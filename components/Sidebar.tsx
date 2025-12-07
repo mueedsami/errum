@@ -76,6 +76,8 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         { label: 'View Inventory', href: '/inventory/view' },
       ],
     },
+    { icon: ShoppingCart, label: 'Store Assingment', href: '/store-assingment' },
+    { icon: ShoppingCart, label: 'Packing', href: '/store-fulfillment' },
     { icon: ShoppingCart, label: 'POS', href: '/pos' },
     { icon: ShoppingCart,
        label: 'Social Commerce',

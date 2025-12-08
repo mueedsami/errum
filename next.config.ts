@@ -7,9 +7,16 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  // output: "export",  <-- REMOVE THIS
   images: {
     unoptimized: true, // keeps next/image working without optimization
+  },
+  async rewrites() {
+    return [
+      {
+        source: '/',
+        destination: '/e-commerce',
+      },
+    ];
   },
 };
 

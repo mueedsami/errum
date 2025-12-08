@@ -161,7 +161,7 @@ export default function OrdersDashboard() {
         },
         status: order.payment_status === 'paid' ? 'Paid' : 'Pending',
         salesBy: order.salesman?.name || userName || 'N/A',
-        store: order.store.name,
+        store: order.store?.name,
         notes: order.notes || '',
         fulfillmentStatus: order.fulfillment_status
       }));

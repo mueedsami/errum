@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const axiosInstance = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api',
+  baseURL: process.env.NEXT_PUBLIC_API_URL,
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
@@ -138,7 +138,7 @@ axiosInstance.interceptors.response.use(
 
           // Try to refresh customer token
           const response = await axios.post(
-            `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api'}/customer-auth/refresh`,
+            `${process.env.NEXT_PUBLIC_API_URL}/customer-auth/refresh`,
             {},
             {
               headers: {

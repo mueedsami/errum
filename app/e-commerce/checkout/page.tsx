@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Package, MapPin, CreditCard, ShoppingBag, AlertCircle, Loader2, ChevronRight, Plus, Edit2, Trash2 } from 'lucide-react';
 import Navigation from '@/components/ecommerce/Navigation';
+import SSLCommerzPayment from '@/components/ecommerce/SSLCommerzPayment';
 import checkoutService, { Address, OrderItem, PaymentMethod } from '@/services/checkoutService';
 import cartService from '@/services/cartService';
 
@@ -45,11 +46,14 @@ export default function CheckoutPage() {
 
   const [addressForm, setAddressForm] = useState<Omit<Address, 'id'>>(getEmptyAddressForm());
   const [sameAsShipping, setSameAsShipping] = useState(true);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>('cod');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<string>(''); // ✅ CHANGED: stores payment method CODE
   const [orderNotes, setOrderNotes] = useState('');
   const [couponCode, setCouponCode] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<{ discount: number; message: string } | null>(null);
   const [shippingCharge, setShippingCharge] = useState(60);
+
+  // ✅ NEW: SSLCommerz payment screen state
+  const [showSSLCommerzPayment, setShowSSLCommerzPayment] = useState(false);
 
   const isAuthenticated = () => {
     const token = localStorage.getItem('auth_token');
@@ -173,34 +177,45 @@ export default function CheckoutPage() {
     fetchAddresses();
   }, []);
 
-  // Fetch payment methods
+  // ✅ FIXED: Fetch payment methods
   useEffect(() => {
     const fetchPaymentMethods = async () => {
       try {
         const methods = await checkoutService.getPaymentMethods();
+        console.log('💳 Fetched payment methods:', methods);
         setPaymentMethods(methods);
         
-        const codMethod = methods.find(m => m.id === 'cod' || m.name.toLowerCase().includes('cash on delivery'));
-        if (codMethod) {
-          setSelectedPaymentMethod(codMethod.id);
-        } else if (methods.length > 0) {
-          setSelectedPaymentMethod(methods[0].id);
+        // Set default payment method by CODE
+        if (methods.length > 0) {
+          const defaultMethod = methods.find(m => m.code === 'cash') || methods[0];
+          setSelectedPaymentMethod(defaultMethod.code);
         }
       } catch (error) {
         console.error('Failed to fetch payment methods:', error);
         
         const fallbackMethods: PaymentMethod[] = [
           {
-            id: 'cod',
+            id: 1,
+            code: 'cash',
             name: 'Cash on Delivery',
             description: 'Pay with cash when your order is delivered',
-            fee: 0,
-            is_online: false,
+            type: 'cash',
+            allowed_customer_types: ['ecommerce'],
             is_active: true,
+            requires_reference: false,
+            supports_partial: true,
+            min_amount: null,
+            max_amount: null,
+            processor: null,
+            processor_config: null,
+            icon: null,
+            fixed_fee: 0,
+            percentage_fee: 0,
+            sort_order: 1,
           }
         ];
         setPaymentMethods(fallbackMethods);
-        setSelectedPaymentMethod(fallbackMethods[0].id);
+        setSelectedPaymentMethod(fallbackMethods[0].code);
       }
     };
     fetchPaymentMethods();
@@ -342,6 +357,7 @@ export default function CheckoutPage() {
     }
   };
 
+  // ✅ FIXED: Handle place order with SSLCommerz detection
   const handlePlaceOrder = async () => {
     if (!selectedShippingAddressId) {
       setError('Please select a shipping address');
@@ -353,23 +369,41 @@ export default function CheckoutPage() {
       return;
     }
 
+    // ✅ Find the selected payment method object
+    const paymentMethod = paymentMethods.find(pm => pm.code === selectedPaymentMethod);
+    
+    if (!paymentMethod) {
+      setError('Invalid payment method selected');
+      return;
+    }
+
+    console.log('💳 Selected payment method:', paymentMethod);
+
+    // ✅ Check if it's an online payment method
+    const isOnlinePayment = checkoutService.isOnlinePaymentMethod(paymentMethod);
+
+    console.log('🔍 Is online payment:', isOnlinePayment);
+
+    if (isOnlinePayment) {
+      // ✅ Show SSLCommerz payment component
+      console.log('🔐 Showing SSLCommerz payment screen');
+      setShowSSLCommerzPayment(true);
+      return;
+    }
+
+    // ✅ Continue with offline payment (COD, Cash, etc.)
     setIsProcessing(true);
     setError(null);
 
     try {
-      // Get the payment method CODE (string) and convert to lowercase
-      const paymentMethod = paymentMethods.find(pm => pm.id === selectedPaymentMethod);
-      const paymentMethodCode = (paymentMethod?.name || 'cod').toLowerCase();
-
       const orderData: any = {
-        payment_method: paymentMethodCode,
+        payment_method: paymentMethod.code, // ✅ Use payment method code
         shipping_address_id: selectedShippingAddressId,
         billing_address_id: sameAsShipping ? selectedShippingAddressId : (selectedBillingAddressId || selectedShippingAddressId),
         notes: orderNotes || '',
         delivery_preference: 'standard' as const,
       };
 
-      // Only include coupon_code if it has a value
       if (appliedCoupon && couponCode) {
         orderData.coupon_code = couponCode;
       }
@@ -407,6 +441,39 @@ export default function CheckoutPage() {
             <Loader2 className="animate-spin h-12 w-12 text-red-700 mx-auto mb-4" />
             <p className="text-gray-600">Loading checkout...</p>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ✅ NEW: Show SSLCommerz payment screen
+  if (showSSLCommerzPayment) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <button
+            onClick={() => setShowSSLCommerzPayment(false)}
+            className="mb-4 text-red-700 hover:text-red-800 flex items-center gap-2 font-medium"
+          >
+            ← Back to Review Order
+          </button>
+          
+          <SSLCommerzPayment
+            shippingAddressId={selectedShippingAddressId!}
+            billingAddressId={sameAsShipping ? selectedShippingAddressId! : selectedBillingAddressId}
+            orderNotes={orderNotes}
+            couponCode={appliedCoupon ? couponCode : undefined}
+            totalAmount={summary.total_amount}
+            onError={(error) => {
+              console.error('❌ Payment error:', error);
+              setError(error);
+              setShowSSLCommerzPayment(false);
+            }}
+            onCancel={() => {
+              setShowSSLCommerzPayment(false);
+            }}
+          />
         </div>
       </div>
     );
@@ -483,7 +550,7 @@ export default function CheckoutPage() {
         <div className="grid lg:grid-cols-3 gap-8">
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Shipping Address */}
+            {/* 🔒 ORIGINAL SHIPPING ADDRESS CODE - UNCHANGED */}
             {currentStep === 'shipping' && (
               <div className="bg-white rounded-lg shadow-md p-6">
                 <div className="flex items-center justify-between mb-6">
@@ -838,7 +905,7 @@ export default function CheckoutPage() {
               </div>
             )}
 
-            {/* Payment Method */}
+            {/* ✅ FIXED: Payment Method */}
             {currentStep === 'payment' && (
               <div className="bg-white rounded-lg shadow-md p-6">
                 <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
@@ -849,9 +916,9 @@ export default function CheckoutPage() {
                 <div className="space-y-4">
                   {paymentMethods.map((method) => (
                     <label
-                      key={method.id}
+                      key={method.code}
                       className={`flex items-start gap-4 p-4 border-2 rounded-lg cursor-pointer transition-all ${
-                        selectedPaymentMethod === method.id
+                        selectedPaymentMethod === method.code
                           ? 'border-red-700 bg-red-50'
                           : 'border-gray-200 hover:border-gray-300'
                       }`}
@@ -859,16 +926,24 @@ export default function CheckoutPage() {
                       <input
                         type="radio"
                         name="payment"
-                        value={method.id}
-                        checked={selectedPaymentMethod === method.id}
-                        onChange={(e) => setSelectedPaymentMethod(e.target.value)}
-                        className="mt-1 w-5 h-5 text-red-700"
+                        value={method.code}
+                        checked={selectedPaymentMethod === method.code}
+                        onChange={(e) => {
+                          console.log('💳 Payment method selected:', e.target.value);
+                          setSelectedPaymentMethod(e.target.value);
+                        }}
+                        className="mt-1 w-5 h-5 text-red-700 cursor-pointer"
                       />
                       <div className="flex-1">
                         <h3 className="font-semibold text-gray-900">{method.name}</h3>
-                        <p className="text-sm text-gray-600 mt-1">{method.description}</p>
-                        {method.fee > 0 && (
-                          <p className="text-sm text-red-700 mt-1">Fee: ৳{method.fee}</p>
+                        {method.description && (
+                          <p className="text-sm text-gray-600 mt-1">{method.description}</p>
+                        )}
+                        {(method.fixed_fee > 0 || method.percentage_fee > 0) && (
+                          <p className="text-sm text-red-700 mt-1">
+                            Fee: ৳{method.fixed_fee}
+                            {method.percentage_fee > 0 && ` + ${method.percentage_fee}%`}
+                          </p>
                         )}
                       </div>
                     </label>
@@ -893,7 +968,7 @@ export default function CheckoutPage() {
               </div>
             )}
 
-            {/* Review & Place Order */}
+            {/* 🔒 ORIGINAL REVIEW CODE - UNCHANGED (except payment method display) */}
             {currentStep === 'review' && (
               <div className="space-y-6">
                 {/* Shipping Address Review */}
@@ -942,7 +1017,7 @@ export default function CheckoutPage() {
                     </button>
                   </div>
                   <p className="text-gray-700">
-                    {paymentMethods.find(m => m.id === selectedPaymentMethod)?.name || selectedPaymentMethod}
+                    {paymentMethods.find(m => m.code === selectedPaymentMethod)?.name || selectedPaymentMethod}
                   </p>
                 </div>
 
@@ -980,7 +1055,7 @@ export default function CheckoutPage() {
             )}
           </div>
 
-          {/* Order Summary Sidebar */}
+          {/* 🔒 ORIGINAL ORDER SUMMARY - UNCHANGED */}
           <div className="lg:col-span-1">
             <div className="bg-white rounded-lg shadow-md p-6 sticky top-4">
               <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center gap-2">

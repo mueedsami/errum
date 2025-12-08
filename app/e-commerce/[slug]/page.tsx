@@ -87,7 +87,6 @@ export default function CategoryProductsPage() {
         sort_order: sortOrder,
         page: currentPage,
         per_page: 100, // Fetch more to properly group
-        in_stock: false,
       });
 
       setProducts(response.products);
@@ -343,7 +342,11 @@ export default function CategoryProductsPage() {
                       <div
                         key={`${group.sku}-${firstVariant.id}`}
                         className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-xl transition-shadow duration-300 cursor-pointer group"
-                        onClick={() => handleProductClick(firstVariant.id)}
+                        onClick={() => {
+                          // Find first variant that's in stock, or fall back to first variant
+                          const availableVariant = group.variants.find(v => v.in_stock) || firstVariant;
+                          handleProductClick(availableVariant.id);
+                        }}
                       >
                         {/* Product Image */}
                         <div className="relative aspect-square overflow-hidden bg-gray-100">
@@ -423,8 +426,12 @@ export default function CategoryProductsPage() {
                       </div>
 
                       {!group.hasVariations && (
-                        <span className={`text-xs font-medium ${firstVariant.in_stock ? 'text-green-600' : 'text-red-600'}`}>
-                          {firstVariant.in_stock ? `In Stock (${firstVariant.stock_quantity})` : 'Out of Stock'}
+                        <span className={`text-xs font-medium ${
+                          group.variants.some(v => v.in_stock) ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          {group.variants.some(v => v.in_stock) 
+                            ? `In Stock (${group.variants.reduce((sum, v) => sum + v.stock_quantity, 0)})` 
+                            : 'Out of Stock'}
                         </span>
                       )}
                     </div>
@@ -432,11 +439,18 @@ export default function CategoryProductsPage() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleProductClick(firstVariant.id);
+                        // Find first variant that's in stock, or fall back to first variant
+                        const availableVariant = group.variants.find(v => v.in_stock) || firstVariant;
+                        handleProductClick(availableVariant.id);
                       }}
-                      className="w-full bg-red-800 hover:bg-red-900 text-white text-sm font-medium py-2 px-4 rounded-lg transition-colors duration-200"
+                      disabled={group.variants.every(v => !v.in_stock)}
+                      className={`w-full text-white text-sm font-medium py-2 px-4 rounded-lg transition-colors duration-200 ${
+                        group.variants.every(v => !v.in_stock)
+                          ? 'bg-gray-400 cursor-not-allowed'
+                          : 'bg-red-800 hover:bg-red-900'
+                      }`}
                     >
-                      Go To Product Details
+                      {group.variants.every(v => !v.in_stock) ? 'Out of Stock' : 'Go To Product Details'}
                     </button>
                   </div>
                       </div>

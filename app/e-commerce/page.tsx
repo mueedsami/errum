@@ -27,7 +27,7 @@ export default function HomePage() {
       <NewArrivals />
             
       {/* Footer */}
-      <Footer />
+      {/* <Footer /> */}
     </div>
   );
 }

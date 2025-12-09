@@ -31,10 +31,10 @@ interface ProductVariant {
   sku: string;
   color?: string;
   size?: string;
-  selling_price: number;
+  selling_price: number | null; // ✅ allow null safely
   in_stock: boolean;
-  stock_quantity: number;
-  images: ProductImage[];
+  stock_quantity: number | null; // ✅ allow null safely
+  images: ProductImage[] | null; // ✅ allow null safely
 }
 
 export default function ProductDetailPage() {
@@ -51,7 +51,7 @@ export default function ProductDetailPage() {
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null);
   const [relatedProducts, setRelatedProducts] = useState<SimpleProduct[]>([]);
 
-  // ✅ Suggested Products State
+  // Suggested Products State
   const [suggestedProducts, setSuggestedProducts] = useState<SimpleProduct[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
 
@@ -62,6 +62,13 @@ export default function ProductDetailPage() {
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [cartSidebarOpen, setCartSidebarOpen] = useState(false);
   const [isInWishlist, setIsInWishlist] = useState(false);
+
+  // ✅ Safe price formatter (prevents toLocaleString crash)
+  const formatBDT = (value: any) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return '৳0.00';
+    return `৳${n.toLocaleString('en-BD', { minimumFractionDigits: 2 })}`;
+  };
 
   // Check if user is authenticated
   const isAuthenticated = () => {
@@ -139,7 +146,7 @@ export default function ProductDetailPage() {
 
         setAllProducts(allProductsResponse.products);
 
-        const variations = allProductsResponse.products
+        const variations: ProductVariant[] = allProductsResponse.products
           .filter(p => p.sku === mainProduct.sku)
           .map(p => ({
             id: p.id,
@@ -147,17 +154,16 @@ export default function ProductDetailPage() {
             sku: p.sku,
             color: extractColorFromName(p.name),
             size: extractSizeFromName(p.name),
-            selling_price: p.selling_price,
-            in_stock: p.in_stock,
-            stock_quantity: p.stock_quantity,
-            images: p.images,
+            selling_price: (p as any).selling_price ?? null,
+            in_stock: !!p.in_stock,
+            stock_quantity: (p as any).stock_quantity ?? 0,
+            images: (p as any).images ?? [],
           }))
           .sort((a, b) => {
             const aColor = a.color || '';
             const bColor = b.color || '';
             const aSize = a.size || '';
             const bSize = b.size || '';
-
             if (aColor !== bColor) return aColor.localeCompare(bColor);
             return aSize.localeCompare(bSize);
           });
@@ -236,25 +242,27 @@ export default function ProductDetailPage() {
       wishlistUtils.add({
         id: selectedVariant.id,
         name: selectedVariant.name,
-        image: selectedVariant.images[0]?.url || '',
-        price: selectedVariant.selling_price,
+        image: (selectedVariant.images && selectedVariant.images[0]?.url) || '',
+        price: Number(selectedVariant.selling_price ?? 0),
         sku: selectedVariant.sku,
       });
     }
   };
 
-  // ✅ FIXED: Added variant_options support
+  // Add to cart
   const handleAddToCart = async () => {
     if (!selectedVariant || !selectedVariant.in_stock) return;
 
-    // Check authentication
+    const stockQty = Number(selectedVariant.stock_quantity ?? 0);
+    if (stockQty <= 0) return;
+
     if (!isAuthenticated()) {
       const pendingCartItem = {
         product_id: selectedVariant.id,
         quantity: quantity,
         name: selectedVariant.name,
-        price: selectedVariant.selling_price,
-        image: selectedVariant.images[0]?.url || '',
+        price: Number(selectedVariant.selling_price ?? 0),
+        image: (selectedVariant.images && selectedVariant.images[0]?.url) || '',
         variant_options: {
           color: selectedVariant.color,
           size: selectedVariant.size,
@@ -263,7 +271,6 @@ export default function ProductDetailPage() {
 
       localStorage.setItem('pending-cart-item', JSON.stringify(pendingCartItem));
       localStorage.setItem('cart-redirect', 'true');
-
       router.push('/e-commerce/login');
       return;
     }
@@ -303,8 +310,8 @@ export default function ProductDetailPage() {
           product_id: selectedVariant.id,
           quantity: quantity,
           name: selectedVariant.name,
-          price: selectedVariant.selling_price,
-          image: selectedVariant.images[0]?.url || '',
+          price: Number(selectedVariant.selling_price ?? 0),
+          image: (selectedVariant.images && selectedVariant.images[0]?.url) || '',
           variant_options: {
             color: selectedVariant.color,
             size: selectedVariant.size,
@@ -323,7 +330,6 @@ export default function ProductDetailPage() {
     }
   };
 
-  // ✅ FIXED: Added variant_options support for suggested products
   const handleAddSuggestedToCart = async (item: SimpleProduct, e: React.MouseEvent) => {
     e.stopPropagation();
 
@@ -337,7 +343,7 @@ export default function ProductDetailPage() {
         product_id: item.id,
         quantity: 1,
         name: item.name,
-        price: item.selling_price,
+        price: Number((item as any).selling_price ?? 0),
         image: item.images?.[0]?.url || '/placeholder-product.jpg',
         variant_options: { color, size }
       };
@@ -379,7 +385,7 @@ export default function ProductDetailPage() {
           product_id: item.id,
           quantity: 1,
           name: item.name,
-          price: item.selling_price,
+          price: Number((item as any).selling_price ?? 0),
           image: item.images?.[0]?.url || '/placeholder-product.jpg',
           variant_options: { color, size }
         };
@@ -408,7 +414,7 @@ export default function ProductDetailPage() {
         id: item.id,
         name: item.name,
         image: item.images?.[0]?.url || '/placeholder-product.jpg',
-        price: item.selling_price,
+        price: Number((item as any).selling_price ?? 0),
         sku: item.sku,
       });
     }
@@ -416,23 +422,30 @@ export default function ProductDetailPage() {
 
   const handleQuantityChange = (delta: number) => {
     if (!selectedVariant) return;
+    const stockQty = Number(selectedVariant.stock_quantity ?? 0);
     const newQuantity = quantity + delta;
-    if (newQuantity >= 1 && newQuantity <= selectedVariant.stock_quantity) {
+    if (newQuantity >= 1 && newQuantity <= stockQty) {
       setQuantity(newQuantity);
     }
   };
 
   const handlePrevImage = () => {
     if (!selectedVariant) return;
-    setSelectedImageIndex((prev) =>
-      prev === 0 ? selectedVariant.images.length - 1 : prev - 1
+    const imgs = Array.isArray(selectedVariant.images) ? selectedVariant.images : [];
+    if (imgs.length === 0) return;
+
+    setSelectedImageIndex(prev =>
+      prev === 0 ? imgs.length - 1 : prev - 1
     );
   };
 
   const handleNextImage = () => {
     if (!selectedVariant) return;
-    setSelectedImageIndex((prev) =>
-      prev === selectedVariant.images.length - 1 ? 0 : prev + 1
+    const imgs = Array.isArray(selectedVariant.images) ? selectedVariant.images : [];
+    if (imgs.length === 0) return;
+
+    setSelectedImageIndex(prev =>
+      prev === imgs.length - 1 ? 0 : prev + 1
     );
   };
 
@@ -489,19 +502,25 @@ export default function ProductDetailPage() {
   }
 
   // ---------------------------
-  // Derived UI values
+  // Derived safe values
   // ---------------------------
   const baseName = getBaseName(product.name);
 
-  const currentImages = selectedVariant.images.length > 0
-    ? selectedVariant.images
-    : [{ id: 0, url: '/placeholder-product.jpg', is_primary: true, alt_text: 'Product' } as any];
+  const sellingPrice = Number(selectedVariant.selling_price ?? 0);
+  const costPrice = Number((product as any).cost_price ?? 0);
+  const stockQty = Number(selectedVariant.stock_quantity ?? 0);
 
-  const primaryImage = currentImages[selectedImageIndex]?.url || currentImages[0]?.url;
+  const safeImages =
+    Array.isArray(selectedVariant.images) && selectedVariant.images.length > 0
+      ? selectedVariant.images
+      : [{ id: 0, url: '/placeholder-product.jpg', is_primary: true, alt_text: 'Product' } as any];
+
+  const primaryImage =
+    safeImages[selectedImageIndex]?.url || safeImages[0]?.url;
 
   const discountPercent =
-    product.cost_price > selectedVariant.selling_price
-      ? Math.round(((product.cost_price - selectedVariant.selling_price) / product.cost_price) * 100)
+    costPrice > sellingPrice && costPrice > 0
+      ? Math.round(((costPrice - sellingPrice) / costPrice) * 100)
       : 0;
 
   // ---------------------------
@@ -562,7 +581,7 @@ export default function ProductDetailPage() {
                   className="relative w-full h-full object-contain p-8 md:p-10"
                 />
 
-                {currentImages.length > 1 && (
+                {safeImages.length > 1 && (
                   <>
                     <button
                       onClick={handlePrevImage}
@@ -585,16 +604,16 @@ export default function ProductDetailPage() {
                   </div>
                 )}
 
-                {selectedVariant.in_stock && selectedVariant.stock_quantity < 5 && (
+                {selectedVariant.in_stock && stockQty > 0 && stockQty < 5 && (
                   <div className="absolute top-4 left-4 rounded-xl bg-amber-500 text-white px-3 py-1.5 text-[10px] sm:text-xs font-bold tracking-wide">
-                    Only {selectedVariant.stock_quantity} left
+                    Only {stockQty} left
                   </div>
                 )}
               </div>
 
-              {currentImages.length > 1 && (
+              {safeImages.length > 1 && (
                 <div className="grid grid-cols-4 gap-3">
-                  {currentImages.map((img, index) => (
+                  {safeImages.map((img, index) => (
                     <button
                       key={img.id}
                       onClick={() => setSelectedImageIndex(index)}
@@ -631,13 +650,13 @@ export default function ProductDetailPage() {
                 {/* Price */}
                 <div className="mt-5 flex flex-wrap items-center gap-3">
                   <span className="text-2xl sm:text-3xl font-bold text-gray-900">
-                    ৳{selectedVariant.selling_price.toLocaleString('en-BD', { minimumFractionDigits: 2 })}
+                    {formatBDT(sellingPrice)}
                   </span>
 
-                  {product.cost_price > selectedVariant.selling_price && (
+                  {costPrice > sellingPrice && sellingPrice > 0 && (
                     <>
                       <span className="text-sm sm:text-base text-gray-400 line-through">
-                        ৳{product.cost_price.toLocaleString('en-BD', { minimumFractionDigits: 2 })}
+                        {formatBDT(costPrice)}
                       </span>
                       <span className="text-[10px] sm:text-xs font-semibold text-red-700 bg-red-50 border border-red-100 px-2.5 py-1 rounded-full">
                         Save {discountPercent}%
@@ -648,11 +667,11 @@ export default function ProductDetailPage() {
 
                 {/* Stock micro status */}
                 <div className="mt-3">
-                  {selectedVariant.in_stock ? (
+                  {selectedVariant.in_stock && stockQty > 0 ? (
                     <div className="inline-flex items-center gap-2 rounded-full bg-emerald-50 border border-emerald-100 px-3 py-1">
                       <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
                       <span className="text-[10px] sm:text-xs font-medium text-emerald-700">
-                        In stock • {selectedVariant.stock_quantity} available
+                        In stock • {stockQty} available
                       </span>
                     </div>
                   ) : (
@@ -699,7 +718,7 @@ export default function ProductDetailPage() {
                       {availableSizes.map((size) => {
                         const sizeVariant = productVariants.find(v => v.size === size);
                         const isSelected = selectedVariant.size === size;
-                        const isAvailable = sizeVariant && sizeVariant.in_stock;
+                        const isAvailable = !!(sizeVariant && sizeVariant.in_stock);
 
                         return (
                           <button
@@ -737,7 +756,7 @@ export default function ProductDetailPage() {
                       {availableColors.map((color) => {
                         const colorVariant = productVariants.find(v => v.color === color);
                         const isSelected = selectedVariant.color === color;
-                        const isAvailable = colorVariant && colorVariant.in_stock;
+                        const isAvailable = !!(colorVariant && colorVariant.in_stock);
 
                         return (
                           <button
@@ -780,7 +799,7 @@ export default function ProductDetailPage() {
                       </span>
                       <button
                         onClick={() => handleQuantityChange(1)}
-                        disabled={quantity >= selectedVariant.stock_quantity}
+                        disabled={quantity >= stockQty}
                         className="p-2.5 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
                         aria-label="Increase quantity"
                       >
@@ -792,7 +811,7 @@ export default function ProductDetailPage() {
                   <div className="mt-4 flex gap-2">
                     <button
                       onClick={handleAddToCart}
-                      disabled={!selectedVariant.in_stock || isAdding}
+                      disabled={!selectedVariant.in_stock || isAdding || stockQty <= 0}
                       className={`
                         flex-1 rounded-xl py-3.5 text-sm font-semibold
                         flex items-center justify-center gap-2 transition-all
@@ -841,10 +860,10 @@ export default function ProductDetailPage() {
                   <div className="flex justify-between">
                     <span className="text-gray-500">Availability</span>
                     <span className={`font-semibold ${
-                      selectedVariant.in_stock ? 'text-emerald-700' : 'text-red-700'
+                      selectedVariant.in_stock && stockQty > 0 ? 'text-emerald-700' : 'text-red-700'
                     }`}>
-                      {selectedVariant.in_stock
-                        ? `In Stock (${selectedVariant.stock_quantity})`
+                      {selectedVariant.in_stock && stockQty > 0
+                        ? `In Stock (${stockQty})`
                         : 'Out of Stock'
                       }
                     </span>
@@ -864,7 +883,7 @@ export default function ProductDetailPage() {
             </div>
           </div>
 
-          {/* ✅ YOU MAY ALSO LIKE */}
+          {/* YOU MAY ALSO LIKE */}
           <div className="mt-14 md:mt-20">
             <div className="flex items-end justify-between gap-4 mb-6">
               <div>
@@ -877,14 +896,12 @@ export default function ProductDetailPage() {
               </div>
             </div>
 
-            {/* Loading State */}
             {loadingSuggestions && (
               <div className="flex justify-center py-12">
                 <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-900"></div>
               </div>
             )}
 
-            {/* Empty State */}
             {!loadingSuggestions && suggestedProducts.length === 0 && (
               <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
                 <p className="text-gray-500 text-sm">
@@ -893,12 +910,12 @@ export default function ProductDetailPage() {
               </div>
             )}
 
-            {/* Cards */}
             {!loadingSuggestions && suggestedProducts.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 {suggestedProducts.map((item) => {
                   const itemImage = item.images?.[0]?.url || '/placeholder-product.jpg';
                   const isItemInWishlist = wishlistUtils.isInWishlist(item.id);
+                  const sp = Number((item as any).selling_price ?? 0);
 
                   return (
                     <div
@@ -943,7 +960,7 @@ export default function ProductDetailPage() {
 
                         <div className="mt-3 flex items-center justify-between">
                           <span className="text-base font-bold text-gray-900">
-                            ৳{item.selling_price.toLocaleString('en-BD', { minimumFractionDigits: 2 })}
+                            {formatBDT(sp)}
                           </span>
 
                           <button
@@ -967,7 +984,7 @@ export default function ProductDetailPage() {
             )}
           </div>
 
-          {/* Premium Features */}
+          {/* Features */}
           <div className="mt-14 md:mt-18 border-t border-gray-100 pt-10">
             <div className="grid md:grid-cols-3 gap-6">
               <div className="bg-white p-6 rounded-2xl border border-gray-100">

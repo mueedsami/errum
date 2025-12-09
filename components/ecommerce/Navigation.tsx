@@ -226,12 +226,12 @@ const Navbar = () => {
               )}
             </div>
 
-            <Link
+            {/* <Link
               href="/e-commerce/products"
               className="text-gray-700 hover:text-red-700 transition text-sm font-medium"
             >
               All Products
-            </Link>
+            </Link> */}
 
             <Link
               href="/e-commerce/about"
@@ -500,13 +500,13 @@ const Navbar = () => {
               )}
             </div>
 
-            <Link
+            {/* <Link
               href="/e-commerce/products"
               className="block py-2 text-gray-700 hover:text-red-700 transition"
               onClick={() => setIsOpen(false)}
             >
               All Products
-            </Link>
+            </Link> */}
 
             <Link
               href="/e-commerce/about"

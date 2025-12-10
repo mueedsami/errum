@@ -3,20 +3,47 @@
 import { useState, useEffect } from 'react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
-import OrderFilters from '@/components/orders/OrderFilters';
-import OrdersTable from '@/components/orders/OrdersTable';
-import OrderDetailsModal from '@/components/orders/OrderDetailsModal';
-import EditOrderModal from '@/components/orders/EditOrderModal';
-import ExchangeProductModal from '@/components/orders/ExchangeProductModal';
-import ReturnProductModal from '@/components/orders/ReturnProductModal';
-import { Order } from '@/types/order';
-import { Truck, Printer, Settings, CheckCircle, XCircle, Package, ShoppingBag } from 'lucide-react';
-import { checkQZStatus, printBulkReceipts, getPrinters } from '@/lib/qz-tray';
+import { ShoppingBag, Search, MoreVertical, Eye, Package, XCircle, Loader, Globe, Edit, RefreshCw, ArrowLeftRight } from 'lucide-react';
 import orderService from '@/services/orderService';
-import shipmentService from '@/services/shipmentService';
 
-export default function OrdersDashboard() {
+interface Order {
+  id: number;
+  orderNumber: string;
+  orderType: string;
+  orderTypeLabel: string;
+  date: string;
+  customer: {
+    name: string;
+    phone: string;
+    email?: string;
+    address?: string;
+  };
+  items: Array<{
+    id: number;
+    name: string;
+    sku: string;
+    quantity: number;
+    price: number;
+    discount: number;
+  }>;
+  subtotal: number;
+  discount: number;
+  shipping: number;
+  amounts: {
+    total: number;
+    paid: number;
+    due: number;
+  };
+  status: string;
+  salesBy: string;
+  store: string;
+  notes?: string;
+  fulfillmentStatus?: string | null;
+}
+
+export default function PendingOrdersDashboard() {
   const [darkMode, setDarkMode] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
   const [search, setSearch] = useState('');
@@ -26,91 +53,34 @@ export default function OrdersDashboard() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showExchangeModal, setShowExchangeModal] = useState(false);
-  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [isLoadingDetails, setIsLoadingDetails] = useState(false);
   const [activeMenu, setActiveMenu] = useState<number | null>(null);
-  const [userRole, setUserRole] = useState<string>('');
+  const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [userName, setUserName] = useState<string>('');
-  const [selectedOrders, setSelectedOrders] = useState<Set<number>>(new Set());
-  const [isSendingBulk, setIsSendingBulk] = useState(false);
-  const [isPrintingBulk, setIsPrintingBulk] = useState(false);
-  const [qzConnected, setQzConnected] = useState(false);
-  const [printers, setPrinters] = useState<string[]>([]);
-  const [selectedPrinter, setSelectedPrinter] = useState<string>('');
-  const [showPrinterSelect, setShowPrinterSelect] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [bulkPrintProgress, setBulkPrintProgress] = useState<{
-    show: boolean;
-    current: number;
-    total: number;
-    success: number;
-    failed: number;
-  }>({ show: false, current: 0, total: 0, success: 0, failed: 0 });
-  
-  const [pathaoProgress, setPathaoProgress] = useState<{
-    show: boolean;
-    current: number;
-    total: number;
-    success: number;
-    failed: number;
-    details: Array<{ orderId: number; orderNumber?: string; status: 'success' | 'failed'; message: string }>;
-  }>({ show: false, current: 0, total: 0, success: 0, failed: 0, details: [] });
 
   useEffect(() => {
-    const role = localStorage.getItem('userRole') || '';
     const name = localStorage.getItem('userName') || '';
-    setUserRole(role);
     setUserName(name);
-  }, []);
-
-  const checkPrinterStatus = async () => {
-    try {
-      const status = await checkQZStatus();
-      setQzConnected(status.connected);
-      
-      if (status.connected) {
-        const printerList = await getPrinters();
-        setPrinters(printerList);
-        
-        const savedPrinter = localStorage.getItem('defaultPrinter');
-        if (savedPrinter && printerList.includes(savedPrinter)) {
-          setSelectedPrinter(savedPrinter);
-        } else if (printerList.length > 0) {
-          setSelectedPrinter(printerList[0]);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to check printer status:', error);
-    }
-  };
-
-  const handlePrinterSelect = (printer: string) => {
-    setSelectedPrinter(printer);
-    localStorage.setItem('defaultPrinter', printer);
-    setShowPrinterSelect(false);
-  };
-
-  useEffect(() => {
     loadOrders();
-    checkPrinterStatus();
   }, []);
 
   const loadOrders = async () => {
     setIsLoading(true);
     try {
-      // Fetch social commerce orders with fulfilled status
+      // Fetch social commerce orders pending fulfillment
       const socialCommerceResponse = await orderService.getAll({
         order_type: 'social_commerce',
-        fulfillment_status: 'fulfilled',
+        status: 'pending',
         sort_by: 'created_at',
         sort_order: 'desc',
         per_page: 1000
       });
 
-      // Fetch e-commerce orders with fulfilled status
+      // Fetch e-commerce orders pending fulfillment
       const ecommerceResponse = await orderService.getAll({
         order_type: 'ecommerce',
-        fulfillment_status: 'fulfilled',
+        status: 'pending',
         sort_by: 'created_at',
         sort_order: 'desc',
         per_page: 1000
@@ -125,7 +95,7 @@ export default function OrdersDashboard() {
       // Sort combined orders by date
       allOrders.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-      // Transform the orders to match your Order type
+      // Transform the orders
       const transformedOrders = allOrders.map((order: any) => ({
         id: order.id,
         orderNumber: order.order_number,
@@ -138,44 +108,44 @@ export default function OrdersDashboard() {
           email: order.customer.email || '',
           address: order.shipping_address || ''
         },
-        items: order.items?.map((item: any) => ({
-          id: item.id,
-          name: item.product_name,
-          sku: item.product_sku,
-          quantity: item.quantity,
-          price: parseFloat(item.unit_price),
-          discount: parseFloat(item.discount_amount || '0')
-        })) || [],
-        subtotal: parseFloat(order.subtotal),
-        discount: parseFloat(order.discount_amount || '0'),
-        shipping: parseFloat(order.shipping_amount || '0'),
+        items: order.items?.map((item: any) => {
+          const unitPrice = Number(String(item.unit_price ?? "0").replace(/[^0-9.-]/g, ""));
+          const discountAmount = Number(String(item.discount_amount ?? "0").replace(/[^0-9.-]/g, ""));
+          
+          console.log('Item data:', {
+            product_name: item.product_name,
+            unit_price_raw: item.unit_price,
+            unit_price_cleaned: unitPrice,
+            discount_raw: item.discount_amount,
+            discount_cleaned: discountAmount
+          });
+          
+          return {
+            id: item.id,
+            name: item.product_name,
+            sku: item.product_sku,
+            quantity: item.quantity,
+            price: unitPrice,
+            discount: discountAmount
+          };
+        }) || [],
+        subtotal: Number(String(order.subtotal ?? "0").replace(/[^0-9.-]/g, "")),
+        discount: Number(String(order.discount_amount ?? "0").replace(/[^0-9.-]/g, "")),
+        shipping: Number(String(order.shipping_amount ?? "0").replace(/[^0-9.-]/g, "")),
         amounts: {
-          total: parseFloat(order.total_amount),
-          paid: parseFloat(order.paid_amount),
-          due: parseFloat(order.outstanding_amount)
-        },
-        payments: {
-          total: parseFloat(order.total_amount),
-          paid: parseFloat(order.paid_amount),
-          due: parseFloat(order.outstanding_amount)
+          total: Number(String(order.total_amount ?? "0").replace(/[^0-9.-]/g, "")),
+          paid: Number(String(order.paid_amount ?? "0").replace(/[^0-9.-]/g, "")),
+          due: Number(String(order.outstanding_amount ?? "0").replace(/[^0-9.-]/g, ""))
         },
         status: order.payment_status === 'paid' ? 'Paid' : 'Pending',
         salesBy: order.salesman?.name || userName || 'N/A',
-        store: order.store?.name,
+        store: order.store.name,
         notes: order.notes || '',
         fulfillmentStatus: order.fulfillment_status
       }));
-
-      // Apply user role filtering if needed
-      let filteredData = transformedOrders;
-      if (userRole === 'social_commerce_manager') {
-        filteredData = transformedOrders.filter((order: any) => 
-          order.salesBy === userName
-        );
-      }
       
-      setOrders(filteredData);
-      setFilteredOrders(filteredData);
+      setOrders(transformedOrders);
+      setFilteredOrders(transformedOrders);
 
     } catch (error: any) {
       console.error('Failed to load orders:', error);
@@ -213,7 +183,7 @@ export default function OrdersDashboard() {
 
     if (statusFilter !== 'All Status') {
       filtered = filtered.filter((o) =>
-        statusFilter === 'Paid' ? o.payments.due === 0 : o.payments.due > 0
+        statusFilter === 'Paid' ? o.amounts.due === 0 : o.amounts.due > 0
       );
     }
 
@@ -228,81 +198,126 @@ export default function OrdersDashboard() {
     setFilteredOrders(filtered);
   }, [search, dateFilter, statusFilter, orderTypeFilter, orders]);
 
-  const handleViewDetails = (order: Order) => {
-    setSelectedOrder(order);
+  const handleViewDetails = async (order: Order) => {
+    setIsLoadingDetails(true);
     setShowDetailsModal(true);
     setActiveMenu(null);
-  };
-
-  const handleEditOrder = (order: Order) => {
-    setSelectedOrder(order);
-    setShowEditModal(true);
-    setActiveMenu(null);
-  };
-
-  const handleSaveOrder = async (updatedOrder: Order) => {
+    
     try {
-      const payload = {
+      // Fetch full order details with items
+      const fullOrder = await orderService.getById(order.id);
+      
+      // Transform the full order data
+      const transformedOrder: Order = {
+        id: fullOrder.id,
+        orderNumber: fullOrder.order_number,
+        orderType: fullOrder.order_type,
+        orderTypeLabel: fullOrder.order_type_label,
+        date: new Date(fullOrder.order_date).toLocaleDateString('en-GB'),
         customer: {
-          name: updatedOrder.customer.name,
-          phone: updatedOrder.customer.phone,
-          email: updatedOrder.customer.email,
-          address: (updatedOrder as any).customer?.address ?? ''
+          name: fullOrder.customer.name,
+          phone: fullOrder.customer.phone,
+          email: fullOrder.customer.email || '',
+          address: fullOrder.shipping_address || ''
         },
-        shipping_address: (updatedOrder as any).customer?.address ?? '',
-        shipping_amount: (updatedOrder as any).shipping ?? (updatedOrder as any).shipping_amount ?? 0,
-        discount_amount: (updatedOrder as any).discount ?? (updatedOrder as any).discount_amount ?? 0,
-        notes: (updatedOrder as any).notes ?? ''
+        items: fullOrder.items?.map((item: any) => ({
+          id: item.id,
+          name: item.product_name,
+          sku: item.product_sku,
+          quantity: item.quantity,
+          price: Number(String(item.unit_price ?? "0").replace(/[^0-9.-]/g, "")),
+          discount: Number(String(item.discount_amount ?? "0").replace(/[^0-9.-]/g, ""))
+        })) || [],
+        subtotal: Number(String(fullOrder.subtotal ?? "0").replace(/[^0-9.-]/g, "")),
+        discount: Number(String(fullOrder.discount_amount ?? "0").replace(/[^0-9.-]/g, "")),
+        shipping: Number(String(fullOrder.shipping_amount ?? "0").replace(/[^0-9.-]/g, "")),
+        amounts: {
+          total: Number(String(fullOrder.total_amount ?? "0").replace(/[^0-9.-]/g, "")),
+          paid: Number(String(fullOrder.paid_amount ?? "0").replace(/[^0-9.-]/g, "")),
+          due: Number(String(fullOrder.outstanding_amount ?? "0").replace(/[^0-9.-]/g, ""))
+        },
+        status: fullOrder.payment_status === 'paid' ? 'Paid' : 'Pending',
+        salesBy: fullOrder.salesman?.name || userName || 'N/A',
+        store: fullOrder.store.name,
+        notes: fullOrder.notes || '',
+        fulfillmentStatus: fullOrder.fulfillment_status
       };
-
-      // Note: You'll need to add an update method to orderService
-      // For now, using the direct axios call
-      const axiosInstance = (await import('@/lib/axios')).default;
-      const response = await axiosInstance.put(`/orders/${updatedOrder.id}`, payload);
-
-      if (response.data.success) {
-        await loadOrders();
-        alert('Order updated successfully!');
-      } else {
-        alert('Failed to update order');
-      }
+      
+      setSelectedOrder(transformedOrder);
     } catch (error: any) {
-      console.error('Error updating order:', error);
-      alert(`Failed to update order: ${error.response?.data?.message || error.message}`);
+      console.error('Failed to load order details:', error);
+      alert('Failed to load order details: ' + error.message);
+      setShowDetailsModal(false);
+    } finally {
+      setIsLoadingDetails(false);
     }
   };
 
-  const handleExchangeOrder = (order: Order) => {
-    setSelectedOrder(order);
-    setShowExchangeModal(true);
+  const handleEditOrder = async (order: Order) => {
     setActiveMenu(null);
+    setIsLoadingDetails(true);
+    setShowEditModal(true);
+    
+    try {
+      // Fetch full order details with items
+      const fullOrder = await orderService.getById(order.id);
+      
+      // Transform the full order data
+      const transformedOrder: Order = {
+        id: fullOrder.id,
+        orderNumber: fullOrder.order_number,
+        orderType: fullOrder.order_type,
+        orderTypeLabel: fullOrder.order_type_label,
+        date: new Date(fullOrder.order_date).toLocaleDateString('en-GB'),
+        customer: {
+          name: fullOrder.customer.name,
+          phone: fullOrder.customer.phone,
+          email: fullOrder.customer.email || '',
+          address: fullOrder.shipping_address || ''
+        },
+        items: fullOrder.items?.map((item: any) => ({
+          id: item.id,
+          name: item.product_name,
+          sku: item.product_sku,
+          quantity: item.quantity,
+          price: Number(String(item.unit_price ?? "0").replace(/[^0-9.-]/g, "")),
+          discount: Number(String(item.discount_amount ?? "0").replace(/[^0-9.-]/g, ""))
+        })) || [],
+        subtotal: Number(String(fullOrder.subtotal ?? "0").replace(/[^0-9.-]/g, "")),
+        discount: Number(String(fullOrder.discount_amount ?? "0").replace(/[^0-9.-]/g, "")),
+        shipping: Number(String(fullOrder.shipping_amount ?? "0").replace(/[^0-9.-]/g, "")),
+        amounts: {
+          total: Number(String(fullOrder.total_amount ?? "0").replace(/[^0-9.-]/g, "")),
+          paid: Number(String(fullOrder.paid_amount ?? "0").replace(/[^0-9.-]/g, "")),
+          due: Number(String(fullOrder.outstanding_amount ?? "0").replace(/[^0-9.-]/g, ""))
+        },
+        status: fullOrder.payment_status === 'paid' ? 'Paid' : 'Pending',
+        salesBy: fullOrder.salesman?.name || userName || 'N/A',
+        store: fullOrder.store.name,
+        notes: fullOrder.notes || '',
+        fulfillmentStatus: fullOrder.fulfillment_status
+      };
+      
+      setSelectedOrder(transformedOrder);
+    } catch (error: any) {
+      console.error('Failed to load order details:', error);
+      alert('Failed to load order details: ' + error.message);
+      setShowEditModal(false);
+    } finally {
+      setIsLoadingDetails(false);
+    }
   };
 
   const handleReturnOrder = (order: Order) => {
-    setSelectedOrder(order);
-    setShowReturnModal(true);
     setActiveMenu(null);
+    alert(`Return order functionality for ${order.orderNumber} will be implemented.`);
+    // TODO: Implement return order modal
   };
 
-  const handleProcessExchange = async (exchangeData: any) => {
-    try {
-      console.log('Processing exchange:', exchangeData);
-      await loadOrders();
-    } catch (error) {
-      console.error('Error processing exchange:', error);
-      throw error;
-    }
-  };
-
-  const handleProcessReturn = async (returnData: any) => {
-    try {
-      console.log('Processing return:', returnData);
-      await loadOrders();
-      alert('Return processed successfully!');
-    } catch (error) {
-      console.error('Error processing return:', error);
-      throw error;
-    }
+  const handleExchangeOrder = (order: Order) => {
+    setActiveMenu(null);
+    alert(`Exchange order functionality for ${order.orderNumber} will be implemented.`);
+    // TODO: Implement exchange order modal
   };
 
   const handleCancelOrder = async (orderId: number) => {
@@ -319,327 +334,63 @@ export default function OrdersDashboard() {
     }
   };
 
-  const handleSendToPathao = async (order: Order) => {
-    if (!confirm(`Send order #${order.orderNumber} to Pathao for delivery?`)) {
-      return;
+  const getOrderTypeBadge = (orderType: string) => {
+    if (orderType === 'social_commerce') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">
+          <ShoppingBag className="h-3 w-3" />
+          Social
+        </span>
+      );
     }
-
-    try {
-      const existingShipment = await shipmentService.getByOrderId(order.id);
-      
-      if (existingShipment) {
-        if (existingShipment.pathao_consignment_id) {
-          alert(`This order already has a Pathao shipment.\nConsignment ID: ${existingShipment.pathao_consignment_id}`);
-          return;
-        }
-        
-        const updatedShipment = await shipmentService.sendToPathao(existingShipment.id);
-        alert(`Order sent to Pathao successfully!\nConsignment ID: ${updatedShipment.pathao_consignment_id}\nTracking: ${updatedShipment.pathao_tracking_number}`);
-        return;
-      }
-
-      const shipment = await shipmentService.create({
-        order_id: order.id,
-        delivery_type: 'home_delivery',
-        package_weight: 1.0,
-        send_to_pathao: true
-      });
-
-      alert(`Shipment created and sent to Pathao successfully!\nShipment #: ${shipment.shipment_number}\nConsignment ID: ${shipment.pathao_consignment_id}`);
-      await loadOrders();
-
-    } catch (error: any) {
-      console.error('Send to Pathao error:', error);
-      alert(`Failed to send to Pathao: ${error.message}`);
+    
+    if (orderType === 'ecommerce') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
+          <Globe className="h-3 w-3" />
+          E-Com
+        </span>
+      );
     }
+    
+    return null;
   };
 
-  const handleToggleSelectAll = () => {
-    if (selectedOrders.size === filteredOrders.length) {
-      setSelectedOrders(new Set());
-    } else {
-      setSelectedOrders(new Set(filteredOrders.map(o => o.id)));
-    }
-  };
-
-  const handleToggleSelect = (orderId: number) => {
-    const newSelected = new Set(selectedOrders);
-    if (newSelected.has(orderId)) {
-      newSelected.delete(orderId);
-    } else {
-      newSelected.add(orderId);
-    }
-    setSelectedOrders(newSelected);
-  };
-
-  const handleBulkSendToPathao = async () => {
-    if (selectedOrders.size === 0) {
-      alert('Please select at least one order to send to Pathao.');
-      return;
-    }
-
-    if (!confirm(`Send ${selectedOrders.size} order(s) to Pathao?`)) {
-      return;
-    }
-
-    setIsSendingBulk(true);
-    setPathaoProgress({
-      show: true,
-      current: 0,
-      total: selectedOrders.size,
-      success: 0,
-      failed: 0,
-      details: []
-    });
-
-    try {
-      const selectedOrdersList = orders.filter(o => selectedOrders.has(o.id));
-      const shipmentIdsToSend: number[] = [];
-
-      for (const order of selectedOrdersList) {
-        setPathaoProgress(prev => ({ ...prev, current: prev.current + 1 }));
-
-        try {
-          const existingShipment = await shipmentService.getByOrderId(order.id);
-
-          if (existingShipment) {
-            if (existingShipment.pathao_consignment_id) {
-              setPathaoProgress(prev => ({
-                ...prev,
-                failed: prev.failed + 1,
-                details: [...prev.details, {
-                  orderId: order.id,
-                  orderNumber: order.orderNumber,
-                  status: 'failed',
-                  message: 'Already sent to Pathao'
-                }]
-              }));
-              continue;
-            }
-            shipmentIdsToSend.push(existingShipment.id);
-          } else {
-            const newShipment = await shipmentService.create({
-              order_id: order.id,
-              delivery_type: 'home_delivery',
-              package_weight: 1.0,
-              send_to_pathao: false
-            });
-            shipmentIdsToSend.push(newShipment.id);
-          }
-        } catch (error: any) {
-          setPathaoProgress(prev => ({
-            ...prev,
-            failed: prev.failed + 1,
-            details: [...prev.details, {
-              orderId: order.id,
-              orderNumber: order.orderNumber,
-              status: 'failed',
-              message: error.message
-            }]
-          }));
-        }
-
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-
-      if (shipmentIdsToSend.length > 0) {
-        const result = await shipmentService.bulkSendToPathao(shipmentIdsToSend);
-
-        result.success.forEach((item) => {
-          setPathaoProgress(prev => ({
-            ...prev,
-            success: prev.success + 1,
-            details: [...prev.details, {
-              orderId: 0,
-              orderNumber: item.shipment_number,
-              status: 'success',
-              message: `Consignment ID: ${item.pathao_consignment_id}`
-            }]
-          }));
-        });
-
-        result.failed.forEach((item) => {
-          setPathaoProgress(prev => ({
-            ...prev,
-            failed: prev.failed + 1,
-            details: [...prev.details, {
-              orderId: 0,
-              orderNumber: item.shipment_number,
-              status: 'failed',
-              message: item.reason
-            }]
-          }));
-        });
-      }
-
-      alert(`Bulk Send to Pathao Completed!\n\nSuccess: ${pathaoProgress.success}\nFailed: ${pathaoProgress.failed}`);
-      setSelectedOrders(new Set());
-      await loadOrders();
-
-    } catch (error: any) {
-      console.error('Bulk send to Pathao error:', error);
-      alert(`Failed to complete bulk send: ${error.message}`);
-    } finally {
-      setIsSendingBulk(false);
-      setTimeout(() => {
-        setPathaoProgress({ show: false, current: 0, total: 0, success: 0, failed: 0, details: [] });
-      }, 3000);
-    }
-  };
-
-  const handleBulkPrintReceipts = async () => {
-    if (selectedOrders.size === 0) {
-      alert('Please select at least one order to print.');
-      return;
-    }
-
-    try {
-      await checkPrinterStatus();
-      await new Promise(resolve => setTimeout(resolve, 500));
-    } catch (error) {
-      alert('Failed to connect to QZ Tray. Please ensure QZ Tray is running and try again.');
-      return;
-    }
-
-    const status = await checkQZStatus();
-    if (!status.connected) {
-      alert('QZ Tray is not connected. Please start QZ Tray and try again.');
-      return;
-    }
-
-    if (!selectedPrinter) {
-      setShowPrinterSelect(true);
-      alert('Please select a printer first.');
-      return;
-    }
-
-    if (!confirm(`Print receipts for ${selectedOrders.size} order(s)?`)) {
-      return;
-    }
-
-    setIsPrintingBulk(true);
-    setBulkPrintProgress({
-      show: true,
-      current: 0,
-      total: selectedOrders.size,
-      success: 0,
-      failed: 0
-    });
-
-    try {
-      const selectedOrdersList = orders.filter(o => selectedOrders.has(o.id));
-      
-      let successCount = 0;
-      let failedCount = 0;
-      let currentIndex = 0;
-
-      for (const order of selectedOrdersList) {
-        currentIndex++;
-        setBulkPrintProgress(prev => ({ ...prev, current: currentIndex }));
-        
-        try {
-          await printBulkReceipts([order], selectedPrinter);
-          successCount++;
-          setBulkPrintProgress(prev => ({ ...prev, success: successCount }));
-        } catch (error) {
-          failedCount++;
-          setBulkPrintProgress(prev => ({ ...prev, failed: failedCount }));
-        }
-        
-        await new Promise(resolve => setTimeout(resolve, 800));
-      }
-
-      alert(`Bulk print completed!\nSuccess: ${successCount}\nFailed: ${failedCount}`);
-      setSelectedOrders(new Set());
-    } catch (error) {
-      alert('Failed to complete bulk print operation.');
-    } finally {
-      setIsPrintingBulk(false);
-      setTimeout(() => {
-        setBulkPrintProgress({ show: false, current: 0, total: 0, success: 0, failed: 0 });
-      }, 2000);
-    }
-  };
-
-  const totalRevenue = orders.reduce((sum, order) => sum + (order.amounts?.total || order.subtotal), 0);
-  const paidOrders = orders.filter(o => o.payments.due === 0).length;
-  const pendingOrders = orders.filter(o => o.payments.due > 0).length;
+  const totalRevenue = orders.reduce((sum, order) => sum + order.amounts.total, 0);
+  const paidOrders = orders.filter(o => o.amounts.due === 0).length;
+  const pendingOrders = orders.filter(o => o.amounts.due > 0).length;
   const socialCommerceCount = orders.filter(o => o.orderType === 'social_commerce').length;
   const ecommerceCount = orders.filter(o => o.orderType === 'ecommerce').length;
 
   return (
     <div className={darkMode ? 'dark' : ''}>
       <div className="flex h-screen bg-white dark:bg-black">
-        <Sidebar />
+        <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
+        
         <div className="flex-1 flex flex-col overflow-hidden">
-          <Header darkMode={darkMode} setDarkMode={setDarkMode} />
+          <Header darkMode={darkMode} setDarkMode={setDarkMode} toggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
 
           <main className="flex-1 overflow-auto bg-white dark:bg-black">
-            {/* Ultra Compact Header */}
+            {/* Header */}
             <div className="border-b border-gray-200 dark:border-gray-800">
               <div className="px-4 py-2">
                 <div className="max-w-7xl mx-auto flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="p-1.5 bg-black dark:bg-white rounded">
-                      <ShoppingBag className="w-4 h-4 text-white dark:text-black" />
+                      <Package className="w-4 h-4 text-white dark:text-black" />
                     </div>
                     <div>
-                      <h1 className="text-lg font-bold text-black dark:text-white leading-none">Fulfilled Orders</h1>
+                      <h1 className="text-lg font-bold text-black dark:text-white leading-none">Pending Orders</h1>
                       <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-none mt-0.5">
-                        {filteredOrders.length} of {orders.length} orders
+                        {filteredOrders.length} of {orders.length} orders awaiting fulfillment
                       </p>
                     </div>
                   </div>
-                  
-                  {qzConnected && (
-                    <div className="flex items-center gap-1.5">
-                      <div className="flex items-center gap-1 px-2 py-1 border border-gray-300 dark:border-gray-700 rounded text-[10px]">
-                        <div className="w-1 h-1 rounded-full bg-black dark:bg-white"></div>
-                        <span className="font-medium text-black dark:text-white">Printer</span>
-                      </div>
-                      
-                      <div className="relative">
-                        <button
-                          onClick={() => setShowPrinterSelect(!showPrinterSelect)}
-                          className="flex items-center gap-1 px-2 py-1 border border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900 rounded transition-colors"
-                        >
-                          <Settings className="w-3 h-3 text-black dark:text-white" />
-                          <span className="text-[10px] font-medium text-black dark:text-white truncate max-w-[100px]">
-                            {selectedPrinter || 'Select'}
-                          </span>
-                        </button>
-                        
-                        {showPrinterSelect && (
-                          <div className="absolute right-0 top-full mt-1 bg-white dark:bg-black border border-gray-300 dark:border-gray-700 rounded shadow-lg w-56 z-50">
-                            <div className="px-2 py-1 border-b border-gray-200 dark:border-gray-800">
-                              <p className="text-[9px] font-bold text-gray-500 dark:text-gray-400 uppercase">Printers</p>
-                            </div>
-                            {printers.map((printer) => (
-                              <button
-                                key={printer}
-                                onClick={() => handlePrinterSelect(printer)}
-                                className={`w-full px-2 py-1.5 text-left text-[10px] transition-colors ${
-                                  selectedPrinter === printer 
-                                    ? 'bg-black dark:bg-white text-white dark:text-black font-medium' 
-                                    : 'text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-900'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between">
-                                  <span className="truncate">{printer}</span>
-                                  {selectedPrinter === printer && <CheckCircle className="w-2.5 h-2.5 flex-shrink-0 ml-1" />}
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
             </div>
 
-            {/* Ultra Compact Stats */}
+            {/* Stats */}
             <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-800">
               <div className="max-w-7xl mx-auto">
                 <div className="grid grid-cols-6 gap-2">
@@ -660,7 +411,7 @@ export default function OrdersDashboard() {
                     <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{paidOrders}</p>
                   </div>
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Pending</p>
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Due</p>
                     <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{pendingOrders}</p>
                   </div>
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
@@ -671,173 +422,616 @@ export default function OrdersDashboard() {
               </div>
             </div>
 
-            {/* Main Content */}
-            <div className="max-w-7xl mx-auto px-4 py-2">
-              <OrderFilters
-                search={search}
-                setSearch={setSearch}
-                dateFilter={dateFilter}
-                setDateFilter={setDateFilter}
-                statusFilter={statusFilter}
-                setStatusFilter={setStatusFilter}
-                orderTypeFilter={orderTypeFilter}
-                setOrderTypeFilter={setOrderTypeFilter}
-              />
-
-              {/* Ultra Compact Bulk Actions */}
-              {selectedOrders.size > 0 && (
-                <div className="mb-2 border border-gray-300 dark:border-gray-700 rounded px-3 py-1.5">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 bg-black dark:bg-white rounded flex items-center justify-center">
-                        <span className="text-white dark:text-black text-[10px] font-bold">{selectedOrders.size}</span>
-                      </div>
-                      <p className="text-[10px] font-semibold text-black dark:text-white">{selectedOrders.size} selected</p>
-                    </div>
-                    
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={handleBulkPrintReceipts}
-                        disabled={isPrintingBulk}
-                        className="flex items-center gap-1 px-2 py-1 bg-black dark:bg-white hover:bg-gray-800 dark:hover:bg-gray-200 text-white dark:text-black rounded transition-colors disabled:opacity-50 text-[10px] font-medium"
-                      >
-                        <Printer className="w-3 h-3" />
-                        {isPrintingBulk ? 'Printing' : 'Print'}
-                      </button>
-                      <button
-                        onClick={handleBulkSendToPathao}
-                        disabled={isSendingBulk}
-                        className="flex items-center gap-1 px-2 py-1 bg-black dark:bg-white hover:bg-gray-800 dark:hover:bg-gray-200 text-white dark:text-black rounded transition-colors disabled:opacity-50 text-[10px] font-medium"
-                      >
-                        <Truck className="w-3 h-3" />
-                        {isSendingBulk ? 'Sending' : 'Pathao'}
-                      </button>
-                    </div>
-                  </div>
+            {/* Filters */}
+            <div className="max-w-7xl mx-auto px-4 py-3">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search Order ID or Customer..."
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
+                  />
                 </div>
-              )}
+                
+                <input
+                  type="date"
+                  value={dateFilter}
+                  onChange={(e) => setDateFilter(e.target.value)}
+                  className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
+                />
+                
+                <select
+                  value={orderTypeFilter}
+                  onChange={(e) => setOrderTypeFilter(e.target.value)}
+                  className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
+                >
+                  <option>All Types</option>
+                  <option>Social Commerce</option>
+                  <option>E-Commerce</option>
+                </select>
+                
+                <select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
+                >
+                  <option>All Status</option>
+                  <option>Paid</option>
+                  <option>Pending</option>
+                </select>
+              </div>
 
-              {/* Ultra Compact Progress */}
-              {pathaoProgress.show && (
-                <div className="mb-2 border border-gray-300 dark:border-gray-700 rounded px-3 py-1.5">
-                  <div className="flex items-center justify-between mb-1">
-                    <p className="text-[10px] font-semibold text-black dark:text-white flex items-center gap-1">
-                      <Package className="w-3 h-3" />
-                      Pathao {pathaoProgress.current}/{pathaoProgress.total}
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-0.5">
-                        <CheckCircle className="w-3 h-3 text-black dark:text-white" />
-                        <span className="text-[10px] font-medium text-black dark:text-white">{pathaoProgress.success}</span>
-                      </div>
-                      <div className="flex items-center gap-0.5">
-                        <XCircle className="w-3 h-3 text-gray-500" />
-                        <span className="text-[10px] font-medium text-gray-500">{pathaoProgress.failed}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="w-full bg-gray-200 dark:bg-gray-800 rounded-full h-1">
-                    <div
-                      className="bg-black dark:bg-white h-1 rounded-full transition-all"
-                      style={{ width: `${(pathaoProgress.current / pathaoProgress.total) * 100}%` }}
-                    ></div>
-                  </div>
-                </div>
-              )}
+              <p className="text-xs text-gray-500 dark:text-gray-500">
+                Showing {filteredOrders.length} of {orders.length} orders
+              </p>
+            </div>
 
-              {bulkPrintProgress.show && (
-                <div className="mb-2 border border-gray-300 dark:border-gray-700 rounded px-3 py-1.5">
-                  <div className="flex items-center justify-between mb-1">
-                    <p className="text-[10px] font-semibold text-black dark:text-white flex items-center gap-1">
-                      <Printer className="w-3 h-3" />
-                      Print {bulkPrintProgress.current}/{bulkPrintProgress.total}
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-0.5">
-                        <CheckCircle className="w-3 h-3 text-black dark:text-white" />
-                        <span className="text-[10px] font-medium text-black dark:text-white">{bulkPrintProgress.success}</span>
-                      </div>
-                      <div className="flex items-center gap-0.5">
-                        <XCircle className="w-3 h-3 text-gray-500" />
-                        <span className="text-[10px] font-medium text-gray-500">{bulkPrintProgress.failed}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="w-full bg-gray-200 dark:bg-gray-800 rounded-full h-1">
-                    <div
-                      className="bg-black dark:bg-white h-1 rounded-full transition-all"
-                      style={{ width: `${(bulkPrintProgress.current / bulkPrintProgress.total) * 100}%` }}
-                    ></div>
-                  </div>
-                </div>
-              )}
-
+            {/* Orders Table */}
+            <div className="max-w-7xl mx-auto px-4 pb-4">
               {isLoading ? (
                 <div className="bg-white dark:bg-gray-900 rounded-xl p-12 text-center border border-gray-200 dark:border-gray-800">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-black dark:border-white mx-auto"></div>
+                  <Loader className="animate-spin h-12 w-12 text-black dark:text-white mx-auto" />
                   <p className="text-gray-500 dark:text-gray-400 font-medium mt-4">Loading orders...</p>
                 </div>
+              ) : filteredOrders.length === 0 ? (
+                <div className="bg-white dark:bg-gray-900 rounded-xl p-12 text-center border border-gray-200 dark:border-gray-800">
+                  <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500 dark:text-gray-400 font-medium">No pending orders found</p>
+                </div>
               ) : (
-                <OrdersTable
-                  filteredOrders={filteredOrders}
-                  totalOrders={orders.length}
-                  activeMenu={activeMenu}
-                  setActiveMenu={setActiveMenu}
-                  onViewDetails={handleViewDetails}
-                  onEditOrder={handleEditOrder}
-                  onExchangeOrder={handleExchangeOrder}
-                  onReturnOrder={handleReturnOrder}
-                  onCancelOrder={handleCancelOrder}
-                  onSendToPathao={handleSendToPathao}
-                  selectedOrders={selectedOrders}
-                  onToggleSelect={handleToggleSelect}
-                  onToggleSelectAll={handleToggleSelectAll}
-                />
+                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
+                  <table className="w-full">
+                    <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Order No</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Type</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Customer</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Date</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Status</th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Amount</th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                      {filteredOrders.map((order) => (
+                        <tr key={order.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                          <td className="px-4 py-3">
+                            <p className="text-sm font-semibold text-black dark:text-white">{order.orderNumber}</p>
+                          </td>
+                          <td className="px-4 py-3">
+                            {getOrderTypeBadge(order.orderType)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
+                                <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                                  {order.customer.name.charAt(0).toUpperCase()}
+                                </span>
+                              </div>
+                              <div>
+                                <p className="text-sm font-medium text-black dark:text-white">{order.customer.name}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-500">{order.customer.phone}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <p className="text-sm text-gray-700 dark:text-gray-300">{order.date}</p>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
+                              order.status === 'Paid'
+                                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                                : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+                            }`}>
+                              {order.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <p className="text-sm font-bold text-black dark:text-white">৳{order.amounts.total.toFixed(2)}</p>
+                            {order.amounts.due > 0 && (
+                              <p className="text-xs text-red-600 dark:text-red-400">Due: ৳{order.amounts.due.toFixed(2)}</p>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-center gap-2">
+                              <button
+                                onClick={() => handleViewDetails(order)}
+                                className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+                                title="View Details"
+                              >
+                                <Eye className="h-4 w-4 text-gray-700 dark:text-gray-300" />
+                              </button>
+                              
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  const menuHeight = 280; // Approximate height of menu
+                                  const spaceBelow = window.innerHeight - rect.bottom;
+                                  const spaceRight = window.innerWidth - rect.right;
+                                  
+                                  // Position menu
+                                  let top = rect.bottom + 4;
+                                  let left = rect.right - 224; // 224px = w-56
+                                  
+                                  // Adjust if not enough space below
+                                  if (spaceBelow < menuHeight) {
+                                    top = rect.top - menuHeight - 4;
+                                  }
+                                  
+                                  // Adjust if not enough space on right
+                                  if (spaceRight < 224) {
+                                    left = rect.left - 224 + rect.width;
+                                  }
+                                  
+                                  setMenuPosition({ top, left });
+                                  setActiveMenu(activeMenu === order.id ? null : order.id);
+                                }}
+                                className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+                                title="More Actions"
+                              >
+                                <MoreVertical className="h-4 w-4 text-gray-700 dark:text-gray-300" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </main>
         </div>
       </div>
 
-      {showDetailsModal && selectedOrder && (
-        <OrderDetailsModal
-          order={selectedOrder}
-          onClose={() => setShowDetailsModal(false)}
-          onEdit={handleEditOrder}
-        />
+      {/* Fixed Position Dropdown Menu */}
+      {activeMenu !== null && menuPosition && (
+        <div 
+          className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-2xl w-56 z-[60]"
+          style={{ top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }}
+        >
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const order = filteredOrders.find(o => o.id === activeMenu);
+              if (order) handleViewDetails(order);
+            }}
+            className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 rounded-t-lg border-b border-gray-100 dark:border-gray-700"
+          >
+            <Eye className="h-5 w-5 flex-shrink-0" />
+            <span>View Details</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const order = filteredOrders.find(o => o.id === activeMenu);
+              if (order) handleEditOrder(order);
+            }}
+            className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700"
+          >
+            <Edit className="h-5 w-5 flex-shrink-0" />
+            <span>Edit Order</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const order = filteredOrders.find(o => o.id === activeMenu);
+              if (order) handleReturnOrder(order);
+            }}
+            className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700"
+          >
+            <RefreshCw className="h-5 w-5 flex-shrink-0" />
+            <span>Return Order</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const order = filteredOrders.find(o => o.id === activeMenu);
+              if (order) handleExchangeOrder(order);
+            }}
+            className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b-2 border-gray-300 dark:border-gray-600"
+          >
+            <ArrowLeftRight className="h-5 w-5 flex-shrink-0" />
+            <span>Exchange Order</span>
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              const order = filteredOrders.find(o => o.id === activeMenu);
+              if (order) handleCancelOrder(order.id);
+            }}
+            className="w-full px-4 py-3 text-left text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-3 rounded-b-lg"
+          >
+            <XCircle className="h-5 w-5 flex-shrink-0" />
+            <span>Cancel Order</span>
+          </button>
+        </div>
       )}
 
-      {showEditModal && selectedOrder && (
-        <EditOrderModal
-          order={selectedOrder}
-          onClose={() => setShowEditModal(false)}
-          onSave={handleSaveOrder}
-        />
+      {/* Order Details Modal */}
+      {showDetailsModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-auto border border-gray-200 dark:border-gray-800">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between z-10">
+              <div>
+                <h2 className="text-xl font-bold text-black dark:text-white">Order Details</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {selectedOrder?.orderNumber || 'Loading...'}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowDetailsModal(false);
+                  setSelectedOrder(null);
+                }}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              >
+                <XCircle className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            {isLoadingDetails ? (
+              <div className="p-12 text-center">
+                <Loader className="animate-spin h-12 w-12 text-black dark:text-white mx-auto mb-4" />
+                <p className="text-gray-500 dark:text-gray-400">Loading order details...</p>
+              </div>
+            ) : selectedOrder ? (
+              <div className="p-6 space-y-6">
+              {/* Order Info */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Order Type</p>
+                  {getOrderTypeBadge(selectedOrder.orderType)}
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Status</p>
+                  <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
+                    selectedOrder.status === 'Paid'
+                      ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                      : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+                  }`}>
+                    {selectedOrder.status}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Date</p>
+                  <p className="text-sm font-medium text-black dark:text-white">{selectedOrder.date}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Store</p>
+                  <p className="text-sm font-medium text-black dark:text-white">{selectedOrder.store}</p>
+                </div>
+              </div>
+
+              {/* Customer Info */}
+              <div>
+                <h3 className="text-sm font-bold text-black dark:text-white mb-3">Customer Information</h3>
+                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-gray-500 dark:text-gray-500">Name</p>
+                    <p className="text-sm font-medium text-black dark:text-white">{selectedOrder.customer.name}</p>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-gray-500 dark:text-gray-500">Phone</p>
+                    <p className="text-sm font-medium text-black dark:text-white">{selectedOrder.customer.phone}</p>
+                  </div>
+                  {selectedOrder.customer.email && (
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-gray-500 dark:text-gray-500">Email</p>
+                      <p className="text-sm font-medium text-black dark:text-white">{selectedOrder.customer.email}</p>
+                    </div>
+                  )}
+                  {selectedOrder.customer.address && (
+                    <div>
+                      <p className="text-xs text-gray-500 dark:text-gray-500 mb-1">Address</p>
+                      <p className="text-sm text-black dark:text-white">{selectedOrder.customer.address}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Order Items */}
+              <div>
+                <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Items</h3>
+                {selectedOrder.items && selectedOrder.items.length > 0 ? (
+                  <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
+                    <table className="w-full">
+                      <thead className="bg-gray-50 dark:bg-gray-800">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">Product</th>
+                          <th className="px-4 py-2 text-center text-xs font-semibold text-gray-700 dark:text-gray-300">Qty</th>
+                          <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 dark:text-gray-300">Price</th>
+                          <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 dark:text-gray-300">Total</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                        {selectedOrder.items.map((item) => (
+                          <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                            <td className="px-4 py-3">
+                              <p className="text-sm font-medium text-black dark:text-white">{item.name}</p>
+                              <p className="text-xs text-gray-500 dark:text-gray-500">SKU: {item.sku}</p>
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 text-sm font-medium text-black dark:text-white">
+                                {item.quantity}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <p className="text-sm text-black dark:text-white">৳{item.price.toFixed(2)}</p>
+                              {item.discount > 0 && (
+                                <p className="text-xs text-red-500">-৳{item.discount.toFixed(2)}</p>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <p className="text-sm font-medium text-black dark:text-white">
+                                ৳{((item.price - item.discount) * item.quantity).toFixed(2)}
+                              </p>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-8 text-center">
+                    <Package className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                    <p className="text-sm text-gray-500 dark:text-gray-500">No items in this order</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Order Summary */}
+              <div>
+                <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Summary</h3>
+                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-gray-700 dark:text-gray-300">Subtotal</p>
+                    <p className="text-sm font-medium text-black dark:text-white">৳{selectedOrder.subtotal.toFixed(2)}</p>
+                  </div>
+                  {selectedOrder.discount > 0 && (
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-gray-700 dark:text-gray-300">Discount</p>
+                      <p className="text-sm font-medium text-red-600 dark:text-red-400">-৳{selectedOrder.discount.toFixed(2)}</p>
+                    </div>
+                  )}
+                  {selectedOrder.shipping > 0 && (
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-gray-700 dark:text-gray-300">Shipping</p>
+                      <p className="text-sm font-medium text-black dark:text-white">৳{selectedOrder.shipping.toFixed(2)}</p>
+                    </div>
+                  )}
+                  <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex items-center justify-between">
+                    <p className="text-sm font-bold text-black dark:text-white">Total</p>
+                    <p className="text-lg font-bold text-black dark:text-white">৳{selectedOrder.amounts.total.toFixed(2)}</p>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-gray-700 dark:text-gray-300">Paid</p>
+                    <p className="text-sm font-medium text-green-600 dark:text-green-400">৳{selectedOrder.amounts.paid.toFixed(2)}</p>
+                  </div>
+                  {selectedOrder.amounts.due > 0 && (
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-bold text-gray-700 dark:text-gray-300">Due</p>
+                      <p className="text-sm font-bold text-red-600 dark:text-red-400">৳{selectedOrder.amounts.due.toFixed(2)}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Notes */}
+              {selectedOrder.notes && (
+                <div>
+                  <h3 className="text-sm font-bold text-black dark:text-white mb-2">Notes</h3>
+                  <p className="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                    {selectedOrder.notes}
+                  </p>
+                </div>
+              )}
+            </div>
+          ) : null}
+          </div>
+        </div>
       )}
 
-      {showExchangeModal && selectedOrder && (
-        <ExchangeProductModal
-          order={selectedOrder}
-          onClose={() => setShowExchangeModal(false)}
-          onExchange={handleProcessExchange}
-        />
+      {/* Edit Order Modal */}
+      {showEditModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-auto border border-gray-200 dark:border-gray-800">
+            {/* Modal Header */}
+            <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between z-10">
+              <div>
+                <h2 className="text-xl font-bold text-black dark:text-white">Edit Order</h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  {selectedOrder?.orderNumber || 'Loading...'}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowEditModal(false);
+                  setSelectedOrder(null);
+                }}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              >
+                <XCircle className="h-5 w-5 text-gray-500" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            {isLoadingDetails ? (
+              <div className="p-12 text-center">
+                <Loader className="animate-spin h-12 w-12 text-black dark:text-white mx-auto mb-4" />
+                <p className="text-gray-500 dark:text-gray-400">Loading order details...</p>
+              </div>
+            ) : selectedOrder ? (
+              <div className="p-6 space-y-6">
+                {/* Customer Information */}
+                <div>
+                  <h3 className="text-sm font-bold text-black dark:text-white mb-3">Customer Information</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Name</label>
+                      <input
+                        type="text"
+                        defaultValue={selectedOrder.customer.name}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Phone</label>
+                      <input
+                        type="text"
+                        defaultValue={selectedOrder.customer.phone}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Email</label>
+                      <input
+                        type="email"
+                        defaultValue={selectedOrder.customer.email}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Address</label>
+                      <textarea
+                        rows={2}
+                        defaultValue={selectedOrder.customer.address}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Order Items */}
+                <div>
+                  <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Items</h3>
+                  {selectedOrder.items && selectedOrder.items.length > 0 ? (
+                    <div className="space-y-3">
+                      {selectedOrder.items.map((item, index) => (
+                        <div key={item.id} className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-black dark:text-white">{item.name}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-500">SKU: {item.sku}</p>
+                          </div>
+                          <div className="w-24">
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Qty</label>
+                            <input
+                              type="number"
+                              defaultValue={item.quantity}
+                              min="1"
+                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-black dark:text-white text-sm"
+                            />
+                          </div>
+                          <div className="w-32">
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Price</label>
+                            <input
+                              type="number"
+                              defaultValue={item.price}
+                              step="0.01"
+                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-black dark:text-white text-sm"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">No items in this order</p>
+                  )}
+                </div>
+
+                {/* Order Details */}
+                <div>
+                  <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Details</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Discount (৳)</label>
+                      <input
+                        type="number"
+                        defaultValue={selectedOrder.discount}
+                        step="0.01"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Shipping (৳)</label>
+                      <input
+                        type="number"
+                        defaultValue={selectedOrder.shipping}
+                        step="0.01"
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Notes</label>
+                      <textarea
+                        rows={3}
+                        defaultValue={selectedOrder.notes}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-800">
+                  <button
+                    onClick={() => {
+                      setShowEditModal(false);
+                      setSelectedOrder(null);
+                    }}
+                    className="px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-black dark:text-white rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => {
+                      alert('Save functionality will be implemented with API integration');
+                      // TODO: Implement save order changes
+                    }}
+                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
       )}
 
-      {showReturnModal && selectedOrder && (
-        <ReturnProductModal
-          order={selectedOrder}
-          onClose={() => setShowReturnModal(false)}
-          onReturn={handleProcessReturn}
-        />
-      )}
-
+      {/* Click outside to close menu */}
       {activeMenu !== null && (
-        <div className="fixed inset-0 z-[90]" onClick={() => setActiveMenu(null)} />
+        <div className="fixed inset-0 z-[55]" onClick={() => setActiveMenu(null)} />
       )}
 
-      {showPrinterSelect && (
-        <div className="fixed inset-0 z-40" onClick={() => setShowPrinterSelect(false)} />
-      )}
+      {/* Custom Scrollbar Styles */}
+      <style jsx>{`
+        .overflow-y-auto::-webkit-scrollbar {
+          width: 6px;
+        }
+        .overflow-y-auto::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .overflow-y-auto::-webkit-scrollbar-thumb {
+          background: #cbd5e0;
+          border-radius: 3px;
+        }
+        .dark .overflow-y-auto::-webkit-scrollbar-thumb {
+          background: #4a5568;
+        }
+        .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+          background: #a0aec0;
+        }
+        .dark .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+          background: #718096;
+        }
+      `}</style>
     </div>
   );
 }

@@ -92,9 +92,12 @@ export default function ProductDetailPage() {
   };
 
   const extractSizeFromName = (name: string): string | undefined => {
-    const match = name.match(/\b(XS|S|M|L|XL|XXL|\d+)\b/i);
-    return match ? match[0] : undefined;
-  };
+  const match = name.match(
+    /\b(XXS|XS|S|M|L|XL|XXL|XXXL|EU 38 \(US 6\)|EU 39 \(US 7\)|EU 40 \(US 7\.5\)|EU 41 \(US 8\.5\)|EU 42 \(US 9\)|EU 43 \(US 10\)|\d+)\b/i
+  );
+  return match ? match[0] : undefined;
+};
+
 
   // Fetch suggested products
   useEffect(() => {

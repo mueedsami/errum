@@ -319,7 +319,7 @@ export default function FounderDashboard() {
                   <div className="flex items-center gap-3">
                     <div>
                       <h1 className="text-xl font-semibold tracking-tight">
-                        Deshio • Founder Dashboard
+                        Founder Dashboard
                       </h1>
                       <p className="text-xs text-slate-500 dark:text-slate-400">
                         Live snapshot of sales, inventory, and operations across

@@ -23,8 +23,6 @@ interface Store {
   type?: string;
 }
 
-type PaymentMode = 'full' | 'advance';
-
 export default function AmountDetailsPage() {
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -38,10 +36,6 @@ export default function AmountDetailsPage() {
   const [transactionReference, setTransactionReference] = useState('');
   const [paymentNotes, setPaymentNotes] = useState('');
 
-  // Payment mode: full vs advance
-  const [paymentMode, setPaymentMode] = useState<PaymentMode>('full');
-  const [advanceAmount, setAdvanceAmount] = useState<string>('');
-
   // Store assignment state
   const [stores, setStores] = useState<Store[]>([]);
   const [assignStoreNow, setAssignStoreNow] = useState<boolean>(false);
@@ -50,7 +44,8 @@ export default function AmountDetailsPage() {
 
   const [showToast, setShowToast] = useState(false);
   const [toastMessage, setToastMessage] = useState('');
-  const [toastType, setToastType] = useState<'success' | 'error' | 'info' | 'warning'>('success');
+  const [toastType, setToastType] =
+    useState<'success' | 'error' | 'info' | 'warning'>('success');
 
   const calculateItemAmount = (item: any): number => {
     if (item.amount !== undefined && item.amount !== null) {
@@ -82,7 +77,7 @@ export default function AmountDetailsPage() {
       if (parsedOrder.items) {
         parsedOrder.items = parsedOrder.items.map((item: any) => ({
           ...item,
-          amount: calculateItemAmount(item)
+          amount: calculateItemAmount(item),
         }));
 
         if (!parsedOrder.subtotal || parsedOrder.subtotal === 0) {
@@ -95,7 +90,7 @@ export default function AmountDetailsPage() {
 
       setOrderData(parsedOrder);
 
-      // Initial guess for store assignment if order already has a store_id
+      // Default store assignment based on existing data (if any)
       if (parsedOrder.store_id) {
         setAssignStoreNow(true);
         setSelectedStoreId(String(parsedOrder.store_id));
@@ -111,7 +106,7 @@ export default function AmountDetailsPage() {
     const fetchPaymentMethods = async () => {
       try {
         const response = await axios.get('/payment-methods', {
-          params: { customer_type: 'social_commerce' }
+          params: { customer_type: 'social_commerce' },
         });
         if (response.data.success) {
           const methods = response.data.data?.payment_methods || [];
@@ -131,9 +126,9 @@ export default function AmountDetailsPage() {
         const response = await axios.get('/stores');
         console.log('🏬 Stores API raw response:', response.data);
 
-        // Try multiple common shapes
         let storeList: Store[] = [];
 
+        // Try multiple common shapes safely
         if (Array.isArray(response.data)) {
           storeList = response.data;
         } else if (Array.isArray(response.data?.data)) {
@@ -150,13 +145,15 @@ export default function AmountDetailsPage() {
         setStores(storeList);
 
         if (!storeList.length) {
-          // No stores available → force "Decide later"
+          // No stores → force "decide later"
           setAssignStoreNow(false);
           setSelectedStoreId('');
+        } else {
+          // If order already had a store_id, keep it; else leave empty (user must pick)
+          // (we already set selectedStoreId above from parsedOrder)
         }
       } catch (error) {
         console.error('Error fetching stores:', error);
-        // If store fetch fails, we fall back to "Decide later"
         setAssignStoreNow(false);
         setSelectedStoreId('');
       } finally {
@@ -179,28 +176,29 @@ export default function AmountDetailsPage() {
   const subtotal = orderData.subtotal || 0;
   const totalDiscount =
     orderData.items?.reduce(
-      (sum: number, item: any) => sum + (parseFloat(item.discount_amount) || 0),
+      (sum: number, item: any) =>
+        sum + (parseFloat(item.discount_amount) || 0),
       0
     ) || 0;
   const vat = (subtotal * parseFloat(vatRate || '0')) / 100;
   const transport = parseFloat(transportCost) || 0;
   const total = subtotal + vat + transport;
 
-  const selectedMethod = paymentMethods.find((m) => String(m.id) === selectedPaymentMethod);
-  const selectedStore = stores.find((s) => String(s.id) === selectedStoreId);
+  const selectedMethod = paymentMethods.find(
+    (m) => String(m.id) === selectedPaymentMethod
+  );
   const hasStores = stores && stores.length > 0;
-
-  // For UI preview of remaining in advance mode
-  const parsedAdvancePreview = parseFloat(advanceAmount || '0') || 0;
-  const remainingPreview =
-    paymentMode === 'advance'
-      ? Math.max(0, Number((total - parsedAdvancePreview).toFixed(2)))
-      : 0;
+  const selectedStore = stores.find(
+    (s) => String(s.id) === selectedStoreId
+  );
 
   const handlePlaceOrder = async () => {
-    // Store validation — only when "Assign now" is chosen and we actually have stores
+    // Validate store selection only if "Assign now" AND we actually have stores
     if (assignStoreNow && hasStores && !selectedStoreId) {
-      displayToast('Please select a store or choose "Decide store later".', 'error');
+      displayToast(
+        'Please select a store or choose "Decide store later".',
+        'error'
+      );
       return;
     }
 
@@ -210,23 +208,11 @@ export default function AmountDetailsPage() {
     }
 
     if (selectedMethod?.requires_reference && !transactionReference.trim()) {
-      displayToast(`Please enter transaction reference for ${selectedMethod.name}`, 'error');
+      displayToast(
+        `Please enter transaction reference for ${selectedMethod.name}`,
+        'error'
+      );
       return;
-    }
-
-    // Payment mode validation
-    let amountToCharge = total;
-    if (paymentMode === 'advance') {
-      const adv = parseFloat(advanceAmount || '0');
-      if (isNaN(adv) || adv <= 0) {
-        displayToast('Please enter a valid advance amount greater than 0.', 'error');
-        return;
-      }
-      if (adv > total) {
-        displayToast('Advance amount cannot be more than total amount.', 'error');
-        return;
-      }
-      amountToCharge = adv;
     }
 
     setIsProcessing(true);
@@ -236,32 +222,44 @@ export default function AmountDetailsPage() {
       console.log('📦 PLACING SOCIAL COMMERCE ORDER');
       console.log('═══════════════════════════════════');
 
-      // Build order payload from orderData, but control store_id from UI
+      // Build payload from orderData but control store_id + store_assignment_mode
       const orderPayload: any = { ...orderData };
 
-      if (assignStoreNow && selectedStoreId) {
-        orderPayload.store_id = parseInt(selectedStoreId, 10);
-      } else {
-        // Decide later: ensure store_id is not sent
-        if ('store_id' in orderPayload) {
-          delete orderPayload.store_id;
+      if (
+        orderPayload.order_type === 'social_commerce' ||
+        orderPayload.order_type === 'ecommerce'
+      ) {
+        if (assignStoreNow && selectedStoreId) {
+          orderPayload.store_id = parseInt(selectedStoreId, 10);
+          orderPayload.store_assignment_mode = 'assign_now';
+        } else {
+          // Pending assignment: send null store_id and mode
+          if ('store_id' in orderPayload) {
+            delete orderPayload.store_id;
+          }
+          orderPayload.store_assignment_mode = 'pending_assignment';
         }
       }
 
+      console.log('📦 Order payload being sent:', orderPayload);
+
       console.log('📦 Step 1: Creating order...');
-      console.log('Order payload being sent:', orderPayload);
       const createOrderResponse = await axios.post('/orders', orderPayload);
 
       if (!createOrderResponse.data.success) {
-        throw new Error(createOrderResponse.data.message || 'Failed to create order');
+        throw new Error(
+          createOrderResponse.data.message || 'Failed to create order'
+        );
       }
 
       const createdOrder = createOrderResponse.data.data;
       console.log('✅ Order created:', createdOrder.order_number);
+      console.log('Status:', createdOrder.status);
       console.log('Fulfillment status:', createdOrder.fulfillment_status);
+
       if (!assignStoreNow) {
         console.log(
-          'ℹ️ Order created WITHOUT store_id – should appear in Pending Assignment list.'
+          'ℹ️ Order created WITHOUT store_id – should appear as pending_assignment on backend.'
         );
       } else {
         console.log('🏬 Assigned Store ID:', orderPayload.store_id);
@@ -274,18 +272,28 @@ export default function AmountDetailsPage() {
 
         for (const defectItem of defectiveItems) {
           try {
-            console.log(`📋 Marking defective ${defectItem.defectId} as sold...`);
+            console.log(
+              `📋 Marking defective ${defectItem.defectId} as sold...`
+            );
 
-            await defectIntegrationService.markDefectiveAsSold(defectItem.defectId, {
-              order_id: createdOrder.id,
-              selling_price: defectItem.price,
-              sale_notes: `Sold via Social Commerce - Order #${createdOrder.order_number}`,
-              sold_at: new Date().toISOString()
-            });
+            await defectIntegrationService.markDefectiveAsSold(
+              defectItem.defectId,
+              {
+                order_id: createdOrder.id,
+                selling_price: defectItem.price,
+                sale_notes: `Sold via Social Commerce - Order #${createdOrder.order_number}`,
+                sold_at: new Date().toISOString(),
+              }
+            );
 
-            console.log(`✅ Defective ${defectItem.defectId} marked as sold`);
+            console.log(
+              `✅ Defective ${defectItem.defectId} marked as sold`
+            );
           } catch (defectError: any) {
-            console.error(`❌ Failed to mark defective ${defectItem.defectId}:`, defectError);
+            console.error(
+              `❌ Failed to mark defective ${defectItem.defectId}:`,
+              defectError
+            );
             console.warn(
               `Warning: Could not update defect status for ${defectItem.productName}`
             );
@@ -293,17 +301,15 @@ export default function AmountDetailsPage() {
         }
       }
 
-      console.log('💰 Step 2: Processing payment...');
+      console.log('💰 Step 2: Processing payment (full amount)...');
       const paymentData: any = {
         payment_method_id: parseInt(selectedPaymentMethod),
-        amount: amountToCharge,
-        payment_type: paymentMode === 'full' ? 'full' : 'partial',
+        amount: total,
+        payment_type: 'full',
         auto_complete: false,
         notes:
           paymentNotes ||
-          (paymentMode === 'full'
-            ? `Social Commerce full payment via ${selectedMethod?.name}`
-            : `Social Commerce advance payment via ${selectedMethod?.name}`)
+          `Social Commerce payment via ${selectedMethod?.name}`,
       };
 
       if (selectedMethod?.requires_reference && transactionReference) {
@@ -311,45 +317,47 @@ export default function AmountDetailsPage() {
         paymentData.external_reference = transactionReference;
       }
 
-      if (selectedMethod?.type === 'mobile_banking' && transactionReference) {
+      if (
+        selectedMethod?.type === 'mobile_banking' &&
+        transactionReference
+      ) {
         paymentData.payment_data = {
           mobile_number: orderData.customer.phone,
           provider: selectedMethod.name,
-          transaction_id: transactionReference
+          transaction_id: transactionReference,
         };
       } else if (selectedMethod?.type === 'card' && transactionReference) {
         paymentData.payment_data = {
-          transaction_reference: transactionReference
+          transaction_reference: transactionReference,
         };
       }
 
       console.log('Payment payload being sent:', paymentData);
 
-      // Use the existing simple payment endpoint, just with partial amount/type when needed
       const paymentResponse = await axios.post(
         `/orders/${createdOrder.id}/payments/simple`,
         paymentData
       );
 
       if (!paymentResponse.data.success) {
-        throw new Error(paymentResponse.data.message || 'Failed to process payment');
+        throw new Error(
+          paymentResponse.data.message || 'Failed to process payment'
+        );
       }
       console.log('✅ Payment processed');
 
       console.log('═══════════════════════════════════');
       console.log('✅ ORDER CREATED - PENDING FULFILLMENT');
       console.log(`Order Number: ${createdOrder.order_number}`);
+      console.log(`Status: ${createdOrder.status}`);
       console.log(`Fulfillment Status: ${createdOrder.fulfillment_status}`);
       if (!assignStoreNow) {
-        console.log('Next step: Operations team will assign this order to a store.');
-      } else {
-        console.log('Next step: Warehouse staff at the assigned store will scan barcodes.');
-      }
-      if (paymentMode === 'advance') {
         console.log(
-          `Payment: Advance ${amountToCharge} received, remaining ${
-            total - amountToCharge
-          } due on delivery.`
+          'Next step: Operations team will assign this order to a store.'
+        );
+      } else {
+        console.log(
+          'Next step: Warehouse staff at assigned store will scan barcodes.'
         );
       }
       console.log('═══════════════════════════════════');
@@ -357,13 +365,9 @@ export default function AmountDetailsPage() {
       const successMsgBase = `Order ${createdOrder.order_number} created successfully!`;
       const successStore = assignStoreNow
         ? ' Pending warehouse fulfillment at assigned store.'
-        : ' Pending store assignment in Order Management.';
-      const successPayment =
-        paymentMode === 'advance'
-          ? ' Advance payment recorded; remaining will be due on delivery.'
-          : '';
-      displayToast(successMsgBase + successStore + successPayment, 'success');
+        : ' Pending store assignment in order management.';
 
+      displayToast(successMsgBase + successStore, 'success');
       sessionStorage.removeItem('pendingOrder');
 
       setTimeout(() => {
@@ -376,7 +380,9 @@ export default function AmountDetailsPage() {
       console.error('═══════════════════════════════════');
 
       const errorMessage =
-        error.response?.data?.message || error.message || 'Error placing order. Please try again.';
+        error.response?.data?.message ||
+        error.message ||
+        'Error placing order. Please try again.';
       displayToast(errorMessage, 'error');
     } finally {
       setIsProcessing(false);
@@ -439,7 +445,8 @@ export default function AmountDetailsPage() {
                         </p>
                         {orderData.deliveryAddress.postalCode && (
                           <p className="text-xs text-gray-600 dark:text-gray-400">
-                            Postal Code: {orderData.deliveryAddress.postalCode}
+                            Postal Code:{' '}
+                            {orderData.deliveryAddress.postalCode}
                           </p>
                         )}
                         {orderData.deliveryAddress.address && (
@@ -454,7 +461,7 @@ export default function AmountDetailsPage() {
                       </>
                     ) : (
                       <>
-                        <p className="text-xs text-gray-900 dark:text:white">
+                        <p className="text-xs text-gray-900 dark:text-white">
                           {orderData.deliveryAddress.division},{' '}
                           {orderData.deliveryAddress.district},{' '}
                           {orderData.deliveryAddress.city}
@@ -471,7 +478,8 @@ export default function AmountDetailsPage() {
                         )}
                         {orderData.deliveryAddress.postalCode && (
                           <p className="text-xs text-gray-600 dark:text-gray-400">
-                            Postal Code: {orderData.deliveryAddress.postalCode}
+                            Postal Code:{' '}
+                            {orderData.deliveryAddress.postalCode}
                           </p>
                         )}
                       </>
@@ -506,7 +514,9 @@ export default function AmountDetailsPage() {
                           onChange={() => setAssignStoreNow(false)}
                           disabled={isProcessing}
                         />
-                        <span>Decide store later (send to pending assignment)</span>
+                        <span>
+                          Decide store later (mark as pending assignment)
+                        </span>
                       </label>
                     </div>
 
@@ -522,7 +532,9 @@ export default function AmountDetailsPage() {
                           className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50"
                         >
                           <option value="">
-                            {isLoadingStores ? 'Loading stores...' : 'Select a store'}
+                            {isLoadingStores
+                              ? 'Loading stores...'
+                              : 'Select a store'}
                           </option>
                           {stores.map((store) => (
                             <option key={store.id} value={store.id}>
@@ -533,13 +545,16 @@ export default function AmountDetailsPage() {
                         </select>
                         {assignStoreNow && !selectedStoreId && !isLoadingStores && (
                           <p className="mt-1 text-[11px] text-red-500">
-                            Please select a store or choose &quot;Decide store later&quot;.
+                            Please select a store or choose &quot;Decide store
+                            later&quot;.
                           </p>
                         )}
                         {assignStoreNow && selectedStore && (
                           <p className="mt-1 text-[11px] text-gray-600 dark:text-gray-400">
                             Assigned Store: {selectedStore.name}
-                            {selectedStore.code ? ` (${selectedStore.code})` : ''}
+                            {selectedStore.code
+                              ? ` (${selectedStore.code})`
+                              : ''}
                           </p>
                         )}
                       </div>
@@ -547,15 +562,18 @@ export default function AmountDetailsPage() {
 
                     {!assignStoreNow && (
                       <p className="mt-1 text-[11px] text-gray-600 dark:text-gray-400">
-                        This order will be created without a store_id and should appear in the
-                        Order Management &gt; Pending Assignment list.
+                        This order will be created with
+                        <span className="font-semibold"> status</span>{' '}
+                        <code>pending_assignment</code> and{' '}
+                        <code>store_id = null</code>. It can be assigned to a
+                        store later from the backoffice.
                       </p>
                     )}
 
                     {!hasStores && (
                       <p className="mt-1 text-[11px] text-orange-600 dark:text-orange-400">
-                        No active stores returned from API. Store assignment can be done later
-                        from the pending assignment screen.
+                        No active stores returned from API. Store assignment can
+                        be done later when stores are available.
                       </p>
                     )}
                   </div>
@@ -566,54 +584,64 @@ export default function AmountDetailsPage() {
                       Products ({orderData.items?.length || 0})
                     </p>
                     <div className="space-y-2 max-h-60 md:max-h-80 overflow-y-auto">
-                      {orderData.items?.map((item: any, index: number) => {
-                        const itemAmount = calculateItemAmount(item);
-                        const isDefective = orderData.defectiveItems?.some(
-                          (d: any) => d.defectId === item.defectId
-                        );
+                      {orderData.items?.map(
+                        (item: any, index: number) => {
+                          const itemAmount = calculateItemAmount(item);
+                          const isDefective =
+                            orderData.defectiveItems?.some(
+                              (d: any) => d.defectId === item.defectId
+                            );
 
-                        return (
-                          <div
-                            key={index}
-                            className={`flex justify-between items-center p-2 rounded ${
-                              isDefective
-                                ? 'bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-700'
-                                : 'bg-gray-50 dark:bg-gray-700'
-                            }`}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm text-gray-900 dark:text-white truncate">
-                                {item.productName}
-                                {isDefective && (
-                                  <span className="ml-2 px-2 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 text-xs rounded">
-                                    Defective
-                                  </span>
-                                )}
-                              </p>
-                              <p className="text-xs text-gray-600 dark:text-gray-400">
-                                Qty: {item.quantity} ×{' '}
-                                {parseFloat(item.unit_price || 0).toFixed(2)} Tk
-                              </p>
-                              {item.discount_amount > 0 && (
-                                <p className="text-xs text-red-600 dark:text-red-400">
-                                  Discount:{' '}
-                                  {`-${parseFloat(item.discount_amount).toFixed(2)} Tk`}
+                          return (
+                            <div
+                              key={index}
+                              className={`flex justify-between items-center p-2 rounded ${
+                                isDefective
+                                  ? 'bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-700'
+                                  : 'bg-gray-50 dark:bg-gray-700'
+                              }`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm text-gray-900 dark:text-white truncate">
+                                  {item.productName}
+                                  {isDefective && (
+                                    <span className="ml-2 px-2 py-0.5 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 text-xs rounded">
+                                      Defective
+                                    </span>
+                                  )}
                                 </p>
-                              )}
+                                <p className="text-xs text-gray-600 dark:text-gray-400">
+                                  Qty: {item.quantity} ×{' '}
+                                  {parseFloat(
+                                    item.unit_price || 0
+                                  ).toFixed(2)}{' '}
+                                  Tk
+                                </p>
+                                {item.discount_amount > 0 && (
+                                  <p className="text-xs text-red-600 dark:text-red-400">
+                                    Discount:{' '}
+                                    {`-${parseFloat(
+                                      item.discount_amount
+                                    ).toFixed(2)} Tk`}
+                                  </p>
+                                )}
+                              </div>
+                              <p className="text-sm font-medium text-gray-900 dark:text-white ml-2">
+                                {itemAmount.toFixed(2)} Tk
+                              </p>
                             </div>
-                            <p className="text-sm font-medium text-gray-900 dark:text-white ml-2">
-                              {itemAmount.toFixed(2)} Tk
-                            </p>
-                          </div>
-                        );
-                      })}
+                          );
+                        }
+                      )}
                     </div>
                   </div>
 
                   {/* Subtotal */}
                   <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
                     <div className="flex justify-between text-base font-semibold">
-                      <span className="text-gray-900 dark:text-white">Subtotal</span>
+                      <span className="text-gray-900 dark:text-white">
+                        Subtotal
+                      </span>
                       <span className="text-gray-900 dark:text-white">
                         {subtotal.toFixed(2)} Tk
                       </span>
@@ -629,7 +657,9 @@ export default function AmountDetailsPage() {
 
                   <div className="space-y-4">
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">Sub Total</span>
+                      <span className="text-gray-600 dark:text-gray-400">
+                        Sub Total
+                      </span>
                       <span className="text-gray-900 dark:text-white">
                         {subtotal.toFixed(2)} Tk
                       </span>
@@ -684,66 +714,14 @@ export default function AmountDetailsPage() {
                     </div>
 
                     <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
-                      <div className="flex justify-between text-lg font-semibold mb-2">
-                        <span className="text-gray-900 dark:text-white">Total</span>
+                      <div className="flex justify-between text-lg font-semibold mb-4">
+                        <span className="text-gray-900 dark:text-white">
+                          Total
+                        </span>
                         <span className="text-gray-900 dark:text-white">
                           {total.toFixed(2)} Tk
                         </span>
                       </div>
-                    </div>
-
-                    {/* Payment mode selection */}
-                    <div className="p-3 rounded bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800">
-                      <p className="text-xs font-medium text-teal-900 dark:text-teal-200 mb-2">
-                        Payment Mode
-                      </p>
-                      <div className="flex flex-col gap-1">
-                        <label className="flex items-center gap-2 text-xs text-gray-800 dark:text-gray-100">
-                          <input
-                            type="radio"
-                            className="h-3 w-3"
-                            checked={paymentMode === 'full'}
-                            onChange={() => setPaymentMode('full')}
-                            disabled={isProcessing}
-                          />
-                          <span>Collect full amount now</span>
-                        </label>
-                        <label className="flex items-center gap-2 text-xs text-gray-800 dark:text-gray-100">
-                          <input
-                            type="radio"
-                            className="h-3 w-3"
-                            checked={paymentMode === 'advance'}
-                            onChange={() => setPaymentMode('advance')}
-                            disabled={isProcessing}
-                          />
-                          <span>Collect advance now, rest due on delivery</span>
-                        </label>
-                      </div>
-
-                      {paymentMode === 'advance' && (
-                        <div className="mt-2">
-                          <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">
-                            Advance Amount to Collect Now
-                          </label>
-                          <input
-                            type="number"
-                            value={advanceAmount}
-                            onChange={(e) => setAdvanceAmount(e.target.value)}
-                            disabled={isProcessing}
-                            placeholder="Enter advance amount"
-                            className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50"
-                          />
-                          {advanceAmount && remainingPreview >= 0 && (
-                            <p className="mt-1 text-[11px] text-gray-600 dark:text-gray-400">
-                              Remaining{' '}
-                              <span className="font-semibold">
-                                {remainingPreview.toFixed(2)} Tk
-                              </span>{' '}
-                              will be due on delivery.
-                            </p>
-                          )}
-                        </div>
-                      )}
                     </div>
 
                     {/* Payment Method Selection */}
@@ -753,7 +731,9 @@ export default function AmountDetailsPage() {
                       </label>
                       <select
                         value={selectedPaymentMethod}
-                        onChange={(e) => setSelectedPaymentMethod(e.target.value)}
+                        onChange={(e) =>
+                          setSelectedPaymentMethod(e.target.value)
+                        }
                         disabled={isProcessing}
                         className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50"
                       >
@@ -770,12 +750,15 @@ export default function AmountDetailsPage() {
                     {selectedMethod?.requires_reference && (
                       <div>
                         <label className="block text-sm text-gray-700 dark:text-gray-300 mb-1">
-                          Transaction Reference <span className="text-red-500">*</span>
+                          Transaction Reference{' '}
+                          <span className="text-red-500">*</span>
                         </label>
                         <input
                           type="text"
                           value={transactionReference}
-                          onChange={(e) => setTransactionReference(e.target.value)}
+                          onChange={(e) =>
+                            setTransactionReference(e.target.value)
+                          }
                           disabled={isProcessing}
                           placeholder={`Enter ${selectedMethod.name} transaction ID`}
                           className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 disabled:opacity-50"
@@ -829,7 +812,11 @@ export default function AmountDetailsPage() {
         </div>
       </div>
       {showToast && (
-        <Toast message={toastMessage} type={toastType} onClose={() => setShowToast(false)} />
+        <Toast
+          message={toastMessage}
+          type={toastType}
+          onClose={() => setShowToast(false)}
+        />
       )}
     </div>
   );

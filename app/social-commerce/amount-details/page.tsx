@@ -23,6 +23,8 @@ interface Store {
   type?: string;
 }
 
+type PaymentMode = 'full' | 'advance';
+
 export default function AmountDetailsPage() {
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -36,6 +38,10 @@ export default function AmountDetailsPage() {
   const [transactionReference, setTransactionReference] = useState('');
   const [paymentNotes, setPaymentNotes] = useState('');
 
+  // Payment mode: full vs advance
+  const [paymentMode, setPaymentMode] = useState<PaymentMode>('full');
+  const [advanceAmount, setAdvanceAmount] = useState<string>('');
+
   // Store assignment state
   const [stores, setStores] = useState<Store[]>([]);
   const [assignStoreNow, setAssignStoreNow] = useState<boolean>(false);
@@ -46,14 +52,6 @@ export default function AmountDetailsPage() {
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error' | 'info' | 'warning'>('success');
 
-  const getTodayDate = () => {
-    const today = new Date();
-    const day = String(today.getDate()).padStart(2, '0');
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const year = today.getFullYear();
-    return `${day}-${month}-${year}`;
-  };
-
   const calculateItemAmount = (item: any): number => {
     if (item.amount !== undefined && item.amount !== null) {
       return parseFloat(item.amount);
@@ -63,10 +61,13 @@ export default function AmountDetailsPage() {
     const quantity = parseInt(item.quantity || 0);
     const discountAmount = parseFloat(item.discount_amount || 0);
 
-    return (unitPrice * quantity) - discountAmount;
+    return unitPrice * quantity - discountAmount;
   };
 
-  const displayToast = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
+  const displayToast = (
+    message: string,
+    type: 'success' | 'error' | 'info' | 'warning' = 'success'
+  ) => {
     setToastMessage(message);
     setToastType(type);
     setShowToast(true);
@@ -94,7 +95,7 @@ export default function AmountDetailsPage() {
 
       setOrderData(parsedOrder);
 
-      // Initialize store assignment based on existing order data (if any)
+      // Initial guess for store assignment if order already has a store_id
       if (parsedOrder.store_id) {
         setAssignStoreNow(true);
         setSelectedStoreId(String(parsedOrder.store_id));
@@ -128,21 +129,36 @@ export default function AmountDetailsPage() {
       try {
         setIsLoadingStores(true);
         const response = await axios.get('/stores');
-        // Try to be defensive about response shape
-        const rawData = response.data?.data ?? response.data;
+        console.log('🏬 Stores API raw response:', response.data);
+
+        // Try multiple common shapes
         let storeList: Store[] = [];
 
-        if (Array.isArray(rawData)) {
-          storeList = rawData;
-        } else if (Array.isArray(rawData?.stores)) {
-          storeList = rawData.stores;
-        } else if (Array.isArray(rawData?.items)) {
-          storeList = rawData.items;
+        if (Array.isArray(response.data)) {
+          storeList = response.data;
+        } else if (Array.isArray(response.data?.data)) {
+          storeList = response.data.data;
+        } else if (Array.isArray(response.data?.data?.stores)) {
+          storeList = response.data.data.stores;
+        } else if (Array.isArray(response.data?.stores)) {
+          storeList = response.data.stores;
+        } else if (Array.isArray(response.data?.items)) {
+          storeList = response.data.items;
         }
 
+        console.log('🏬 Parsed stores list:', storeList);
         setStores(storeList);
+
+        if (!storeList.length) {
+          // No stores available → force "Decide later"
+          setAssignStoreNow(false);
+          setSelectedStoreId('');
+        }
       } catch (error) {
         console.error('Error fetching stores:', error);
+        // If store fetch fails, we fall back to "Decide later"
+        setAssignStoreNow(false);
+        setSelectedStoreId('');
       } finally {
         setIsLoadingStores(false);
       }
@@ -172,10 +188,18 @@ export default function AmountDetailsPage() {
 
   const selectedMethod = paymentMethods.find((m) => String(m.id) === selectedPaymentMethod);
   const selectedStore = stores.find((s) => String(s.id) === selectedStoreId);
+  const hasStores = stores && stores.length > 0;
+
+  // For UI preview of remaining in advance mode
+  const parsedAdvancePreview = parseFloat(advanceAmount || '0') || 0;
+  const remainingPreview =
+    paymentMode === 'advance'
+      ? Math.max(0, Number((total - parsedAdvancePreview).toFixed(2)))
+      : 0;
 
   const handlePlaceOrder = async () => {
-    // Store validation – we only enforce when user chooses "Assign now"
-    if (assignStoreNow && !selectedStoreId) {
+    // Store validation — only when "Assign now" is chosen and we actually have stores
+    if (assignStoreNow && hasStores && !selectedStoreId) {
       displayToast('Please select a store or choose "Decide store later".', 'error');
       return;
     }
@@ -188,6 +212,21 @@ export default function AmountDetailsPage() {
     if (selectedMethod?.requires_reference && !transactionReference.trim()) {
       displayToast(`Please enter transaction reference for ${selectedMethod.name}`, 'error');
       return;
+    }
+
+    // Payment mode validation
+    let amountToCharge = total;
+    if (paymentMode === 'advance') {
+      const adv = parseFloat(advanceAmount || '0');
+      if (isNaN(adv) || adv <= 0) {
+        displayToast('Please enter a valid advance amount greater than 0.', 'error');
+        return;
+      }
+      if (adv > total) {
+        displayToast('Advance amount cannot be more than total amount.', 'error');
+        return;
+      }
+      amountToCharge = adv;
     }
 
     setIsProcessing(true);
@@ -203,13 +242,14 @@ export default function AmountDetailsPage() {
       if (assignStoreNow && selectedStoreId) {
         orderPayload.store_id = parseInt(selectedStoreId, 10);
       } else {
-        // Decide later: ensure store_id is not sent, so it goes to assignment flow
+        // Decide later: ensure store_id is not sent
         if ('store_id' in orderPayload) {
           delete orderPayload.store_id;
         }
       }
 
       console.log('📦 Step 1: Creating order...');
+      console.log('Order payload being sent:', orderPayload);
       const createOrderResponse = await axios.post('/orders', orderPayload);
 
       if (!createOrderResponse.data.success) {
@@ -220,7 +260,9 @@ export default function AmountDetailsPage() {
       console.log('✅ Order created:', createdOrder.order_number);
       console.log('Fulfillment status:', createdOrder.fulfillment_status);
       if (!assignStoreNow) {
-        console.log('ℹ️ Order created without store_id – will appear in pending assignment list.');
+        console.log(
+          'ℹ️ Order created WITHOUT store_id – should appear in Pending Assignment list.'
+        );
       } else {
         console.log('🏬 Assigned Store ID:', orderPayload.store_id);
       }
@@ -254,10 +296,14 @@ export default function AmountDetailsPage() {
       console.log('💰 Step 2: Processing payment...');
       const paymentData: any = {
         payment_method_id: parseInt(selectedPaymentMethod),
-        amount: total,
-        payment_type: 'full',
+        amount: amountToCharge,
+        payment_type: paymentMode === 'full' ? 'full' : 'partial',
         auto_complete: false,
-        notes: paymentNotes || `Social Commerce payment via ${selectedMethod?.name}`
+        notes:
+          paymentNotes ||
+          (paymentMode === 'full'
+            ? `Social Commerce full payment via ${selectedMethod?.name}`
+            : `Social Commerce advance payment via ${selectedMethod?.name}`)
       };
 
       if (selectedMethod?.requires_reference && transactionReference) {
@@ -277,6 +323,9 @@ export default function AmountDetailsPage() {
         };
       }
 
+      console.log('Payment payload being sent:', paymentData);
+
+      // Use the existing simple payment endpoint, just with partial amount/type when needed
       const paymentResponse = await axios.post(
         `/orders/${createdOrder.id}/payments/simple`,
         paymentData
@@ -296,13 +345,24 @@ export default function AmountDetailsPage() {
       } else {
         console.log('Next step: Warehouse staff at the assigned store will scan barcodes.');
       }
+      if (paymentMode === 'advance') {
+        console.log(
+          `Payment: Advance ${amountToCharge} received, remaining ${
+            total - amountToCharge
+          } due on delivery.`
+        );
+      }
       console.log('═══════════════════════════════════');
 
       const successMsgBase = `Order ${createdOrder.order_number} created successfully!`;
-      const successMsgExtra = assignStoreNow
+      const successStore = assignStoreNow
         ? ' Pending warehouse fulfillment at assigned store.'
         : ' Pending store assignment in Order Management.';
-      displayToast(successMsgBase + successMsgExtra, 'success');
+      const successPayment =
+        paymentMode === 'advance'
+          ? ' Advance payment recorded; remaining will be due on delivery.'
+          : '';
+      displayToast(successMsgBase + successStore + successPayment, 'success');
 
       sessionStorage.removeItem('pendingOrder');
 
@@ -394,7 +454,7 @@ export default function AmountDetailsPage() {
                       </>
                     ) : (
                       <>
-                        <p className="text-xs text-gray-900 dark:text-white">
+                        <p className="text-xs text-gray-900 dark:text:white">
                           {orderData.deliveryAddress.division},{' '}
                           {orderData.deliveryAddress.district},{' '}
                           {orderData.deliveryAddress.city}
@@ -431,9 +491,12 @@ export default function AmountDetailsPage() {
                           className="h-3 w-3"
                           checked={assignStoreNow}
                           onChange={() => setAssignStoreNow(true)}
-                          disabled={isProcessing}
+                          disabled={isProcessing || !hasStores}
                         />
-                        <span>Assign this order to a store now</span>
+                        <span>
+                          Assign this order to a store now
+                          {!hasStores && ' (No active stores found)'}
+                        </span>
                       </label>
                       <label className="flex items-center gap-2 text-xs text-gray-800 dark:text-gray-200">
                         <input
@@ -447,7 +510,7 @@ export default function AmountDetailsPage() {
                       </label>
                     </div>
 
-                    {assignStoreNow && (
+                    {assignStoreNow && hasStores && (
                       <div className="mt-2">
                         <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">
                           Select Store
@@ -470,7 +533,7 @@ export default function AmountDetailsPage() {
                         </select>
                         {assignStoreNow && !selectedStoreId && !isLoadingStores && (
                           <p className="mt-1 text-[11px] text-red-500">
-                            Please select a store or choose "Decide store later".
+                            Please select a store or choose &quot;Decide store later&quot;.
                           </p>
                         )}
                         {assignStoreNow && selectedStore && (
@@ -484,8 +547,15 @@ export default function AmountDetailsPage() {
 
                     {!assignStoreNow && (
                       <p className="mt-1 text-[11px] text-gray-600 dark:text-gray-400">
-                        This order will be created without a store_id and appear in the Order
-                        Management &gt; Pending Assignment list.
+                        This order will be created without a store_id and should appear in the
+                        Order Management &gt; Pending Assignment list.
+                      </p>
+                    )}
+
+                    {!hasStores && (
+                      <p className="mt-1 text-[11px] text-orange-600 dark:text-orange-400">
+                        No active stores returned from API. Store assignment can be done later
+                        from the pending assignment screen.
                       </p>
                     )}
                   </div>
@@ -614,12 +684,66 @@ export default function AmountDetailsPage() {
                     </div>
 
                     <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
-                      <div className="flex justify-between text-lg font-semibold mb-4">
+                      <div className="flex justify-between text-lg font-semibold mb-2">
                         <span className="text-gray-900 dark:text-white">Total</span>
                         <span className="text-gray-900 dark:text-white">
                           {total.toFixed(2)} Tk
                         </span>
                       </div>
+                    </div>
+
+                    {/* Payment mode selection */}
+                    <div className="p-3 rounded bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800">
+                      <p className="text-xs font-medium text-teal-900 dark:text-teal-200 mb-2">
+                        Payment Mode
+                      </p>
+                      <div className="flex flex-col gap-1">
+                        <label className="flex items-center gap-2 text-xs text-gray-800 dark:text-gray-100">
+                          <input
+                            type="radio"
+                            className="h-3 w-3"
+                            checked={paymentMode === 'full'}
+                            onChange={() => setPaymentMode('full')}
+                            disabled={isProcessing}
+                          />
+                          <span>Collect full amount now</span>
+                        </label>
+                        <label className="flex items-center gap-2 text-xs text-gray-800 dark:text-gray-100">
+                          <input
+                            type="radio"
+                            className="h-3 w-3"
+                            checked={paymentMode === 'advance'}
+                            onChange={() => setPaymentMode('advance')}
+                            disabled={isProcessing}
+                          />
+                          <span>Collect advance now, rest due on delivery</span>
+                        </label>
+                      </div>
+
+                      {paymentMode === 'advance' && (
+                        <div className="mt-2">
+                          <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">
+                            Advance Amount to Collect Now
+                          </label>
+                          <input
+                            type="number"
+                            value={advanceAmount}
+                            onChange={(e) => setAdvanceAmount(e.target.value)}
+                            disabled={isProcessing}
+                            placeholder="Enter advance amount"
+                            className="w-full px-2 py-1.5 text-xs border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50"
+                          />
+                          {advanceAmount && remainingPreview >= 0 && (
+                            <p className="mt-1 text-[11px] text-gray-600 dark:text-gray-400">
+                              Remaining{' '}
+                              <span className="font-semibold">
+                                {remainingPreview.toFixed(2)} Tk
+                              </span>{' '}
+                              will be due on delivery.
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
 
                     {/* Payment Method Selection */}

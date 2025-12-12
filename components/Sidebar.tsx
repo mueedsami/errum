@@ -67,6 +67,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         { label: 'Field', href: '/product/field' },
         { label: 'Product List', href: '/product/list' },
         { label: 'Batch', href: '/product/batch' },
+        { label: 'Archived Products', href: '/product/archived' }, // 👈 new
       ],
     },
     {

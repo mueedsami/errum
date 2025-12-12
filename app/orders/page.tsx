@@ -103,6 +103,7 @@ export default function PendingOrdersDashboard() {
   const parseMoney = (val: any) =>
     Number(String(val ?? '0').replace(/[^0-9.-]/g, ''));
 
+  // 🔧 Central transformer to avoid the "all orders of same customer" bug
   const transformOrder = (order: any): Order => {
     return {
       id: order.id,
@@ -111,7 +112,7 @@ export default function PendingOrdersDashboard() {
       orderTypeLabel: order.order_type_label,
       date: new Date(order.order_date).toLocaleDateString('en-GB'),
       customer: {
-        // Prefer snapshot fields if present, fallback to relation
+        // Prefer per-order snapshot fields if present
         name: order.customer_name ?? order.customer?.name ?? '',
         phone: order.customer_phone ?? order.customer?.phone ?? '',
         email: order.customer_email ?? order.customer?.email ?? '',
@@ -580,10 +581,18 @@ export default function PendingOrdersDashboard() {
     if (!editableOrder) return;
 
     try {
-      await axios.post(`/orders/${editableOrder.id}/items`, {
+      // 🔑 Send a richer payload so validator is happy
+      const payload = {
+        product_id: product.id,
         batch_id: product.batchId,
-        quantity: 1
-      });
+        quantity: 1,
+        unit_price: product.price,
+        discount_amount: 0
+      };
+
+      console.log('Adding order item payload:', payload);
+
+      await axios.post(`/orders/${editableOrder.id}/items`, payload);
 
       await reloadEditableOrder(editableOrder.id);
 
@@ -592,8 +601,11 @@ export default function PendingOrdersDashboard() {
       setProductResults([]);
     } catch (err: any) {
       console.error('Failed to add item to order:', err);
+      const backendData = err?.response?.data;
       const msg =
-        err?.response?.data?.message ||
+        backendData?.message ||
+        backendData?.error ||
+        JSON.stringify(backendData || {}) ||
         err?.message ||
         'Failed to add item to order.';
       alert(msg);
@@ -623,8 +635,11 @@ export default function PendingOrdersDashboard() {
       await reloadEditableOrder(editableOrder.id);
     } catch (error: any) {
       console.error('Failed to remove item:', error);
+      const backendData = error?.response?.data;
       const msg =
-        error?.response?.data?.message ||
+        backendData?.message ||
+        backendData?.error ||
+        JSON.stringify(backendData || {}) ||
         error?.message ||
         'Failed to remove item.';
       alert(msg);
@@ -645,8 +660,11 @@ export default function PendingOrdersDashboard() {
       await reloadEditableOrder(editableOrder.id);
     } catch (error: any) {
       console.error('Failed to update item:', error);
+      const backendData = error?.response?.data;
       const msg =
-        error?.response?.data?.message ||
+        backendData?.message ||
+        backendData?.error ||
+        JSON.stringify(backendData || {}) ||
         error?.message ||
         'Failed to update item.';
       alert(msg);
@@ -683,8 +701,11 @@ export default function PendingOrdersDashboard() {
       }
     } catch (error: any) {
       console.error('Failed to save order:', error);
+      const backendData = error?.response?.data;
       const msg =
-        error?.response?.data?.message ||
+        backendData?.message ||
+        backendData?.error ||
+        JSON.stringify(backendData || {}) ||
         error?.message ||
         'Failed to save order.';
       alert(msg);

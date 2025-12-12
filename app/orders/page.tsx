@@ -3,8 +3,24 @@
 import { useState, useEffect } from 'react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
-import { ShoppingBag, Search, MoreVertical, Eye, Package, XCircle, Loader, Globe, Edit, RefreshCw, ArrowLeftRight } from 'lucide-react';
+import {
+  ShoppingBag,
+  Search,
+  MoreVertical,
+  Eye,
+  Package,
+  XCircle,
+  Loader,
+  Globe,
+  Edit,
+  RefreshCw,
+  ArrowLeftRight
+} from 'lucide-react';
 import orderService from '@/services/orderService';
+import ReturnProductModal from '@/components/sales/ReturnProductModal';
+import ExchangeProductModal from '@/components/sales/ExchangeProductModal';
+import productReturnService, { type CreateReturnRequest } from '@/services/productReturnService';
+import refundService, { type CreateRefundRequest } from '@/services/refundService';
 
 interface Order {
   id: number;
@@ -59,6 +75,14 @@ export default function PendingOrdersDashboard() {
   const [userName, setUserName] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
 
+  // Return / Exchange modals
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [showExchangeModal, setShowExchangeModal] = useState(false);
+  const [selectedOrderForAction, setSelectedOrderForAction] = useState<any | null>(null);
+
+  // Editable version of the order for Edit modal
+  const [editableOrder, setEditableOrder] = useState<Order | null>(null);
+
   useEffect(() => {
     const name = localStorage.getItem('userName') || '';
     setUserName(name);
@@ -87,13 +111,13 @@ export default function PendingOrdersDashboard() {
       });
 
       // Combine both order types
-      const allOrders = [
-        ...socialCommerceResponse.data,
-        ...ecommerceResponse.data
-      ];
+      const allOrders = [...socialCommerceResponse.data, ...ecommerceResponse.data];
 
       // Sort combined orders by date
-      allOrders.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      allOrders.sort(
+        (a: any, b: any) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
 
       // Transform the orders
       const transformedOrders = allOrders.map((order: any) => ({
@@ -108,34 +132,51 @@ export default function PendingOrdersDashboard() {
           email: order.customer.email || '',
           address: order.shipping_address || ''
         },
-        items: order.items?.map((item: any) => {
-          const unitPrice = Number(String(item.unit_price ?? "0").replace(/[^0-9.-]/g, ""));
-          const discountAmount = Number(String(item.discount_amount ?? "0").replace(/[^0-9.-]/g, ""));
-          
-          console.log('Item data:', {
-            product_name: item.product_name,
-            unit_price_raw: item.unit_price,
-            unit_price_cleaned: unitPrice,
-            discount_raw: item.discount_amount,
-            discount_cleaned: discountAmount
-          });
-          
-          return {
-            id: item.id,
-            name: item.product_name,
-            sku: item.product_sku,
-            quantity: item.quantity,
-            price: unitPrice,
-            discount: discountAmount
-          };
-        }) || [],
-        subtotal: Number(String(order.subtotal ?? "0").replace(/[^0-9.-]/g, "")),
-        discount: Number(String(order.discount_amount ?? "0").replace(/[^0-9.-]/g, "")),
-        shipping: Number(String(order.shipping_amount ?? "0").replace(/[^0-9.-]/g, "")),
+        items:
+          order.items?.map((item: any) => {
+            const unitPrice = Number(
+              String(item.unit_price ?? '0').replace(/[^0-9.-]/g, '')
+            );
+            const discountAmount = Number(
+              String(item.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
+            );
+
+            console.log('Item data:', {
+              product_name: item.product_name,
+              unit_price_raw: item.unit_price,
+              unit_price_cleaned: unitPrice,
+              discount_raw: item.discount_amount,
+              discount_cleaned: discountAmount
+            });
+
+            return {
+              id: item.id,
+              name: item.product_name,
+              sku: item.product_sku,
+              quantity: item.quantity,
+              price: unitPrice,
+              discount: discountAmount
+            };
+          }) || [],
+        subtotal: Number(
+          String(order.subtotal ?? '0').replace(/[^0-9.-]/g, '')
+        ),
+        discount: Number(
+          String(order.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
+        ),
+        shipping: Number(
+          String(order.shipping_amount ?? '0').replace(/[^0-9.-]/g, '')
+        ),
         amounts: {
-          total: Number(String(order.total_amount ?? "0").replace(/[^0-9.-]/g, "")),
-          paid: Number(String(order.paid_amount ?? "0").replace(/[^0-9.-]/g, "")),
-          due: Number(String(order.outstanding_amount ?? "0").replace(/[^0-9.-]/g, ""))
+          total: Number(
+            String(order.total_amount ?? '0').replace(/[^0-9.-]/g, '')
+          ),
+          paid: Number(
+            String(order.paid_amount ?? '0').replace(/[^0-9.-]/g, '')
+          ),
+          due: Number(
+            String(order.outstanding_amount ?? '0').replace(/[^0-9.-]/g, '')
+          )
         },
         status: order.payment_status === 'paid' ? 'Paid' : 'Pending',
         salesBy: order.salesman?.name || userName || 'N/A',
@@ -143,10 +184,9 @@ export default function PendingOrdersDashboard() {
         notes: order.notes || '',
         fulfillmentStatus: order.fulfillment_status
       }));
-      
+
       setOrders(transformedOrders);
       setFilteredOrders(transformedOrders);
-
     } catch (error: any) {
       console.error('Failed to load orders:', error);
       alert('Failed to load orders. Please check your connection.');
@@ -161,11 +201,12 @@ export default function PendingOrdersDashboard() {
     let filtered = orders;
 
     if (search.trim()) {
-      filtered = filtered.filter((o) =>
-        o.id.toString().includes(search.trim()) ||
-        o.orderNumber?.toLowerCase().includes(search.toLowerCase()) ||
-        o.customer.name.toLowerCase().includes(search.toLowerCase()) ||
-        o.customer.phone.includes(search.trim())
+      filtered = filtered.filter(
+        (o) =>
+          o.id.toString().includes(search.trim()) ||
+          o.orderNumber?.toLowerCase().includes(search.toLowerCase()) ||
+          o.customer.name.toLowerCase().includes(search.toLowerCase()) ||
+          o.customer.phone.includes(search.trim())
       );
     }
 
@@ -173,7 +214,10 @@ export default function PendingOrdersDashboard() {
       filtered = filtered.filter((o) => {
         const orderDate = o.date;
         let filterDateFormatted = dateFilter;
-        if (dateFilter.includes('-') && dateFilter.split('-')[0].length === 4) {
+        if (
+          dateFilter.includes('-') &&
+          dateFilter.split('-')[0].length === 4
+        ) {
           const [year, month, day] = dateFilter.split('-');
           filterDateFormatted = `${day}/${month}/${year}`;
         }
@@ -189,7 +233,8 @@ export default function PendingOrdersDashboard() {
 
     if (orderTypeFilter !== 'All Types') {
       filtered = filtered.filter((o) => {
-        if (orderTypeFilter === 'Social Commerce') return o.orderType === 'social_commerce';
+        if (orderTypeFilter === 'Social Commerce')
+          return o.orderType === 'social_commerce';
         if (orderTypeFilter === 'E-Commerce') return o.orderType === 'ecommerce';
         return true;
       });
@@ -202,11 +247,11 @@ export default function PendingOrdersDashboard() {
     setIsLoadingDetails(true);
     setShowDetailsModal(true);
     setActiveMenu(null);
-    
+
     try {
       // Fetch full order details with items
       const fullOrder = await orderService.getById(order.id);
-      
+
       // Transform the full order data
       const transformedOrder: Order = {
         id: fullOrder.id,
@@ -220,21 +265,38 @@ export default function PendingOrdersDashboard() {
           email: fullOrder.customer.email || '',
           address: fullOrder.shipping_address || ''
         },
-        items: fullOrder.items?.map((item: any) => ({
-          id: item.id,
-          name: item.product_name,
-          sku: item.product_sku,
-          quantity: item.quantity,
-          price: Number(String(item.unit_price ?? "0").replace(/[^0-9.-]/g, "")),
-          discount: Number(String(item.discount_amount ?? "0").replace(/[^0-9.-]/g, ""))
-        })) || [],
-        subtotal: Number(String(fullOrder.subtotal ?? "0").replace(/[^0-9.-]/g, "")),
-        discount: Number(String(fullOrder.discount_amount ?? "0").replace(/[^0-9.-]/g, "")),
-        shipping: Number(String(fullOrder.shipping_amount ?? "0").replace(/[^0-9.-]/g, "")),
+        items:
+          fullOrder.items?.map((item: any) => ({
+            id: item.id,
+            name: item.product_name,
+            sku: item.product_sku,
+            quantity: item.quantity,
+            price: Number(
+              String(item.unit_price ?? '0').replace(/[^0-9.-]/g, '')
+            ),
+            discount: Number(
+              String(item.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
+            )
+          })) || [],
+        subtotal: Number(
+          String(fullOrder.subtotal ?? '0').replace(/[^0-9.-]/g, '')
+        ),
+        discount: Number(
+          String(fullOrder.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
+        ),
+        shipping: Number(
+          String(fullOrder.shipping_amount ?? '0').replace(/[^0-9.-]/g, '')
+        ),
         amounts: {
-          total: Number(String(fullOrder.total_amount ?? "0").replace(/[^0-9.-]/g, "")),
-          paid: Number(String(fullOrder.paid_amount ?? "0").replace(/[^0-9.-]/g, "")),
-          due: Number(String(fullOrder.outstanding_amount ?? "0").replace(/[^0-9.-]/g, ""))
+          total: Number(
+            String(fullOrder.total_amount ?? '0').replace(/[^0-9.-]/g, '')
+          ),
+          paid: Number(
+            String(fullOrder.paid_amount ?? '0').replace(/[^0-9.-]/g, '')
+          ),
+          due: Number(
+            String(fullOrder.outstanding_amount ?? '0').replace(/[^0-9.-]/g, '')
+          )
         },
         status: fullOrder.payment_status === 'paid' ? 'Paid' : 'Pending',
         salesBy: fullOrder.salesman?.name || userName || 'N/A',
@@ -242,7 +304,7 @@ export default function PendingOrdersDashboard() {
         notes: fullOrder.notes || '',
         fulfillmentStatus: fullOrder.fulfillment_status
       };
-      
+
       setSelectedOrder(transformedOrder);
     } catch (error: any) {
       console.error('Failed to load order details:', error);
@@ -257,11 +319,11 @@ export default function PendingOrdersDashboard() {
     setActiveMenu(null);
     setIsLoadingDetails(true);
     setShowEditModal(true);
-    
+
     try {
       // Fetch full order details with items
       const fullOrder = await orderService.getById(order.id);
-      
+
       // Transform the full order data
       const transformedOrder: Order = {
         id: fullOrder.id,
@@ -275,21 +337,38 @@ export default function PendingOrdersDashboard() {
           email: fullOrder.customer.email || '',
           address: fullOrder.shipping_address || ''
         },
-        items: fullOrder.items?.map((item: any) => ({
-          id: item.id,
-          name: item.product_name,
-          sku: item.product_sku,
-          quantity: item.quantity,
-          price: Number(String(item.unit_price ?? "0").replace(/[^0-9.-]/g, "")),
-          discount: Number(String(item.discount_amount ?? "0").replace(/[^0-9.-]/g, ""))
-        })) || [],
-        subtotal: Number(String(fullOrder.subtotal ?? "0").replace(/[^0-9.-]/g, "")),
-        discount: Number(String(fullOrder.discount_amount ?? "0").replace(/[^0-9.-]/g, "")),
-        shipping: Number(String(fullOrder.shipping_amount ?? "0").replace(/[^0-9.-]/g, "")),
+        items:
+          fullOrder.items?.map((item: any) => ({
+            id: item.id,
+            name: item.product_name,
+            sku: item.product_sku,
+            quantity: item.quantity,
+            price: Number(
+              String(item.unit_price ?? '0').replace(/[^0-9.-]/g, '')
+            ),
+            discount: Number(
+              String(item.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
+            )
+          })) || [],
+        subtotal: Number(
+          String(fullOrder.subtotal ?? '0').replace(/[^0-9.-]/g, '')
+        ),
+        discount: Number(
+          String(fullOrder.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
+        ),
+        shipping: Number(
+          String(fullOrder.shipping_amount ?? '0').replace(/[^0-9.-]/g, '')
+        ),
         amounts: {
-          total: Number(String(fullOrder.total_amount ?? "0").replace(/[^0-9.-]/g, "")),
-          paid: Number(String(fullOrder.paid_amount ?? "0").replace(/[^0-9.-]/g, "")),
-          due: Number(String(fullOrder.outstanding_amount ?? "0").replace(/[^0-9.-]/g, ""))
+          total: Number(
+            String(fullOrder.total_amount ?? '0').replace(/[^0-9.-]/g, '')
+          ),
+          paid: Number(
+            String(fullOrder.paid_amount ?? '0').replace(/[^0-9.-]/g, '')
+          ),
+          due: Number(
+            String(fullOrder.outstanding_amount ?? '0').replace(/[^0-9.-]/g, '')
+          )
         },
         status: fullOrder.payment_status === 'paid' ? 'Paid' : 'Pending',
         salesBy: fullOrder.salesman?.name || userName || 'N/A',
@@ -297,8 +376,9 @@ export default function PendingOrdersDashboard() {
         notes: fullOrder.notes || '',
         fulfillmentStatus: fullOrder.fulfillment_status
       };
-      
-      setSelectedOrder(transformedOrder);
+
+      setSelectedOrder(transformedOrder); // used for header text if needed
+      setEditableOrder(transformedOrder); // used for editing
     } catch (error: any) {
       console.error('Failed to load order details:', error);
       alert('Failed to load order details: ' + error.message);
@@ -308,16 +388,30 @@ export default function PendingOrdersDashboard() {
     }
   };
 
-  const handleReturnOrder = (order: Order) => {
+  const handleReturnOrder = async (order: Order) => {
     setActiveMenu(null);
-    alert(`Return order functionality for ${order.orderNumber} will be implemented.`);
-    // TODO: Implement return order modal
+
+    try {
+      const fullOrder = await orderService.getById(order.id);
+      setSelectedOrderForAction(fullOrder);
+      setShowReturnModal(true);
+    } catch (error: any) {
+      console.error('Failed to load order details for return:', error);
+      alert('Failed to load order details. Please try again.');
+    }
   };
 
-  const handleExchangeOrder = (order: Order) => {
+  const handleExchangeOrder = async (order: Order) => {
     setActiveMenu(null);
-    alert(`Exchange order functionality for ${order.orderNumber} will be implemented.`);
-    // TODO: Implement exchange order modal
+
+    try {
+      const fullOrder = await orderService.getById(order.id);
+      setSelectedOrderForAction(fullOrder);
+      setShowExchangeModal(true);
+    } catch (error: any) {
+      console.error('Failed to load order details for exchange:', error);
+      alert('Failed to load order details. Please try again.');
+    }
   };
 
   const handleCancelOrder = async (orderId: number) => {
@@ -334,6 +428,254 @@ export default function PendingOrdersDashboard() {
     }
   };
 
+  const handleReturnSubmit = async (returnData: {
+    selectedProducts: Array<{
+      order_item_id: number;
+      quantity: number;
+      product_barcode_id?: number;
+    }>;
+    refundMethods: {
+      cash: number;
+      card: number;
+      bkash: number;
+      nagad: number;
+      total: number;
+    };
+    returnReason:
+      | 'defective_product'
+      | 'wrong_item'
+      | 'not_as_described'
+      | 'customer_dissatisfaction'
+      | 'size_issue'
+      | 'color_issue'
+      | 'quality_issue'
+      | 'late_delivery'
+      | 'changed_mind'
+      | 'duplicate_order'
+      | 'other';
+    returnType: 'customer_return' | 'store_return' | 'warehouse_return';
+    customerNotes?: string;
+  }) => {
+    try {
+      if (!selectedOrderForAction) return;
+
+      console.log('🔄 Processing return with data:', returnData);
+
+      const returnRequest: CreateReturnRequest = {
+        order_id: selectedOrderForAction.id,
+        return_reason: returnData.returnReason,
+        return_type: returnData.returnType,
+        items: returnData.selectedProducts.map((item) => ({
+          order_item_id: item.order_item_id,
+          quantity: item.quantity,
+          product_barcode_id: item.product_barcode_id
+        })),
+        customer_notes: returnData.customerNotes || 'Customer initiated return'
+      };
+
+      console.log('📤 Creating return request:', returnRequest);
+      const returnResponse = await productReturnService.create(returnRequest);
+      const returnId = returnResponse.data.id;
+      console.log('✅ Return created with ID:', returnId);
+
+      console.log('⏳ Updating return quality check...');
+      await productReturnService.update(returnId, {
+        quality_check_passed: true,
+        quality_check_notes: 'Auto-approved via POS'
+      });
+
+      console.log('⏳ Approving return...');
+      await productReturnService.approve(returnId, {
+        internal_notes: 'Approved via POS system'
+      });
+
+      console.log('⏳ Processing return (restoring inventory)...');
+      await productReturnService.process(returnId, {
+        restore_inventory: true
+      });
+
+      console.log('⏳ Completing return...');
+      await productReturnService.complete(returnId);
+
+      if (returnData.refundMethods.total > 0) {
+        console.log('💰 Creating refund...');
+        const refundRequest: CreateRefundRequest = {
+          return_id: returnId,
+          refund_type: 'full',
+          refund_method: 'cash',
+          refund_method_details: {
+            cash: returnData.refundMethods.cash,
+            card: returnData.refundMethods.card,
+            bkash: returnData.refundMethods.bkash,
+            nagad: returnData.refundMethods.nagad
+          },
+          internal_notes: 'Refund processed via POS'
+        };
+
+        const refundResponse = await refundService.create(refundRequest);
+        const refundId = refundResponse.data.id;
+
+        console.log('⏳ Processing and completing refund...');
+        await refundService.process(refundId);
+        await refundService.complete(refundId, {
+          transaction_reference: `POS-REFUND-${Date.now()}`
+        });
+        console.log('✅ Refund completed');
+      }
+
+      console.log('🔄 Refreshing order list...');
+      await loadOrders();
+
+      alert('✅ Return processed successfully!');
+      setShowReturnModal(false);
+      setSelectedOrderForAction(null);
+    } catch (error: any) {
+      console.error('❌ Return processing failed:', error);
+      const errorMsg =
+        error.response?.data?.message ||
+        error.message ||
+        'Failed to process return';
+      alert(`Error: ${errorMsg}`);
+    }
+  };
+
+  const handleExchangeSubmit = async (exchangeData: {
+    removedProducts: Array<{
+      order_item_id: number;
+      quantity: number;
+      product_barcode_id?: number;
+    }>;
+    replacementProducts: Array<{
+      product_id: number;
+      batch_id: number;
+      quantity: number;
+      unit_price: number;
+      barcode?: string;
+      barcode_id?: number;
+    }>;
+    paymentRefund: {
+      type: 'payment' | 'refund' | 'none';
+      cash: number;
+      card: number;
+      bkash: number;
+      nagad: number;
+      total: number;
+    };
+  }) => {
+    try {
+      if (!selectedOrderForAction) return;
+
+      console.log('🔄 Processing exchange with data:', exchangeData);
+      console.log('📦 Original order:', selectedOrderForAction.order_number);
+
+      console.log('\n📤 STEP 1: Creating return for old products...');
+      const returnRequest: CreateReturnRequest = {
+        order_id: selectedOrderForAction.id,
+        return_reason: 'other',
+        return_type: 'customer_return',
+        items: exchangeData.removedProducts.map((item) => ({
+          order_item_id: item.order_item_id,
+          quantity: item.quantity,
+          product_barcode_id: item.product_barcode_id
+        })),
+        customer_notes: `Exchange transaction - Original Order: ${selectedOrderForAction.order_number}`
+      };
+
+      const returnResponse = await productReturnService.create(returnRequest);
+      const returnId = returnResponse.data.id;
+      const returnNumber = returnResponse.data.return_number;
+      console.log(`✅ Return created: #${returnNumber} (ID: ${returnId})`);
+
+      console.log('\n⚙️ STEP 2: Auto-approving and processing return...');
+      await productReturnService.update(returnId, {
+        quality_check_passed: true,
+        quality_check_notes: 'Exchange - Auto-approved via POS'
+      });
+      await productReturnService.approve(returnId, {
+        internal_notes: 'Exchange - Auto-approved via POS'
+      });
+      await productReturnService.process(returnId, {
+        restore_inventory: true
+      });
+      await productReturnService.complete(returnId);
+
+      console.log('\n💰 STEP 3: Creating FULL refund for returned items...');
+      const refundRequest: CreateRefundRequest = {
+        return_id: returnId,
+        refund_type: 'full',
+        refund_method: 'cash',
+        internal_notes: `Full refund for exchange - Original Order: ${selectedOrderForAction.order_number}`
+      };
+
+      const refundResponse = await refundService.create(refundRequest);
+      const refundId = refundResponse.data.id;
+      await refundService.process(refundId);
+      await refundService.complete(refundId, {
+        transaction_reference: `EXCHANGE-REFUND-${Date.now()}`
+      });
+
+      console.log('\n🛒 STEP 4: Creating new order for replacement products...');
+      const newOrderTotal = exchangeData.replacementProducts.reduce(
+        (sum, p) => sum + p.unit_price * p.quantity,
+        0
+      );
+
+      const newOrderData = {
+        order_type: selectedOrderForAction.order_type as
+          | 'counter'
+          | 'social_commerce'
+          | 'ecommerce',
+        store_id: selectedOrderForAction.store.id,
+        customer_id: selectedOrderForAction.customer?.id,
+        items: exchangeData.replacementProducts.map((p) => ({
+          product_id: p.product_id,
+          batch_id: p.batch_id,
+          quantity: p.quantity,
+          unit_price: p.unit_price,
+          barcode: p.barcode,
+          barcode_id: p.barcode_id
+        })),
+        payment: {
+          payment_method_id: 1, // Cash
+          amount: newOrderTotal,
+          payment_type: 'full' as const
+        },
+        notes: `Exchange from order #${selectedOrderForAction.order_number} | Return: #${returnNumber}`
+      };
+
+      const newOrder = await orderService.create(newOrderData);
+      await orderService.complete(newOrder.id);
+
+      let successMessage = `✅ Exchange processed successfully!\n\n`;
+      successMessage += `Return: #${returnNumber}\n`;
+      successMessage += `New Order: #${newOrder.order_number}\n\n`;
+
+      if (exchangeData.paymentRefund.type === 'payment') {
+        successMessage += `💳 Customer paid additional: ৳${exchangeData.paymentRefund.total.toLocaleString()}\n`;
+        successMessage += `(New items cost more than returned items)`;
+      } else if (exchangeData.paymentRefund.type === 'refund') {
+        successMessage += `💵 Additional refund to customer: ৳${exchangeData.paymentRefund.total.toLocaleString()}\n`;
+        successMessage += `(Returned items cost more than new items)\n`;
+        successMessage += `Please give customer the refund difference in cash/selected method`;
+      } else {
+        successMessage += `📊 Even exchange - no payment difference`;
+      }
+
+      await loadOrders();
+      alert(successMessage);
+
+      setShowExchangeModal(false);
+      setSelectedOrderForAction(null);
+    } catch (error: any) {
+      console.error('❌ EXCHANGE PROCESSING FAILED:', error);
+      const errorMsg =
+        error.response?.data?.message ||
+        error.message ||
+        'Failed to process exchange';
+      alert(`❌ Exchange failed: ${errorMsg}\n\nPlease check the console for details.`);
+    }
+  };
+
   const getOrderTypeBadge = (orderType: string) => {
     if (orderType === 'social_commerce') {
       return (
@@ -343,7 +685,7 @@ export default function PendingOrdersDashboard() {
         </span>
       );
     }
-    
+
     if (orderType === 'ecommerce') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
@@ -352,23 +694,29 @@ export default function PendingOrdersDashboard() {
         </span>
       );
     }
-    
+
     return null;
   };
 
   const totalRevenue = orders.reduce((sum, order) => sum + order.amounts.total, 0);
-  const paidOrders = orders.filter(o => o.amounts.due === 0).length;
-  const pendingOrders = orders.filter(o => o.amounts.due > 0).length;
-  const socialCommerceCount = orders.filter(o => o.orderType === 'social_commerce').length;
-  const ecommerceCount = orders.filter(o => o.orderType === 'ecommerce').length;
+  const paidOrders = orders.filter((o) => o.amounts.due === 0).length;
+  const pendingOrders = orders.filter((o) => o.amounts.due > 0).length;
+  const socialCommerceCount = orders.filter(
+    (o) => o.orderType === 'social_commerce'
+  ).length;
+  const ecommerceCount = orders.filter((o) => o.orderType === 'ecommerce').length;
 
   return (
     <div className={darkMode ? 'dark' : ''}>
       <div className="flex h-screen bg-white dark:bg-black">
         <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
-        
+
         <div className="flex-1 flex flex-col overflow-hidden">
-          <Header darkMode={darkMode} setDarkMode={setDarkMode} toggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
+          <Header
+            darkMode={darkMode}
+            setDarkMode={setDarkMode}
+            toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+          />
 
           <main className="flex-1 overflow-auto bg-white dark:bg-black">
             {/* Header */}
@@ -380,9 +728,12 @@ export default function PendingOrdersDashboard() {
                       <Package className="w-4 h-4 text-white dark:text-black" />
                     </div>
                     <div>
-                      <h1 className="text-lg font-bold text-black dark:text-white leading-none">Pending Orders</h1>
+                      <h1 className="text-lg font-bold text-black dark:text-white leading-none">
+                        Pending Orders
+                      </h1>
                       <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-none mt-0.5">
-                        {filteredOrders.length} of {orders.length} orders awaiting fulfillment
+                        {filteredOrders.length} of {orders.length} orders awaiting
+                        fulfillment
                       </p>
                     </div>
                   </div>
@@ -395,28 +746,52 @@ export default function PendingOrdersDashboard() {
               <div className="max-w-7xl mx-auto">
                 <div className="grid grid-cols-6 gap-2">
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Total</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{orders.length}</p>
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">
+                      Total
+                    </p>
+                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">
+                      {orders.length}
+                    </p>
                   </div>
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Social</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{socialCommerceCount}</p>
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">
+                      Social
+                    </p>
+                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">
+                      {socialCommerceCount}
+                    </p>
                   </div>
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">E-Com</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{ecommerceCount}</p>
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">
+                      E-Com
+                    </p>
+                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">
+                      {ecommerceCount}
+                    </p>
                   </div>
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Paid</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{paidOrders}</p>
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">
+                      Paid
+                    </p>
+                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">
+                      {paidOrders}
+                    </p>
                   </div>
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Due</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{pendingOrders}</p>
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">
+                      Due
+                    </p>
+                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">
+                      {pendingOrders}
+                    </p>
                   </div>
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Revenue</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">৳{(totalRevenue / 1000).toFixed(0)}k</p>
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">
+                      Revenue
+                    </p>
+                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">
+                      ৳{(totalRevenue / 1000).toFixed(0)}k
+                    </p>
                   </div>
                 </div>
               </div>
@@ -435,14 +810,14 @@ export default function PendingOrdersDashboard() {
                     className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
                   />
                 </div>
-                
+
                 <input
                   type="date"
                   value={dateFilter}
                   onChange={(e) => setDateFilter(e.target.value)}
                   className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
                 />
-                
+
                 <select
                   value={orderTypeFilter}
                   onChange={(e) => setOrderTypeFilter(e.target.value)}
@@ -452,7 +827,7 @@ export default function PendingOrdersDashboard() {
                   <option>Social Commerce</option>
                   <option>E-Commerce</option>
                 </select>
-                
+
                 <select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
@@ -474,32 +849,55 @@ export default function PendingOrdersDashboard() {
               {isLoading ? (
                 <div className="bg-white dark:bg-gray-900 rounded-xl p-12 text-center border border-gray-200 dark:border-gray-800">
                   <Loader className="animate-spin h-12 w-12 text-black dark:text-white mx-auto" />
-                  <p className="text-gray-500 dark:text-gray-400 font-medium mt-4">Loading orders...</p>
+                  <p className="text-gray-500 dark:text-gray-400 font-medium mt-4">
+                    Loading orders...
+                  </p>
                 </div>
               ) : filteredOrders.length === 0 ? (
                 <div className="bg-white dark:bg-gray-900 rounded-xl p-12 text-center border border-gray-200 dark:border-gray-800">
                   <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500 dark:text-gray-400 font-medium">No pending orders found</p>
+                  <p className="text-gray-500 dark:text-gray-400 font-medium">
+                    No pending orders found
+                  </p>
                 </div>
               ) : (
                 <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
                   <table className="w-full">
                     <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Order No</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Type</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Customer</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Date</th>
-                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Status</th>
-                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Amount</th>
-                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Actions</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                          Order No
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                          Type
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                          Customer
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                          Date
+                        </th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                          Status
+                        </th>
+                        <th className="px-4 py-3 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                          Amount
+                        </th>
+                        <th className="px-4 py-3 text-center text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                       {filteredOrders.map((order) => (
-                        <tr key={order.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                        <tr
+                          key={order.id}
+                          className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
+                        >
                           <td className="px-4 py-3">
-                            <p className="text-sm font-semibold text-black dark:text-white">{order.orderNumber}</p>
+                            <p className="text-sm font-semibold text-black dark:text-white">
+                              {order.orderNumber}
+                            </p>
                           </td>
                           <td className="px-4 py-3">
                             {getOrderTypeBadge(order.orderType)}
@@ -508,31 +906,45 @@ export default function PendingOrdersDashboard() {
                             <div className="flex items-center gap-2">
                               <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
                                 <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                                  {order.customer.name.charAt(0).toUpperCase()}
+                                  {order.customer.name
+                                    .charAt(0)
+                                    .toUpperCase()}
                                 </span>
                               </div>
                               <div>
-                                <p className="text-sm font-medium text-black dark:text-white">{order.customer.name}</p>
-                                <p className="text-xs text-gray-500 dark:text-gray-500">{order.customer.phone}</p>
+                                <p className="text-sm font-medium text-black dark:text-white">
+                                  {order.customer.name}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-500">
+                                  {order.customer.phone}
+                                </p>
                               </div>
                             </div>
                           </td>
                           <td className="px-4 py-3">
-                            <p className="text-sm text-gray-700 dark:text-gray-300">{order.date}</p>
+                            <p className="text-sm text-gray-700 dark:text-gray-300">
+                              {order.date}
+                            </p>
                           </td>
                           <td className="px-4 py-3">
-                            <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                              order.status === 'Paid'
-                                ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                                : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
-                            }`}>
+                            <span
+                              className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
+                                order.status === 'Paid'
+                                  ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                                  : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+                              }`}
+                            >
                               {order.status}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-right">
-                            <p className="text-sm font-bold text-black dark:text-white">৳{order.amounts.total.toFixed(2)}</p>
+                            <p className="text-sm font-bold text-black dark:text-white">
+                              ৳{order.amounts.total.toFixed(2)}
+                            </p>
                             {order.amounts.due > 0 && (
-                              <p className="text-xs text-red-600 dark:text-red-400">Due: ৳{order.amounts.due.toFixed(2)}</p>
+                              <p className="text-xs text-red-600 dark:text-red-400">
+                                Due: ৳{order.amounts.due.toFixed(2)}
+                              </p>
                             )}
                           </td>
                           <td className="px-4 py-3">
@@ -544,31 +956,30 @@ export default function PendingOrdersDashboard() {
                               >
                                 <Eye className="h-4 w-4 text-gray-700 dark:text-gray-300" />
                               </button>
-                              
+
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   const rect = e.currentTarget.getBoundingClientRect();
-                                  const menuHeight = 280; // Approximate height of menu
+                                  const menuHeight = 280; // approximate
                                   const spaceBelow = window.innerHeight - rect.bottom;
                                   const spaceRight = window.innerWidth - rect.right;
-                                  
-                                  // Position menu
+
                                   let top = rect.bottom + 4;
                                   let left = rect.right - 224; // 224px = w-56
-                                  
-                                  // Adjust if not enough space below
+
                                   if (spaceBelow < menuHeight) {
                                     top = rect.top - menuHeight - 4;
                                   }
-                                  
-                                  // Adjust if not enough space on right
+
                                   if (spaceRight < 224) {
                                     left = rect.left - 224 + rect.width;
                                   }
-                                  
+
                                   setMenuPosition({ top, left });
-                                  setActiveMenu(activeMenu === order.id ? null : order.id);
+                                  setActiveMenu(
+                                    activeMenu === order.id ? null : order.id
+                                  );
                                 }}
                                 className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
                                 title="More Actions"
@@ -590,14 +1001,14 @@ export default function PendingOrdersDashboard() {
 
       {/* Fixed Position Dropdown Menu */}
       {activeMenu !== null && menuPosition && (
-        <div 
+        <div
           className="fixed bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-2xl w-56 z-[60]"
           style={{ top: `${menuPosition.top}px`, left: `${menuPosition.left}px` }}
         >
           <button
             onClick={(e) => {
               e.stopPropagation();
-              const order = filteredOrders.find(o => o.id === activeMenu);
+              const order = filteredOrders.find((o) => o.id === activeMenu);
               if (order) handleViewDetails(order);
             }}
             className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 rounded-t-lg border-b border-gray-100 dark:border-gray-700"
@@ -608,7 +1019,7 @@ export default function PendingOrdersDashboard() {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              const order = filteredOrders.find(o => o.id === activeMenu);
+              const order = filteredOrders.find((o) => o.id === activeMenu);
               if (order) handleEditOrder(order);
             }}
             className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700"
@@ -619,7 +1030,7 @@ export default function PendingOrdersDashboard() {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              const order = filteredOrders.find(o => o.id === activeMenu);
+              const order = filteredOrders.find((o) => o.id === activeMenu);
               if (order) handleReturnOrder(order);
             }}
             className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700"
@@ -630,7 +1041,7 @@ export default function PendingOrdersDashboard() {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              const order = filteredOrders.find(o => o.id === activeMenu);
+              const order = filteredOrders.find((o) => o.id === activeMenu);
               if (order) handleExchangeOrder(order);
             }}
             className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b-2 border-gray-300 dark:border-gray-600"
@@ -641,7 +1052,7 @@ export default function PendingOrdersDashboard() {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              const order = filteredOrders.find(o => o.id === activeMenu);
+              const order = filteredOrders.find((o) => o.id === activeMenu);
               if (order) handleCancelOrder(order.id);
             }}
             className="w-full px-4 py-3 text-left text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-3 rounded-b-lg"
@@ -655,11 +1066,13 @@ export default function PendingOrdersDashboard() {
       {/* Order Details Modal */}
       {showDetailsModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-auto border border-gray-200 dark:border-gray-800">
+          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-4xl w-full max-height-[90vh] max-h-[90vh] overflow-auto border border-gray-200 dark:border-gray-800">
             {/* Modal Header */}
             <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between z-10">
               <div>
-                <h2 className="text-xl font-bold text-black dark:text-white">Order Details</h2>
+                <h2 className="text-xl font-bold text-black dark:text-white">
+                  Order Details
+                </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   {selectedOrder?.orderNumber || 'Loading...'}
                 </p>
@@ -679,161 +1092,249 @@ export default function PendingOrdersDashboard() {
             {isLoadingDetails ? (
               <div className="p-12 text-center">
                 <Loader className="animate-spin h-12 w-12 text-black dark:text-white mx-auto mb-4" />
-                <p className="text-gray-500 dark:text-gray-400">Loading order details...</p>
+                <p className="text-gray-500 dark:text-gray-400">
+                  Loading order details...
+                </p>
               </div>
             ) : selectedOrder ? (
               <div className="p-6 space-y-6">
-              {/* Order Info */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Order Type</p>
-                  {getOrderTypeBadge(selectedOrder.orderType)}
+                {/* Order Info */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">
+                      Order Type
+                    </p>
+                    {getOrderTypeBadge(selectedOrder.orderType)}
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">
+                      Status
+                    </p>
+                    <span
+                      className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
+                        selectedOrder.status === 'Paid'
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                          : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+                      }`}
+                    >
+                      {selectedOrder.status}
+                    </span>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">
+                      Date
+                    </p>
+                    <p className="text-sm font-medium text-black dark:text-white">
+                      {selectedOrder.date}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">
+                      Store
+                    </p>
+                    <p className="text-sm font-medium text-black dark:text-white">
+                      {selectedOrder.store}
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Status</p>
-                  <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                    selectedOrder.status === 'Paid'
-                      ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                      : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
-                  }`}>
-                    {selectedOrder.status}
-                  </span>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Date</p>
-                  <p className="text-sm font-medium text-black dark:text-white">{selectedOrder.date}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Store</p>
-                  <p className="text-sm font-medium text-black dark:text-white">{selectedOrder.store}</p>
-                </div>
-              </div>
 
-              {/* Customer Info */}
-              <div>
-                <h3 className="text-sm font-bold text-black dark:text-white mb-3">Customer Information</h3>
-                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-gray-500 dark:text-gray-500">Name</p>
-                    <p className="text-sm font-medium text-black dark:text-white">{selectedOrder.customer.name}</p>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-gray-500 dark:text-gray-500">Phone</p>
-                    <p className="text-sm font-medium text-black dark:text-white">{selectedOrder.customer.phone}</p>
-                  </div>
-                  {selectedOrder.customer.email && (
+                {/* Customer Info */}
+                <div>
+                  <h3 className="text-sm font-bold text-black dark:text-white mb-3">
+                    Customer Information
+                  </h3>
+                  <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-2">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs text-gray-500 dark:text-gray-500">Email</p>
-                      <p className="text-sm font-medium text-black dark:text-white">{selectedOrder.customer.email}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-500">
+                        Name
+                      </p>
+                      <p className="text-sm font-medium text-black dark:text-white">
+                        {selectedOrder.customer.name}
+                      </p>
                     </div>
-                  )}
-                  {selectedOrder.customer.address && (
-                    <div>
-                      <p className="text-xs text-gray-500 dark:text-gray-500 mb-1">Address</p>
-                      <p className="text-sm text-black dark:text-white">{selectedOrder.customer.address}</p>
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-gray-500 dark:text-gray-500">
+                        Phone
+                      </p>
+                      <p className="text-sm font-medium text-black dark:text-white">
+                        {selectedOrder.customer.phone}
+                      </p>
+                    </div>
+                    {selectedOrder.customer.email && (
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs text-gray-500 dark:text-gray-500">
+                          Email
+                        </p>
+                        <p className="text-sm font-medium text-black dark:text-white">
+                          {selectedOrder.customer.email}
+                        </p>
+                      </div>
+                    )}
+                    {selectedOrder.customer.address && (
+                      <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-500 mb-1">
+                          Address
+                        </p>
+                        <p className="text-sm text-black dark:text-white">
+                          {selectedOrder.customer.address}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Order Items */}
+                <div>
+                  <h3 className="text-sm font-bold text-black dark:text-white mb-3">
+                    Order Items
+                  </h3>
+                  {selectedOrder.items && selectedOrder.items.length > 0 ? (
+                    <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
+                      <table className="w-full">
+                        <thead className="bg-gray-50 dark:bg-gray-800">
+                          <tr>
+                            <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">
+                              Product
+                            </th>
+                            <th className="px-4 py-2 text-center text-xs font-semibold text-gray-700 dark:text-gray-300">
+                              Qty
+                            </th>
+                            <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 dark:text-gray-300">
+                              Price
+                            </th>
+                            <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 dark:text-gray-300">
+                              Total
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                          {selectedOrder.items.map((item) => (
+                            <tr
+                              key={item.id}
+                              className="hover:bg-gray-50 dark:hover:bg-gray-800/50"
+                            >
+                              <td className="px-4 py-3">
+                                <p className="text-sm font-medium text-black dark:text-white">
+                                  {item.name}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-500">
+                                  SKU: {item.sku}
+                                </p>
+                              </td>
+                              <td className="px-4 py-3 text-center">
+                                <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 text-sm font-medium text-black dark:text-white">
+                                  {item.quantity}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <p className="text-sm text-black dark:text-white">
+                                  ৳{item.price.toFixed(2)}
+                                </p>
+                                {item.discount > 0 && (
+                                  <p className="text-xs text-red-500">
+                                    -৳{item.discount.toFixed(2)}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <p className="text-sm font-medium text-black dark:text-white">
+                                  ৳{(
+                                    (item.price - item.discount) *
+                                    item.quantity
+                                  ).toFixed(2)}
+                                </p>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-8 text-center">
+                      <Package className="h-12 w-12 text-gray-400 mx-auto mb-3" />
+                      <p className="text-sm text-gray-500 dark:text-gray-500">
+                        No items in this order
+                      </p>
                     </div>
                   )}
                 </div>
-              </div>
 
-              {/* Order Items */}
-              <div>
-                <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Items</h3>
-                {selectedOrder.items && selectedOrder.items.length > 0 ? (
-                  <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
-                    <table className="w-full">
-                      <thead className="bg-gray-50 dark:bg-gray-800">
-                        <tr>
-                          <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">Product</th>
-                          <th className="px-4 py-2 text-center text-xs font-semibold text-gray-700 dark:text-gray-300">Qty</th>
-                          <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 dark:text-gray-300">Price</th>
-                          <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 dark:text-gray-300">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                        {selectedOrder.items.map((item) => (
-                          <tr key={item.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                            <td className="px-4 py-3">
-                              <p className="text-sm font-medium text-black dark:text-white">{item.name}</p>
-                              <p className="text-xs text-gray-500 dark:text-gray-500">SKU: {item.sku}</p>
-                            </td>
-                            <td className="px-4 py-3 text-center">
-                              <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 text-sm font-medium text-black dark:text-white">
-                                {item.quantity}
-                              </span>
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <p className="text-sm text-black dark:text-white">৳{item.price.toFixed(2)}</p>
-                              {item.discount > 0 && (
-                                <p className="text-xs text-red-500">-৳{item.discount.toFixed(2)}</p>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 text-right">
-                              <p className="text-sm font-medium text-black dark:text-white">
-                                ৳{((item.price - item.discount) * item.quantity).toFixed(2)}
-                              </p>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                {/* Order Summary */}
+                <div>
+                  <h3 className="text-sm font-bold text-black dark:text-white mb-3">
+                    Order Summary
+                  </h3>
+                  <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-gray-700 dark:text-gray-300">
+                        Subtotal
+                      </p>
+                      <p className="text-sm font-medium text-black dark:text-white">
+                        ৳{selectedOrder.subtotal.toFixed(2)}
+                      </p>
+                    </div>
+                    {selectedOrder.discount > 0 && (
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-gray-700 dark:text-gray-300">
+                          Discount
+                        </p>
+                        <p className="text-sm font-medium text-red-600 dark:text-red-400">
+                          -৳{selectedOrder.discount.toFixed(2)}
+                        </p>
+                      </div>
+                    )}
+                    {selectedOrder.shipping > 0 && (
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-gray-700 dark:text-gray-300">
+                          Shipping
+                        </p>
+                        <p className="text-sm font-medium text-black dark:text-white">
+                          ৳{selectedOrder.shipping.toFixed(2)}
+                        </p>
+                      </div>
+                    )}
+                    <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex items-center justify-between">
+                      <p className="text-sm font-bold text-black dark:text-white">
+                        Total
+                      </p>
+                      <p className="text-lg font-bold text-black dark:text-white">
+                        ৳{selectedOrder.amounts.total.toFixed(2)}
+                      </p>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm text-gray-700 dark:text-gray-300">
+                        Paid
+                      </p>
+                      <p className="text-sm font-medium text-green-600 dark:text-green-400">
+                        ৳{selectedOrder.amounts.paid.toFixed(2)}
+                      </p>
+                    </div>
+                    {selectedOrder.amounts.due > 0 && (
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-bold text-gray-700 dark:text-gray-300">
+                          Due
+                        </p>
+                        <p className="text-sm font-bold text-red-600 dark:text-red-400">
+                          ৳{selectedOrder.amounts.due.toFixed(2)}
+                        </p>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-8 text-center">
-                    <Package className="h-12 w-12 text-gray-400 mx-auto mb-3" />
-                    <p className="text-sm text-gray-500 dark:text-gray-500">No items in this order</p>
+                </div>
+
+                {/* Notes */}
+                {selectedOrder.notes && (
+                  <div>
+                    <h3 className="text-sm font-bold text-black dark:text-white mb-2">
+                      Notes
+                    </h3>
+                    <p className="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
+                      {selectedOrder.notes}
+                    </p>
                   </div>
                 )}
               </div>
-
-              {/* Order Summary */}
-              <div>
-                <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Summary</h3>
-                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-gray-700 dark:text-gray-300">Subtotal</p>
-                    <p className="text-sm font-medium text-black dark:text-white">৳{selectedOrder.subtotal.toFixed(2)}</p>
-                  </div>
-                  {selectedOrder.discount > 0 && (
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm text-gray-700 dark:text-gray-300">Discount</p>
-                      <p className="text-sm font-medium text-red-600 dark:text-red-400">-৳{selectedOrder.discount.toFixed(2)}</p>
-                    </div>
-                  )}
-                  {selectedOrder.shipping > 0 && (
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm text-gray-700 dark:text-gray-300">Shipping</p>
-                      <p className="text-sm font-medium text-black dark:text-white">৳{selectedOrder.shipping.toFixed(2)}</p>
-                    </div>
-                  )}
-                  <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex items-center justify-between">
-                    <p className="text-sm font-bold text-black dark:text-white">Total</p>
-                    <p className="text-lg font-bold text-black dark:text-white">৳{selectedOrder.amounts.total.toFixed(2)}</p>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-gray-700 dark:text-gray-300">Paid</p>
-                    <p className="text-sm font-medium text-green-600 dark:text-green-400">৳{selectedOrder.amounts.paid.toFixed(2)}</p>
-                  </div>
-                  {selectedOrder.amounts.due > 0 && (
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-bold text-gray-700 dark:text-gray-300">Due</p>
-                      <p className="text-sm font-bold text-red-600 dark:text-red-400">৳{selectedOrder.amounts.due.toFixed(2)}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Notes */}
-              {selectedOrder.notes && (
-                <div>
-                  <h3 className="text-sm font-bold text-black dark:text-white mb-2">Notes</h3>
-                  <p className="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 rounded-lg p-3">
-                    {selectedOrder.notes}
-                  </p>
-                </div>
-              )}
-            </div>
-          ) : null}
+            ) : null}
           </div>
         </div>
       )}
@@ -845,15 +1346,18 @@ export default function PendingOrdersDashboard() {
             {/* Modal Header */}
             <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between z-10">
               <div>
-                <h2 className="text-xl font-bold text-black dark:text-white">Edit Order</h2>
+                <h2 className="text-xl font-bold text-black dark:text-white">
+                  Edit Order
+                </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {selectedOrder?.orderNumber || 'Loading...'}
+                  {editableOrder?.orderNumber || 'Loading...'}
                 </p>
               </div>
               <button
                 onClick={() => {
                   setShowEditModal(false);
                   setSelectedOrder(null);
+                  setEditableOrder(null);
                 }}
                 className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
               >
@@ -865,43 +1369,107 @@ export default function PendingOrdersDashboard() {
             {isLoadingDetails ? (
               <div className="p-12 text-center">
                 <Loader className="animate-spin h-12 w-12 text-black dark:text-white mx-auto mb-4" />
-                <p className="text-gray-500 dark:text-gray-400">Loading order details...</p>
+                <p className="text-gray-500 dark:text-gray-400">
+                  Loading order details...
+                </p>
               </div>
-            ) : selectedOrder ? (
+            ) : editableOrder ? (
               <div className="p-6 space-y-6">
                 {/* Customer Information */}
                 <div>
-                  <h3 className="text-sm font-bold text-black dark:text-white mb-3">Customer Information</h3>
+                  <h3 className="text-sm font-bold text-black dark:text-white mb-3">
+                    Customer Information
+                  </h3>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Name</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Name
+                      </label>
                       <input
                         type="text"
-                        defaultValue={selectedOrder.customer.name}
+                        value={editableOrder.customer.name}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  customer: {
+                                    ...prev.customer,
+                                    name: e.target.value
+                                  }
+                                }
+                              : prev
+                          )
+                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Phone</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Phone
+                      </label>
                       <input
                         type="text"
-                        defaultValue={selectedOrder.customer.phone}
+                        value={editableOrder.customer.phone}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  customer: {
+                                    ...prev.customer,
+                                    phone: e.target.value
+                                  }
+                                }
+                              : prev
+                          )
+                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
                     <div className="col-span-2">
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Email</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Email
+                      </label>
                       <input
                         type="email"
-                        defaultValue={selectedOrder.customer.email}
+                        value={editableOrder.customer.email}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  customer: {
+                                    ...prev.customer,
+                                    email: e.target.value
+                                  }
+                                }
+                              : prev
+                          )
+                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
                     <div className="col-span-2">
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Address</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Address
+                      </label>
                       <textarea
                         rows={2}
-                        defaultValue={selectedOrder.customer.address}
+                        value={editableOrder.customer.address}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  customer: {
+                                    ...prev.customer,
+                                    address: e.target.value
+                                  }
+                                }
+                              : prev
+                          )
+                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -910,68 +1478,224 @@ export default function PendingOrdersDashboard() {
 
                 {/* Order Items */}
                 <div>
-                  <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Items</h3>
-                  {selectedOrder.items && selectedOrder.items.length > 0 ? (
+                  <h3 className="text-sm font-bold text-black dark:text-white mb-3">
+                    Order Items
+                  </h3>
+                  {editableOrder.items && editableOrder.items.length > 0 ? (
                     <div className="space-y-3">
-                      {selectedOrder.items.map((item, index) => (
-                        <div key={item.id} className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
+                      {editableOrder.items.map((item, index) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+                        >
                           <div className="flex-1">
-                            <p className="text-sm font-medium text-black dark:text-white">{item.name}</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-500">SKU: {item.sku}</p>
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                              Product Name
+                            </label>
+                            <input
+                              type="text"
+                              value={item.name}
+                              onChange={(e) =>
+                                setEditableOrder((prev) => {
+                                  if (!prev) return prev;
+                                  const items = [...prev.items];
+                                  items[index] = {
+                                    ...items[index],
+                                    name: e.target.value
+                                  };
+                                  return { ...prev, items };
+                                })
+                              }
+                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-black dark:text-white text-sm"
+                            />
+                            <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                              SKU: {item.sku}
+                            </p>
                           </div>
                           <div className="w-24">
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Qty</label>
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                              Qty
+                            </label>
                             <input
                               type="number"
-                              defaultValue={item.quantity}
-                              min="1"
+                              min={1}
+                              value={item.quantity}
+                              onChange={(e) =>
+                                setEditableOrder((prev) => {
+                                  if (!prev) return prev;
+                                  const qty = Math.max(
+                                    1,
+                                    Number(e.target.value) || 1
+                                  );
+                                  const items = [...prev.items];
+                                  items[index] = {
+                                    ...items[index],
+                                    quantity: qty
+                                  };
+                                  return { ...prev, items };
+                                })
+                              }
                               className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-black dark:text-white text-sm"
                             />
                           </div>
                           <div className="w-32">
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Price</label>
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                              Price
+                            </label>
                             <input
                               type="number"
-                              defaultValue={item.price}
                               step="0.01"
+                              value={item.price}
+                              onChange={(e) =>
+                                setEditableOrder((prev) => {
+                                  if (!prev) return prev;
+                                  const price = Number(e.target.value) || 0;
+                                  const items = [...prev.items];
+                                  items[index] = {
+                                    ...items[index],
+                                    price
+                                  };
+                                  return { ...prev, items };
+                                })
+                              }
                               className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-black dark:text-white text-sm"
                             />
                           </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditableOrder((prev) => {
+                                if (!prev) return prev;
+                                const items = prev.items.filter(
+                                  (_, i) => i !== index
+                                );
+                                return { ...prev, items };
+                              })
+                            }
+                            className="px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 border border-red-200 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
+                          >
+                            Remove
+                          </button>
                         </div>
                       ))}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditableOrder((prev) => {
+                            if (!prev) return prev;
+                            const newItem = {
+                              id: Date.now(),
+                              name: '',
+                              sku: '',
+                              quantity: 1,
+                              price: 0,
+                              discount: 0
+                            };
+                            return {
+                              ...prev,
+                              items: [...prev.items, newItem]
+                            };
+                          })
+                        }
+                        className="mt-2 inline-flex items-center px-3 py-2 text-xs font-medium rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                      >
+                        + Add Item
+                      </button>
                     </div>
                   ) : (
-                    <p className="text-sm text-gray-500">No items in this order</p>
+                    <div>
+                      <p className="text-sm text-gray-500 mb-2">
+                        No items in this order.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setEditableOrder((prev) => {
+                            if (!prev) return prev;
+                            const newItem = {
+                              id: Date.now(),
+                              name: '',
+                              sku: '',
+                              quantity: 1,
+                              price: 0,
+                              discount: 0
+                            };
+                            return { ...prev, items: [newItem] };
+                          })
+                        }
+                        className="inline-flex items-center px-3 py-2 text-xs font-medium rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                      >
+                        + Add First Item
+                      </button>
+                    </div>
                   )}
                 </div>
 
                 {/* Order Details */}
                 <div>
-                  <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Details</h3>
+                  <h3 className="text-sm font-bold text-black dark:text-white mb-3">
+                    Order Details
+                  </h3>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Discount (৳)</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Discount (৳)
+                      </label>
                       <input
                         type="number"
-                        defaultValue={selectedOrder.discount}
                         step="0.01"
+                        value={editableOrder.discount}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  discount: Number(e.target.value) || 0
+                                }
+                              : prev
+                          )
+                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Shipping (৳)</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Shipping (৳)
+                      </label>
                       <input
                         type="number"
-                        defaultValue={selectedOrder.shipping}
                         step="0.01"
+                        value={editableOrder.shipping}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  shipping: Number(e.target.value) || 0
+                                }
+                              : prev
+                          )
+                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
                     <div className="col-span-2">
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Notes</label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                        Notes
+                      </label>
                       <textarea
                         rows={3}
-                        defaultValue={selectedOrder.notes}
+                        value={editableOrder.notes}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  notes: e.target.value
+                                }
+                              : prev
+                          )
+                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -984,6 +1708,7 @@ export default function PendingOrdersDashboard() {
                     onClick={() => {
                       setShowEditModal(false);
                       setSelectedOrder(null);
+                      setEditableOrder(null);
                     }}
                     className="px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-black dark:text-white rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-medium"
                   >
@@ -991,8 +1716,11 @@ export default function PendingOrdersDashboard() {
                   </button>
                   <button
                     onClick={() => {
-                      alert('Save functionality will be implemented with API integration');
-                      // TODO: Implement save order changes
+                      console.log('Edited order to save:', editableOrder);
+                      alert(
+                        'Save functionality will be implemented with API integration.\nCheck console log for edited payload.'
+                      );
+                      // TODO: orderService.update(editableOrder.id, payloadBuiltFromEditableOrder)
                     }}
                     className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
                   >
@@ -1007,7 +1735,33 @@ export default function PendingOrdersDashboard() {
 
       {/* Click outside to close menu */}
       {activeMenu !== null && (
-        <div className="fixed inset-0 z-[55]" onClick={() => setActiveMenu(null)} />
+        <div
+          className="fixed inset-0 z-[55]"
+          onClick={() => setActiveMenu(null)}
+        />
+      )}
+
+      {/* Return / Exchange Modals */}
+      {showReturnModal && selectedOrderForAction && (
+        <ReturnProductModal
+          order={selectedOrderForAction}
+          onClose={() => {
+            setShowReturnModal(false);
+            setSelectedOrderForAction(null);
+          }}
+          onReturn={handleReturnSubmit}
+        />
+      )}
+
+      {showExchangeModal && selectedOrderForAction && (
+        <ExchangeProductModal
+          order={selectedOrderForAction}
+          onClose={() => {
+            setShowExchangeModal(false);
+            setSelectedOrderForAction(null);
+          }}
+          onExchange={handleExchangeSubmit}
+        />
       )}
 
       {/* Custom Scrollbar Styles */}

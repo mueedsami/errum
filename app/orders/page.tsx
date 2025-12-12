@@ -77,7 +77,7 @@ export default function PendingOrdersDashboard() {
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [userName, setUserName] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
+  const [isSavingOrder, setIsSavingOrder] = useState(false);
 
   // 🔁 Return / Exchange modal state
   const [showReturnExchangeModal, setShowReturnExchangeModal] = useState(false);
@@ -94,11 +94,16 @@ export default function PendingOrdersDashboard() {
   const [pickerBatches, setPickerBatches] = useState<any[]>([]);
   const [pickerStoreId, setPickerStoreId] = useState<number | null>(null);
 
-  // Helper: transform backend order into frontend Order type
-  const transformOrder = (order: any): Order => {
-    const num = (val: any) =>
-      Number(String(val ?? '0').replace(/[^0-9.-]/g, ''));
+  useEffect(() => {
+    const name = localStorage.getItem('userName') || '';
+    setUserName(name);
+    loadOrders();
+  }, []);
 
+  const parseMoney = (val: any) =>
+    Number(String(val ?? '0').replace(/[^0-9.-]/g, ''));
+
+  const transformOrder = (order: any): Order => {
     return {
       id: order.id,
       orderNumber: order.order_number,
@@ -106,28 +111,44 @@ export default function PendingOrdersDashboard() {
       orderTypeLabel: order.order_type_label,
       date: new Date(order.order_date).toLocaleDateString('en-GB'),
       customer: {
-        name: order.customer?.name || '',
-        phone: order.customer?.phone || '',
-        email: order.customer?.email || '',
-        // NOTE: backend shipping_address might be string or JSON; keeping as-is
-        address: order.shipping_address || ''
+        // Prefer snapshot fields if present, fallback to relation
+        name: order.customer_name ?? order.customer?.name ?? '',
+        phone: order.customer_phone ?? order.customer?.phone ?? '',
+        email: order.customer_email ?? order.customer?.email ?? '',
+        address:
+          order.customer_address ??
+          order.shipping_address ??
+          ''
       },
       items:
-        order.items?.map((item: any) => ({
-          id: item.id,
-          name: item.product_name,
-          sku: item.product_sku,
-          quantity: item.quantity,
-          price: num(item.unit_price),
-          discount: num(item.discount_amount)
-        })) || [],
-      subtotal: num(order.subtotal),
-      discount: num(order.discount_amount),
-      shipping: num(order.shipping_amount),
+        order.items?.map((item: any) => {
+          const unitPrice = parseMoney(item.unit_price);
+          const discountAmount = parseMoney(item.discount_amount);
+
+          console.log('Item data:', {
+            product_name: item.product_name,
+            unit_price_raw: item.unit_price,
+            unit_price_cleaned: unitPrice,
+            discount_raw: item.discount_amount,
+            discount_cleaned: discountAmount
+          });
+
+          return {
+            id: item.id,
+            name: item.product_name,
+            sku: item.product_sku,
+            quantity: item.quantity,
+            price: unitPrice,
+            discount: discountAmount
+          };
+        }) || [],
+      subtotal: parseMoney(order.subtotal),
+      discount: parseMoney(order.discount_amount),
+      shipping: parseMoney(order.shipping_amount),
       amounts: {
-        total: num(order.total_amount),
-        paid: num(order.paid_amount),
-        due: num(order.outstanding_amount)
+        total: parseMoney(order.total_amount),
+        paid: parseMoney(order.paid_amount),
+        due: parseMoney(order.outstanding_amount)
       },
       status: order.payment_status === 'paid' ? 'Paid' : 'Pending',
       salesBy: order.salesman?.name || userName || 'N/A',
@@ -138,12 +159,27 @@ export default function PendingOrdersDashboard() {
     };
   };
 
-  useEffect(() => {
-    const name = localStorage.getItem('userName') || '';
-    setUserName(name);
-    loadOrders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const recalcOrderTotals = (order: Order): Order => {
+    const subtotal = order.items.reduce(
+      (sum, item) => sum + (item.price - item.discount) * item.quantity,
+      0
+    );
+    const discount = order.discount ?? 0;
+    const shipping = order.shipping ?? 0;
+    const total = subtotal - discount + shipping;
+    const paid = order.amounts.paid ?? 0;
+    const due = total - paid;
+
+    return {
+      ...order,
+      subtotal,
+      amounts: {
+        ...order.amounts,
+        total,
+        due
+      }
+    };
+  };
 
   const loadOrders = async () => {
     setIsLoading(true);
@@ -178,8 +214,7 @@ export default function PendingOrdersDashboard() {
           new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
 
-      // Transform the orders
-      const transformedOrders: Order[] = allOrders.map((order: any) =>
+      const transformedOrders = allOrders.map((order: any) =>
         transformOrder(order)
       );
 
@@ -271,7 +306,6 @@ export default function PendingOrdersDashboard() {
 
       setSelectedOrder(transformedOrder);
       setEditableOrder(transformedOrder);
-
       if (fullOrder.store?.id) {
         setPickerStoreId(fullOrder.store.id);
       }
@@ -285,47 +319,17 @@ export default function PendingOrdersDashboard() {
     }
   };
 
-  // 🔁 Save order via new OrderController@update (no items, only meta fields)
-  const handleSaveOrder = async () => {
-    if (!editableOrder) return;
-
-    setIsSaving(true);
+  const reloadEditableOrder = async (orderId: number) => {
     try {
-      const payload = {
-        customer_name: editableOrder.customer.name,
-        customer_phone: editableOrder.customer.phone,
-        customer_email: editableOrder.customer.email,
-        customer_address: editableOrder.customer.address,
-        discount_amount: editableOrder.discount ?? 0,
-        shipping_amount: editableOrder.shipping ?? 0,
-        notes: editableOrder.notes ?? ''
-        // NOTE: Not sending shipping_address or items here,
-        // as per backend API contract.
-      };
-
-      const res = await axios.patch(`/orders/${editableOrder.id}`, payload);
-      const updatedRaw = res.data?.data ?? res.data;
-      const updated = transformOrder(updatedRaw);
-
-      // Update local state (orders + filteredOrders + modals)
-      setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
-      setFilteredOrders((prev) =>
-        prev.map((o) => (o.id === updated.id ? updated : o))
-      );
-      setSelectedOrder(updated);
-      setEditableOrder(updated);
-
-      alert('Order updated successfully');
-      setShowEditModal(false);
-    } catch (error: any) {
-      console.error('Failed to update order:', error);
-      const msg =
-        error?.response?.data?.message ||
-        error?.message ||
-        'Failed to update order.';
-      alert(msg);
-    } finally {
-      setIsSaving(false);
+      const fullOrder = await orderService.getById(orderId);
+      const transformed = transformOrder(fullOrder);
+      setSelectedOrder(transformed);
+      setEditableOrder(transformed);
+      // Also refresh list summary
+      await loadOrders();
+    } catch (e: any) {
+      console.error('Failed to reload order after item change:', e);
+      alert('Order updated, but failed to refresh details. Please reopen the editor.');
     }
   };
 
@@ -535,9 +539,7 @@ export default function PendingOrdersDashboard() {
                 sku: prod.sku,
                 batchId: batch.id,
                 batchNumber: batch.batch_number,
-                price: Number(
-                  String(batch.sell_price ?? '0').replace(/[^0-9.-]/g, '')
-                ),
+                price: parseMoney(batch.sell_price),
                 available: batch.quantity,
                 relevance_score: prod.relevance_score || 0,
                 search_stage: prod.search_stage || 'api'
@@ -572,29 +574,30 @@ export default function PendingOrdersDashboard() {
     }, 300);
 
     return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productSearch, showProductPicker, pickerStoreId, pickerBatches]);
 
-  const handleSelectProductForOrder = (product: any) => {
-    setEditableOrder((prev) => {
-      if (!prev) return prev;
-      const newItem = {
-        id: Date.now(),
-        name: product.name,
-        sku: product.sku,
-        quantity: 1,
-        price: product.price || 0,
-        discount: 0
-      };
-      return {
-        ...prev,
-        items: [...(prev.items || []), newItem]
-      };
-    });
+  const handleSelectProductForOrder = async (product: any) => {
+    if (!editableOrder) return;
 
-    setShowProductPicker(false);
-    setProductSearch('');
-    setProductResults([]);
+    try {
+      await axios.post(`/orders/${editableOrder.id}/items`, {
+        batch_id: product.batchId,
+        quantity: 1
+      });
+
+      await reloadEditableOrder(editableOrder.id);
+
+      setShowProductPicker(false);
+      setProductSearch('');
+      setProductResults([]);
+    } catch (err: any) {
+      console.error('Failed to add item to order:', err);
+      const msg =
+        err?.response?.data?.message ||
+        err?.message ||
+        'Failed to add item to order.';
+      alert(msg);
+    }
   };
 
   const openProductPicker = () => {
@@ -609,6 +612,85 @@ export default function PendingOrdersDashboard() {
     setShowProductPicker(true);
     setProductSearch('');
     setProductResults([]);
+  };
+
+  const handleRemoveItem = async (itemId: number) => {
+    if (!editableOrder) return;
+    if (!confirm('Remove this item from the order?')) return;
+
+    try {
+      await axios.delete(`/orders/${editableOrder.id}/items/${itemId}`);
+      await reloadEditableOrder(editableOrder.id);
+    } catch (error: any) {
+      console.error('Failed to remove item:', error);
+      const msg =
+        error?.response?.data?.message ||
+        error?.message ||
+        'Failed to remove item.';
+      alert(msg);
+    }
+  };
+
+  const handleUpdateItem = async (itemIndex: number) => {
+    if (!editableOrder) return;
+
+    const item = editableOrder.items[itemIndex];
+    try {
+      await axios.put(`/orders/${editableOrder.id}/items/${item.id}`, {
+        quantity: item.quantity,
+        unit_price: item.price,
+        discount_amount: item.discount ?? 0
+      });
+
+      await reloadEditableOrder(editableOrder.id);
+    } catch (error: any) {
+      console.error('Failed to update item:', error);
+      const msg =
+        error?.response?.data?.message ||
+        error?.message ||
+        'Failed to update item.';
+      alert(msg);
+    }
+  };
+
+  const handleSaveOrder = async () => {
+    if (!editableOrder) return;
+
+    try {
+      setIsSavingOrder(true);
+
+      const payload = {
+        customer_name: editableOrder.customer.name || null,
+        customer_phone: editableOrder.customer.phone || null,
+        customer_email: editableOrder.customer.email || null,
+        customer_address: editableOrder.customer.address || null,
+        discount_amount: editableOrder.discount ?? 0,
+        shipping_amount: editableOrder.shipping ?? 0,
+        notes: editableOrder.notes ?? ''
+      };
+
+      const response = await axios.patch(`/orders/${editableOrder.id}`, payload);
+
+      if (response.data?.success) {
+        const updated = transformOrder(response.data.data);
+        setSelectedOrder(updated);
+        setEditableOrder(updated);
+        await loadOrders();
+        alert('Order updated successfully.');
+        setShowEditModal(false);
+      } else {
+        alert(response.data?.message || 'Failed to update order.');
+      }
+    } catch (error: any) {
+      console.error('Failed to save order:', error);
+      const msg =
+        error?.response?.data?.message ||
+        error?.message ||
+        'Failed to save order.';
+      alert(msg);
+    } finally {
+      setIsSavingOrder(false);
+    }
   };
 
   return (
@@ -867,14 +949,14 @@ export default function PendingOrdersDashboard() {
                                   e.stopPropagation();
                                   const rect =
                                     e.currentTarget.getBoundingClientRect();
-                                  const menuHeight = 280; // Approx height of menu
+                                  const menuHeight = 280;
                                   const spaceBelow =
                                     window.innerHeight - rect.bottom;
                                   const spaceRight =
                                     window.innerWidth - rect.right;
 
                                   let top = rect.bottom + 4;
-                                  let left = rect.right - 224; // 224px = w-56
+                                  let left = rect.right - 224;
 
                                   if (spaceBelow < menuHeight) {
                                     top = rect.top - menuHeight - 4;
@@ -1285,7 +1367,7 @@ export default function PendingOrdersDashboard() {
               </div>
             ) : editableOrder ? (
               <div className="p-6 space-y-6">
-                {/* Customer Information (controlled inputs) */}
+                {/* Customer Information */}
                 <div>
                   <h3 className="text-sm font-bold text-black dark:text-white mb-3">
                     Customer Information
@@ -1299,17 +1381,17 @@ export default function PendingOrdersDashboard() {
                         type="text"
                         value={editableOrder.customer.name}
                         onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  customer: {
-                                    ...prev.customer,
-                                    name: e.target.value
-                                  }
-                                }
-                              : prev
-                          )
+                          setEditableOrder((prev) => {
+                            if (!prev) return prev;
+                            const updated = {
+                              ...prev,
+                              customer: {
+                                ...prev.customer,
+                                name: e.target.value
+                              }
+                            };
+                            return updated;
+                          })
                         }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
@@ -1322,17 +1404,17 @@ export default function PendingOrdersDashboard() {
                         type="text"
                         value={editableOrder.customer.phone}
                         onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  customer: {
-                                    ...prev.customer,
-                                    phone: e.target.value
-                                  }
-                                }
-                              : prev
-                          )
+                          setEditableOrder((prev) => {
+                            if (!prev) return prev;
+                            const updated = {
+                              ...prev,
+                              customer: {
+                                ...prev.customer,
+                                phone: e.target.value
+                              }
+                            };
+                            return updated;
+                          })
                         }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
@@ -1343,19 +1425,19 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <input
                         type="email"
-                        value={editableOrder.customer.email}
+                        value={editableOrder.customer.email ?? ''}
                         onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  customer: {
-                                    ...prev.customer,
-                                    email: e.target.value
-                                  }
-                                }
-                              : prev
-                          )
+                          setEditableOrder((prev) => {
+                            if (!prev) return prev;
+                            const updated = {
+                              ...prev,
+                              customer: {
+                                ...prev.customer,
+                                email: e.target.value
+                              }
+                            };
+                            return updated;
+                          })
                         }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
@@ -1366,19 +1448,19 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <textarea
                         rows={2}
-                        value={editableOrder.customer.address}
+                        value={editableOrder.customer.address ?? ''}
                         onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  customer: {
-                                    ...prev.customer,
-                                    address: e.target.value
-                                  }
-                                }
-                              : prev
-                          )
+                          setEditableOrder((prev) => {
+                            if (!prev) return prev;
+                            const updated = {
+                              ...prev,
+                              customer: {
+                                ...prev.customer,
+                                address: e.target.value
+                              }
+                            };
+                            return updated;
+                          })
                         }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
@@ -1386,7 +1468,7 @@ export default function PendingOrdersDashboard() {
                   </div>
                 </div>
 
-                {/* Order Items with Add / Remove (UI only, not persisted via this API) */}
+                {/* Order Items with Add / Remove / Update */}
                 <div>
                   <h3 className="text-sm font-bold text-black dark:text-white mb-3">
                     Order Items
@@ -1412,8 +1494,27 @@ export default function PendingOrdersDashboard() {
                             </label>
                             <input
                               type="number"
-                              defaultValue={item.quantity}
-                              min="1"
+                              value={item.quantity}
+                              min={1}
+                              onChange={(e) => {
+                                const val = Math.max(
+                                  1,
+                                  Number(e.target.value || 1)
+                                );
+                                setEditableOrder((prev) => {
+                                  if (!prev) return prev;
+                                  const items = [...prev.items];
+                                  items[index] = {
+                                    ...items[index],
+                                    quantity: val
+                                  };
+                                  const updated = recalcOrderTotals({
+                                    ...prev,
+                                    items
+                                  });
+                                  return updated;
+                                });
+                              }}
                               className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-black dark:text-white text-sm"
                             />
                           </div>
@@ -1423,26 +1524,43 @@ export default function PendingOrdersDashboard() {
                             </label>
                             <input
                               type="number"
-                              defaultValue={item.price}
+                              value={item.price}
                               step="0.01"
+                              onChange={(e) => {
+                                const val = Number(e.target.value || 0);
+                                setEditableOrder((prev) => {
+                                  if (!prev) return prev;
+                                  const items = [...prev.items];
+                                  items[index] = {
+                                    ...items[index],
+                                    price: val
+                                  };
+                                  const updated = recalcOrderTotals({
+                                    ...prev,
+                                    items
+                                  });
+                                  return updated;
+                                });
+                              }}
                               className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-black dark:text-white text-sm"
                             />
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditableOrder((prev) => {
-                                if (!prev) return prev;
-                                const newItems = prev.items.filter(
-                                  (_it, i) => i !== index
-                                );
-                                return { ...prev, items: newItems };
-                              });
-                            }}
-                            className="text-xs text-red-600 hover:text-red-700 font-medium"
-                          >
-                            Remove
-                          </button>
+                          <div className="flex flex-col gap-1 items-end">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateItem(index)}
+                              className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                            >
+                              Update
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveItem(item.id)}
+                              className="text-xs text-red-600 hover:text-red-700 font-medium"
+                            >
+                              Remove
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -1474,17 +1592,18 @@ export default function PendingOrdersDashboard() {
                       <input
                         type="number"
                         value={editableOrder.discount}
-                        onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  discount: Number(e.target.value || 0)
-                                }
-                              : prev
-                          )
-                        }
                         step="0.01"
+                        onChange={(e) => {
+                          const val = Number(e.target.value || 0);
+                          setEditableOrder((prev) => {
+                            if (!prev) return prev;
+                            const updated = recalcOrderTotals({
+                              ...prev,
+                              discount: val
+                            });
+                            return updated;
+                          });
+                        }}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -1495,17 +1614,18 @@ export default function PendingOrdersDashboard() {
                       <input
                         type="number"
                         value={editableOrder.shipping}
-                        onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  shipping: Number(e.target.value || 0)
-                                }
-                              : prev
-                          )
-                        }
                         step="0.01"
+                        onChange={(e) => {
+                          const val = Number(e.target.value || 0);
+                          setEditableOrder((prev) => {
+                            if (!prev) return prev;
+                            const updated = recalcOrderTotals({
+                              ...prev,
+                              shipping: val
+                            });
+                            return updated;
+                          });
+                        }}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -1515,11 +1635,15 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <textarea
                         rows={3}
-                        value={editableOrder.notes}
+                        value={editableOrder.notes ?? ''}
                         onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev ? { ...prev, notes: e.target.value } : prev
-                          )
+                          setEditableOrder((prev) => {
+                            if (!prev) return prev;
+                            return {
+                              ...prev,
+                              notes: e.target.value
+                            };
+                          })
                         }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
@@ -1536,16 +1660,15 @@ export default function PendingOrdersDashboard() {
                       setEditableOrder(null);
                     }}
                     className="px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-black dark:text-white rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-medium"
-                    disabled={isSaving}
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleSaveOrder}
-                    disabled={isSaving}
-                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+                    disabled={isSavingOrder}
+                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-lg transition-colors font-medium"
                   >
-                    {isSaving ? 'Saving...' : 'Save Changes'}
+                    {isSavingOrder ? 'Saving...' : 'Save Changes'}
                   </button>
                 </div>
               </div>

@@ -15,7 +15,7 @@ import {
   Edit,
   RefreshCw,
   ArrowLeftRight,
-  X
+  X,
 } from 'lucide-react';
 import orderService from '@/services/orderService';
 import axios from '@/lib/axios';
@@ -108,7 +108,7 @@ export default function PendingOrdersDashboard() {
         status: 'pending',
         sort_by: 'created_at',
         sort_order: 'desc',
-        per_page: 1000
+        per_page: 1000,
       });
 
       // Fetch e-commerce orders pending fulfillment
@@ -117,19 +117,15 @@ export default function PendingOrdersDashboard() {
         status: 'pending',
         sort_by: 'created_at',
         sort_order: 'desc',
-        per_page: 1000
+        per_page: 1000,
       });
 
       // Combine both order types
-      const allOrders = [
-        ...socialCommerceResponse.data,
-        ...ecommerceResponse.data
-      ];
+      const allOrders = [...socialCommerceResponse.data, ...ecommerceResponse.data];
 
       // Sort combined orders by date
       allOrders.sort(
-        (a: any, b: any) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
 
       // Transform the orders
@@ -143,24 +139,14 @@ export default function PendingOrdersDashboard() {
           name: order.customer?.name || '',
           phone: order.customer?.phone || '',
           email: order.customer?.email || '',
-          address: order.shipping_address || ''
+          address: order.shipping_address || '',
         },
         items:
           order.items?.map((item: any) => {
-            const unitPrice = Number(
-              String(item.unit_price ?? '0').replace(/[^0-9.-]/g, '')
-            );
+            const unitPrice = Number(String(item.unit_price ?? '0').replace(/[^0-9.-]/g, ''));
             const discountAmount = Number(
               String(item.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
             );
-
-            console.log('Item data:', {
-              product_name: item.product_name,
-              unit_price_raw: item.unit_price,
-              unit_price_cleaned: unitPrice,
-              discount_raw: item.discount_amount,
-              discount_cleaned: discountAmount
-            });
 
             return {
               id: item.id,
@@ -168,35 +154,23 @@ export default function PendingOrdersDashboard() {
               sku: item.product_sku,
               quantity: item.quantity,
               price: unitPrice,
-              discount: discountAmount
+              discount: discountAmount,
             };
           }) || [],
-        subtotal: Number(
-          String(order.subtotal ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        discount: Number(
-          String(order.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        shipping: Number(
-          String(order.shipping_amount ?? '0').replace(/[^0-9.-]/g, '')
-        ),
+        subtotal: Number(String(order.subtotal ?? '0').replace(/[^0-9.-]/g, '')),
+        discount: Number(String(order.discount_amount ?? '0').replace(/[^0-9.-]/g, '')),
+        shipping: Number(String(order.shipping_amount ?? '0').replace(/[^0-9.-]/g, '')),
         amounts: {
-          total: Number(
-            String(order.total_amount ?? '0').replace(/[^0-9.-]/g, '')
-          ),
-          paid: Number(
-            String(order.paid_amount ?? '0').replace(/[^0-9.-]/g, '')
-          ),
-          due: Number(
-            String(order.outstanding_amount ?? '0').replace(/[^0-9.-]/g, '')
-          )
+          total: Number(String(order.total_amount ?? '0').replace(/[^0-9.-]/g, '')),
+          paid: Number(String(order.paid_amount ?? '0').replace(/[^0-9.-]/g, '')),
+          due: Number(String(order.outstanding_amount ?? '0').replace(/[^0-9.-]/g, '')),
         },
         status: order.payment_status === 'paid' ? 'Paid' : 'Pending',
         salesBy: order.salesman?.name || userName || 'N/A',
         store: order.store?.name || '',
         storeId: order.store?.id,
         notes: order.notes || '',
-        fulfillmentStatus: order.fulfillment_status
+        fulfillmentStatus: order.fulfillment_status,
       }));
 
       setOrders(transformedOrders);
@@ -228,10 +202,7 @@ export default function PendingOrdersDashboard() {
       filtered = filtered.filter((o) => {
         const orderDate = o.date;
         let filterDateFormatted = dateFilter;
-        if (
-          dateFilter.includes('-') &&
-          dateFilter.split('-')[0].length === 4
-        ) {
+        if (dateFilter.includes('-') && dateFilter.split('-')[0].length === 4) {
           const [year, month, day] = dateFilter.split('-');
           filterDateFormatted = `${day}/${month}/${year}`;
         }
@@ -247,10 +218,8 @@ export default function PendingOrdersDashboard() {
 
     if (orderTypeFilter !== 'All Types') {
       filtered = filtered.filter((o) => {
-        if (orderTypeFilter === 'Social Commerce')
-          return o.orderType === 'social_commerce';
-        if (orderTypeFilter === 'E-Commerce')
-          return o.orderType === 'ecommerce';
+        if (orderTypeFilter === 'Social Commerce') return o.orderType === 'social_commerce';
+        if (orderTypeFilter === 'E-Commerce') return o.orderType === 'ecommerce';
         return true;
       });
     }
@@ -276,7 +245,7 @@ export default function PendingOrdersDashboard() {
           name: fullOrder.customer.name,
           phone: fullOrder.customer.phone,
           email: fullOrder.customer.email || '',
-          address: fullOrder.shipping_address || ''
+          address: fullOrder.shipping_address || '',
         },
         items:
           fullOrder.items?.map((item: any) => ({
@@ -284,39 +253,23 @@ export default function PendingOrdersDashboard() {
             name: item.product_name,
             sku: item.product_sku,
             quantity: item.quantity,
-            price: Number(
-              String(item.unit_price ?? '0').replace(/[^0-9.-]/g, '')
-            ),
-            discount: Number(
-              String(item.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
-            )
+            price: Number(String(item.unit_price ?? '0').replace(/[^0-9.-]/g, '')),
+            discount: Number(String(item.discount_amount ?? '0').replace(/[^0-9.-]/g, '')),
           })) || [],
-        subtotal: Number(
-          String(fullOrder.subtotal ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        discount: Number(
-          String(fullOrder.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        shipping: Number(
-          String(fullOrder.shipping_amount ?? '0').replace(/[^0-9.-]/g, '')
-        ),
+        subtotal: Number(String(fullOrder.subtotal ?? '0').replace(/[^0-9.-]/g, '')),
+        discount: Number(String(fullOrder.discount_amount ?? '0').replace(/[^0-9.-]/g, '')),
+        shipping: Number(String(fullOrder.shipping_amount ?? '0').replace(/[^0-9.-]/g, '')),
         amounts: {
-          total: Number(
-            String(fullOrder.total_amount ?? '0').replace(/[^0-9.-]/g, '')
-          ),
-          paid: Number(
-            String(fullOrder.paid_amount ?? '0').replace(/[^0-9.-]/g, '')
-          ),
-          due: Number(
-            String(fullOrder.outstanding_amount ?? '0').replace(/[^0-9.-]/g, '')
-          )
+          total: Number(String(fullOrder.total_amount ?? '0').replace(/[^0-9.-]/g, '')),
+          paid: Number(String(fullOrder.paid_amount ?? '0').replace(/[^0-9.-]/g, '')),
+          due: Number(String(fullOrder.outstanding_amount ?? '0').replace(/[^0-9.-]/g, '')),
         },
         status: fullOrder.payment_status === 'paid' ? 'Paid' : 'Pending',
         salesBy: fullOrder.salesman?.name || userName || 'N/A',
         store: fullOrder.store.name,
         storeId: fullOrder.store.id,
         notes: fullOrder.notes || '',
-        fulfillmentStatus: fullOrder.fulfillment_status
+        fulfillmentStatus: fullOrder.fulfillment_status,
       };
 
       setSelectedOrder(transformedOrder);
@@ -347,7 +300,7 @@ export default function PendingOrdersDashboard() {
           name: fullOrder.customer.name,
           phone: fullOrder.customer.phone,
           email: fullOrder.customer.email || '',
-          address: fullOrder.shipping_address || ''
+          address: fullOrder.shipping_address || '',
         },
         items:
           fullOrder.items?.map((item: any) => ({
@@ -355,39 +308,23 @@ export default function PendingOrdersDashboard() {
             name: item.product_name,
             sku: item.product_sku,
             quantity: item.quantity,
-            price: Number(
-              String(item.unit_price ?? '0').replace(/[^0-9.-]/g, '')
-            ),
-            discount: Number(
-              String(item.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
-            )
+            price: Number(String(item.unit_price ?? '0').replace(/[^0-9.-]/g, '')),
+            discount: Number(String(item.discount_amount ?? '0').replace(/[^0-9.-]/g, '')),
           })) || [],
-        subtotal: Number(
-          String(fullOrder.subtotal ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        discount: Number(
-          String(fullOrder.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        shipping: Number(
-          String(fullOrder.shipping_amount ?? '0').replace(/[^0-9.-]/g, '')
-        ),
+        subtotal: Number(String(fullOrder.subtotal ?? '0').replace(/[^0-9.-]/g, '')),
+        discount: Number(String(fullOrder.discount_amount ?? '0').replace(/[^0-9.-]/g, '')),
+        shipping: Number(String(fullOrder.shipping_amount ?? '0').replace(/[^0-9.-]/g, '')),
         amounts: {
-          total: Number(
-            String(fullOrder.total_amount ?? '0').replace(/[^0-9.-]/g, '')
-          ),
-          paid: Number(
-            String(fullOrder.paid_amount ?? '0').replace(/[^0-9.-]/g, '')
-          ),
-          due: Number(
-            String(fullOrder.outstanding_amount ?? '0').replace(/[^0-9.-]/g, '')
-          )
+          total: Number(String(fullOrder.total_amount ?? '0').replace(/[^0-9.-]/g, '')),
+          paid: Number(String(fullOrder.paid_amount ?? '0').replace(/[^0-9.-]/g, '')),
+          due: Number(String(fullOrder.outstanding_amount ?? '0').replace(/[^0-9.-]/g, '')),
         },
         status: fullOrder.payment_status === 'paid' ? 'Paid' : 'Pending',
         salesBy: fullOrder.salesman?.name || userName || 'N/A',
         store: fullOrder.store.name,
         storeId: fullOrder.store.id,
         notes: fullOrder.notes || '',
-        fulfillmentStatus: fullOrder.fulfillment_status
+        fulfillmentStatus: fullOrder.fulfillment_status,
       };
 
       setSelectedOrder(transformedOrder);
@@ -415,7 +352,7 @@ export default function PendingOrdersDashboard() {
       sku: item.sku,
       quantity: item.quantity,
       selectedQty: 1,
-      selected: false
+      selected: false,
     }));
     setReturnExchangeItems(items);
     setShowReturnExchangeModal(true);
@@ -452,15 +389,13 @@ export default function PendingOrdersDashboard() {
         name: i.name,
         sku: i.sku,
         quantity: i.quantity,
-        selectedQty: i.selectedQty
-      }))
+        selectedQty: i.selectedQty,
+      })),
     };
 
-    const key =
-      returnExchangeType === 'return' ? 'returnOrder' : 'exchangeOrder';
+    const key = returnExchangeType === 'return' ? 'returnOrder' : 'exchangeOrder';
     sessionStorage.setItem(key, JSON.stringify(context));
 
-    // 🔁 Redirect to dedicated page where you can process the return/exchange
     if (returnExchangeType === 'return') {
       window.location.href = '/orders/returns/new';
     } else {
@@ -504,81 +439,82 @@ export default function PendingOrdersDashboard() {
     return null;
   };
 
-  const totalRevenue = orders.reduce(
-    (sum, order) => sum + order.amounts.total,
-    0
-  );
+  const totalRevenue = orders.reduce((sum, order) => sum + order.amounts.total, 0);
   const paidOrders = orders.filter((o) => o.amounts.due === 0).length;
   const pendingOrders = orders.filter((o) => o.amounts.due > 0).length;
-  const socialCommerceCount = orders.filter(
-    (o) => o.orderType === 'social_commerce'
-  ).length;
-  const ecommerceCount = orders.filter(
-    (o) => o.orderType === 'ecommerce'
-  ).length;
+  const socialCommerceCount = orders.filter((o) => o.orderType === 'social_commerce').length;
+  const ecommerceCount = orders.filter((o) => o.orderType === 'ecommerce').length;
 
-  // 🔁 Product picker helpers (similar spirit to Social Commerce page)
+  // 🔁 Product picker helpers
 
-  const fetchBatchesForStore = async (storeId: number) => {
+  const fetchBatchesForStore = async (storeId: number | null) => {
+    if (!storeId) {
+      setPickerBatches([]);
+      return;
+    }
+
     try {
       setIsProductLoading(true);
+      console.log('📦 [EditOrder] Fetching batches for store:', storeId);
 
       try {
         const batchesData = await batchService.getAvailableBatches(storeId);
+        console.log('✅ [EditOrder] getAvailableBatches:', batchesData);
+
         if (batchesData && batchesData.length > 0) {
-          const availableBatches = batchesData.filter(
-            (batch: any) => batch.quantity > 0
-          );
+          const availableBatches = batchesData.filter((batch: any) => batch.quantity > 0);
           setPickerBatches(availableBatches);
           return;
         }
       } catch (err) {
-        console.warn('getAvailableBatches failed, trying getBatchesArray...', err);
+        console.warn('⚠️ [EditOrder] getAvailableBatches failed, trying getBatchesArray...', err);
       }
 
       try {
         const batchesData = await batchService.getBatchesArray({
           store_id: storeId,
-          status: 'available'
+          status: 'available',
         });
+        console.log('✅ [EditOrder] getBatchesArray:', batchesData);
+
         if (batchesData && batchesData.length > 0) {
-          const availableBatches = batchesData.filter(
-            (batch: any) => batch.quantity > 0
-          );
+          const availableBatches = batchesData.filter((batch: any) => batch.quantity > 0);
           setPickerBatches(availableBatches);
           return;
         }
       } catch (err) {
-        console.warn('getBatchesArray failed, trying getBatchesByStore...', err);
+        console.warn('⚠️ [EditOrder] getBatchesArray failed, trying getBatchesByStore...', err);
       }
 
       try {
         const batchesData = await batchService.getBatchesByStore(storeId);
+        console.log('✅ [EditOrder] getBatchesByStore:', batchesData);
+
         if (batchesData && batchesData.length > 0) {
-          const availableBatches = batchesData.filter(
-            (batch: any) => batch.quantity > 0
-          );
+          const availableBatches = batchesData.filter((batch: any) => batch.quantity > 0);
           setPickerBatches(availableBatches);
           return;
         }
       } catch (err) {
-        console.error('All batch fetch methods failed', err);
+        console.error('⚠️ [EditOrder] All batch fetch methods failed', err);
       }
 
       setPickerBatches([]);
+      console.log('⚠️ [EditOrder] No batches found for store:', storeId);
     } finally {
       setIsProductLoading(false);
     }
   };
 
   const fetchProductResults = async (query: string) => {
-    if (!pickerStoreId) return;
     if (!query.trim()) {
       setProductResults([]);
       return;
     }
 
     setIsProductLoading(true);
+    console.log('🔍 [EditOrder] Product search query:', query, 'storeId:', pickerStoreId);
+
     try {
       const response = await axios.post('/products/advanced-search', {
         query,
@@ -586,7 +522,7 @@ export default function PendingOrdersDashboard() {
         enable_fuzzy: true,
         fuzzy_threshold: 60,
         search_fields: ['name', 'sku', 'description', 'category'],
-        per_page: 50
+        per_page: 50,
       });
 
       const results: any[] = [];
@@ -598,40 +534,76 @@ export default function PendingOrdersDashboard() {
           response.data.data ||
           [];
 
+        console.log('🔍 [EditOrder] API products found:', products.length);
+
         for (const prod of products) {
-          const productBatches = pickerBatches.filter((batch: any) => {
-            const batchProductId = batch.product?.id || batch.product_id;
-            return batchProductId === prod.id && batch.quantity > 0;
-          });
+          // Prefer batch-based results if we have store + batches
+          const productBatches =
+            pickerStoreId && pickerBatches.length > 0
+              ? pickerBatches.filter((batch: any) => {
+                  const batchProductId = batch.product?.id || batch.product_id;
+                  return batchProductId === prod.id && batch.quantity > 0;
+                })
+              : [];
+
+          // Try to get a price from batch or product
+          const priceFromProd = Number(
+            String(
+              prod.sell_price ??
+                prod.sale_price ??
+                prod.selling_price ??
+                prod.price ??
+                prod.mrp ??
+                '0'
+            ).replace(/[^0-9.-]/g, '')
+          );
 
           if (productBatches.length > 0) {
             for (const batch of productBatches) {
+              const priceFromBatch = Number(
+                String(batch.sell_price ?? batch.selling_price ?? batch.price ?? '0').replace(
+                  /[^0-9.-]/g,
+                  ''
+                )
+              );
+
               results.push({
                 id: prod.id,
                 name: prod.name,
                 sku: prod.sku,
                 batchId: batch.id,
                 batchNumber: batch.batch_number,
-                price: Number(
-                  String(batch.sell_price ?? '0').replace(/[^0-9.-]/g, '')
-                ),
+                price: priceFromBatch || priceFromProd || 0,
                 available: batch.quantity,
                 relevance_score: prod.relevance_score || 0,
-                search_stage: prod.search_stage || 'api'
+                search_stage: prod.search_stage || 'api',
               });
             }
+          } else {
+            // Fallback: no batches, still show the product
+            results.push({
+              id: prod.id,
+              name: prod.name,
+              sku: prod.sku,
+              batchId: null,
+              batchNumber: null,
+              price: priceFromProd || 0,
+              available: prod.stock_quantity ?? prod.quantity ?? 0,
+              relevance_score: prod.relevance_score || 0,
+              search_stage: prod.search_stage || 'api_no_batches',
+            });
           }
         }
 
-        results.sort(
-          (a, b) => (b.relevance_score || 0) - (a.relevance_score || 0)
-        );
+        results.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
+        console.log('🔍 [EditOrder] Final product results:', results.length);
         setProductResults(results);
       } else {
+        console.warn('❌ [EditOrder] API search unsuccessful');
         setProductResults([]);
       }
     } catch (err) {
-      console.error('Product search failed', err);
+      console.error('❌ [EditOrder] Product search failed', err);
       setProductResults([]);
     } finally {
       setIsProductLoading(false);
@@ -660,11 +632,11 @@ export default function PendingOrdersDashboard() {
         sku: product.sku,
         quantity: 1,
         price: product.price || 0,
-        discount: 0
+        discount: 0,
       };
       return {
         ...prev,
-        items: [...(prev.items || []), newItem]
+        items: [...(prev.items || []), newItem],
       };
     });
 
@@ -674,17 +646,20 @@ export default function PendingOrdersDashboard() {
   };
 
   const openProductPicker = () => {
-    if (!editableOrder?.storeId && !pickerStoreId) {
-      alert('Store information is missing for this order.');
-      return;
-    }
-    const storeId = editableOrder?.storeId || pickerStoreId;
-    if (!storeId) return;
+    // If store exists → load batches; otherwise just open picker with global product search
+    const storeId = editableOrder?.storeId || null;
+    console.log('🧃 [EditOrder] openProductPicker, storeId:', storeId);
+
     setPickerStoreId(storeId);
-    fetchBatchesForStore(storeId);
     setShowProductPicker(true);
     setProductSearch('');
     setProductResults([]);
+
+    if (storeId) {
+      fetchBatchesForStore(storeId);
+    } else {
+      setPickerBatches([]);
+    }
   };
 
   return (
@@ -713,8 +688,7 @@ export default function PendingOrdersDashboard() {
                         Pending Orders
                       </h1>
                       <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-none mt-0.5">
-                        {filteredOrders.length} of {orders.length} orders
-                        awaiting fulfillment
+                        {filteredOrders.length} of {orders.length} orders awaiting fulfillment
                       </p>
                     </div>
                   </div>
@@ -880,20 +854,16 @@ export default function PendingOrdersDashboard() {
                               {order.orderNumber}
                             </p>
                           </td>
-                          <td className="px-4 py-3">
-                            {getOrderTypeBadge(order.orderType)}
-                          </td>
+                          <td className="px-4 py-3">{getOrderTypeBadge(order.orderType)}</td>
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
                               <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center">
                                 <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                                  {order.customer.name
-                                    .charAt(0)
-                                    .toUpperCase()}
+                                  {order.customer.name.charAt(0).toUpperCase()}
                                 </span>
                               </div>
                               <div>
-                                <p className="text-sm font-medium text-black dark:text-white">
+                                <p className="text-sm font-medium text-black dark:text:white">
                                   {order.customer.name}
                                 </p>
                                 <p className="text-xs text-gray-500 dark:text-gray-500">
@@ -941,16 +911,13 @@ export default function PendingOrdersDashboard() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  const rect =
-                                    e.currentTarget.getBoundingClientRect();
-                                  const menuHeight = 280; // Approx height of menu
-                                  const spaceBelow =
-                                    window.innerHeight - rect.bottom;
-                                  const spaceRight =
-                                    window.innerWidth - rect.right;
+                                  const rect = e.currentTarget.getBoundingClientRect();
+                                  const menuHeight = 280;
+                                  const spaceBelow = window.innerHeight - rect.bottom;
+                                  const spaceRight = window.innerWidth - rect.right;
 
                                   let top = rect.bottom + 4;
-                                  let left = rect.right - 224; // 224px = w-56
+                                  let left = rect.right - 224;
 
                                   if (spaceBelow < menuHeight) {
                                     top = rect.top - menuHeight - 4;
@@ -961,11 +928,7 @@ export default function PendingOrdersDashboard() {
                                   }
 
                                   setMenuPosition({ top, left });
-                                  setActiveMenu(
-                                    activeMenu === order.id
-                                      ? null
-                                      : order.id
-                                  );
+                                  setActiveMenu(activeMenu === order.id ? null : order.id);
                                 }}
                                 className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
                                 title="More Actions"
@@ -1056,9 +1019,7 @@ export default function PendingOrdersDashboard() {
             {/* Modal Header */}
             <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between z-10">
               <div>
-                <h2 className="text-xl font-bold text-black dark:text-white">
-                  Order Details
-                </h2>
+                <h2 className="text-xl font-bold text-black dark:text-white">Order Details</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   {selectedOrder?.orderNumber || 'Loading...'}
                 </p>
@@ -1078,9 +1039,7 @@ export default function PendingOrdersDashboard() {
             {isLoadingDetails ? (
               <div className="p-12 text-center">
                 <Loader className="animate-spin h-12 w-12 text-black dark:text-white mx-auto mb-4" />
-                <p className="text-gray-500 dark:text-gray-400">
-                  Loading order details...
-                </p>
+                <p className="text-gray-500 dark:text-gray-400">Loading order details...</p>
               </div>
             ) : selectedOrder ? (
               <div className="p-6 space-y-6">
@@ -1131,26 +1090,20 @@ export default function PendingOrdersDashboard() {
                   </h3>
                   <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-2">
                     <div className="flex items-center justify-between">
-                      <p className="text-xs text-gray-500 dark:text-gray-500">
-                        Name
-                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-500">Name</p>
                       <p className="text-sm font-medium text-black dark:text-white">
                         {selectedOrder.customer.name}
                       </p>
                     </div>
                     <div className="flex items-center justify-between">
-                      <p className="text-xs text-gray-500 dark:text-gray-500">
-                        Phone
-                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-500">Phone</p>
                       <p className="text-sm font-medium text-black dark:text-white">
                         {selectedOrder.customer.phone}
                       </p>
                     </div>
                     {selectedOrder.customer.email && (
                       <div className="flex items-center justify-between">
-                        <p className="text-xs text-gray-500 dark:text-gray-500">
-                          Email
-                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-500">Email</p>
                         <p className="text-sm font-medium text-black dark:text-white">
                           {selectedOrder.customer.email}
                         </p>
@@ -1158,9 +1111,7 @@ export default function PendingOrdersDashboard() {
                     )}
                     {selectedOrder.customer.address && (
                       <div>
-                        <p className="text-xs text-gray-500 dark:text-gray-500 mb-1">
-                          Address
-                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-500 mb-1">Address</p>
                         <p className="text-sm text-black dark:text-white">
                           {selectedOrder.customer.address}
                         </p>
@@ -1224,10 +1175,7 @@ export default function PendingOrdersDashboard() {
                               </td>
                               <td className="px-4 py-3 text-right">
                                 <p className="text-sm font-medium text-black dark:text-white">
-                                  ৳{(
-                                    (item.price - item.discount) *
-                                    item.quantity
-                                  ).toFixed(2)}
+                                  ৳{((item.price - item.discount) * item.quantity).toFixed(2)}
                                 </p>
                               </td>
                             </tr>
@@ -1252,18 +1200,14 @@ export default function PendingOrdersDashboard() {
                   </h3>
                   <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 space-y-2">
                     <div className="flex items-center justify-between">
-                      <p className="text-sm text-gray-700 dark:text-gray-300">
-                        Subtotal
-                      </p>
+                      <p className="text-sm text-gray-700 dark:text-gray-300">Subtotal</p>
                       <p className="text-sm font-medium text-black dark:text-white">
                         ৳{selectedOrder.subtotal.toFixed(2)}
                       </p>
                     </div>
                     {selectedOrder.discount > 0 && (
                       <div className="flex items-center justify-between">
-                        <p className="text-sm text-gray-700 dark:text-gray-300">
-                          Discount
-                        </p>
+                        <p className="text-sm text-gray-700 dark:text-gray-300">Discount</p>
                         <p className="text-sm font-medium text-red-600 dark:text-red-400">
                           -৳{selectedOrder.discount.toFixed(2)}
                         </p>
@@ -1271,26 +1215,20 @@ export default function PendingOrdersDashboard() {
                     )}
                     {selectedOrder.shipping > 0 && (
                       <div className="flex items-center justify-between">
-                        <p className="text-sm text-gray-700 dark:text-gray-300">
-                          Shipping
-                        </p>
+                        <p className="text-sm text-gray-700 dark:text-gray-300">Shipping</p>
                         <p className="text-sm font-medium text-black dark:text-white">
                           ৳{selectedOrder.shipping.toFixed(2)}
                         </p>
                       </div>
                     )}
                     <div className="border-t border-gray-200 dark:border-gray-700 pt-2 flex items-center justify-between">
-                      <p className="text-sm font-bold text-black dark:text-white">
-                        Total
-                      </p>
+                      <p className="text-sm font-bold text-black dark:text-white">Total</p>
                       <p className="text-lg font-bold text-black dark:text-white">
                         ৳{selectedOrder.amounts.total.toFixed(2)}
                       </p>
                     </div>
                     <div className="flex items-center justify-between">
-                      <p className="text-sm text-gray-700 dark:text-gray-300">
-                        Paid
-                      </p>
+                      <p className="text-sm text-gray-700 dark:text-gray-300">Paid</p>
                       <p className="text-sm font-medium text-green-600 dark:text-green-400">
                         ৳{selectedOrder.amounts.paid.toFixed(2)}
                       </p>
@@ -1332,9 +1270,7 @@ export default function PendingOrdersDashboard() {
             {/* Modal Header */}
             <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between z-10">
               <div>
-                <h2 className="text-xl font-bold text-black dark:text-white">
-                  Edit Order
-                </h2>
+                <h2 className="text-xl font-bold text-black dark:text-white">Edit Order</h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   {selectedOrder?.orderNumber || 'Loading...'}
                 </p>
@@ -1355,13 +1291,11 @@ export default function PendingOrdersDashboard() {
             {isLoadingDetails ? (
               <div className="p-12 text-center">
                 <Loader className="animate-spin h-12 w-12 text-black dark:text-white mx-auto mb-4" />
-                <p className="text-gray-500 dark:text-gray-400">
-                  Loading order details...
-                </p>
+                <p className="text-gray-500 dark:text-gray-400">Loading order details...</p>
               </div>
             ) : editableOrder ? (
               <div className="p-6 space-y-6">
-                {/* Customer Information (kept as before, uncontrolled inputs) */}
+                {/* Customer Information */}
                 <div>
                   <h3 className="text-sm font-bold text-black dark:text-white mb-3">
                     Customer Information
@@ -1457,9 +1391,7 @@ export default function PendingOrdersDashboard() {
                             onClick={() => {
                               setEditableOrder((prev) => {
                                 if (!prev) return prev;
-                                const newItems = prev.items.filter(
-                                  (_it, i) => i !== index
-                                );
+                                const newItems = prev.items.filter((_it, i) => i !== index);
                                 return { ...prev, items: newItems };
                               });
                             }}
@@ -1471,9 +1403,7 @@ export default function PendingOrdersDashboard() {
                       ))}
                     </div>
                   ) : (
-                    <p className="text-sm text-gray-500">
-                      No items in this order
-                    </p>
+                    <p className="text-sm text-gray-500">No items in this order</p>
                   )}
 
                   <button
@@ -1540,10 +1470,7 @@ export default function PendingOrdersDashboard() {
                   </button>
                   <button
                     onClick={() => {
-                      alert(
-                        'Save functionality will be implemented with API integration'
-                      );
-                      // TODO: Implement save order changes (use editableOrder state)
+                      alert('Save functionality will be implemented with API integration');
                     }}
                     className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
                   >
@@ -1595,16 +1522,20 @@ export default function PendingOrdersDashboard() {
                       Loading products...
                     </p>
                   </div>
+                ) : !productSearch.trim() ? (
+                  <div className="p-6 text-center text-xs text-gray-500 dark:text-gray-400">
+                    Type to search products
+                  </div>
                 ) : productResults.length === 0 ? (
                   <div className="p-6 text-center text-xs text-gray-500 dark:text-gray-400">
-                    Type to search products for this store
+                    No products found for &quot;{productSearch}&quot;
                   </div>
                 ) : (
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                     {productResults.map((product) => (
                       <button
                         type="button"
-                        key={`${product.id}-${product.batchId}`}
+                        key={`${product.id}-${product.batchId ?? 'no-batch'}`}
                         onClick={() => handleSelectProductForOrder(product)}
                         className="border border-gray-200 dark:border-gray-600 rounded p-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
                       >
@@ -1619,9 +1550,11 @@ export default function PendingOrdersDashboard() {
                         <p className="text-[11px] text-gray-600 dark:text-gray-400">
                           Price: {product.price} Tk
                         </p>
-                        <p className="text-[11px] text-green-600 dark:text-green-400">
-                          Available: {product.available}
-                        </p>
+                        {product.available !== undefined && (
+                          <p className="text-[11px] text-green-600 dark:text-green-400">
+                            Available: {product.available}
+                          </p>
+                        )}
                       </button>
                     ))}
                   </div>
@@ -1639,9 +1572,7 @@ export default function PendingOrdersDashboard() {
             <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800">
               <div>
                 <h3 className="text-sm font-semibold text-black dark:text-white">
-                  {returnExchangeType === 'return'
-                    ? 'Create Return'
-                    : 'Create Exchange'}
+                  {returnExchangeType === 'return' ? 'Create Return' : 'Create Exchange'}
                 </h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   Order: {selectedOrder.orderNumber}
@@ -1697,7 +1628,7 @@ export default function PendingOrdersDashboard() {
                             SKU: {item.sku}
                           </p>
                         </td>
-                        <td className="px-3 py-2 text-center text-gray-900 dark:text-white">
+                        <td className="px-3 py-2 text-center text-gray-900 dark:text:white">
                           {item.quantity}
                         </td>
                         <td className="px-3 py-2 text-center">
@@ -1715,7 +1646,7 @@ export default function PendingOrdersDashboard() {
                                   selectedQty: Math.max(
                                     1,
                                     Math.min(val || 1, item.quantity)
-                                  )
+                                  ),
                                 };
                                 return copy;
                               });
@@ -1733,7 +1664,7 @@ export default function PendingOrdersDashboard() {
                                 const copy = [...prev];
                                 copy[index] = {
                                   ...copy[index],
-                                  selected: checked
+                                  selected: checked,
                                 };
                                 return copy;
                               });
@@ -1771,10 +1702,7 @@ export default function PendingOrdersDashboard() {
 
       {/* Click outside to close menu */}
       {activeMenu !== null && (
-        <div
-          className="fixed inset-0 z-[55]"
-          onClick={() => setActiveMenu(null)}
-        />
+        <div className="fixed inset-0 z-[55]" onClick={() => setActiveMenu(null)} />
       )}
 
       {/* Custom Scrollbar Styles */}

@@ -14,13 +14,12 @@ import {
   Globe,
   Edit,
   RefreshCw,
-  ArrowLeftRight
+  ArrowLeftRight,
+  X
 } from 'lucide-react';
 import orderService from '@/services/orderService';
-import ReturnProductModal from '@/components/sales/ReturnProductModal';
-import ExchangeProductModal from '@/components/sales/ExchangeProductModal';
-import productReturnService, { type CreateReturnRequest } from '@/services/productReturnService';
-import refundService, { type CreateRefundRequest } from '@/services/refundService';
+import axios from '@/lib/axios';
+import batchService from '@/services/batchService';
 
 interface Order {
   id: number;
@@ -53,9 +52,12 @@ interface Order {
   status: string;
   salesBy: string;
   store: string;
+  storeId?: number;
   notes?: string;
   fulfillmentStatus?: string | null;
 }
+
+type ReturnExchangeType = 'return' | 'exchange';
 
 export default function PendingOrdersDashboard() {
   const [darkMode, setDarkMode] = useState(false);
@@ -67,6 +69,7 @@ export default function PendingOrdersDashboard() {
   const [statusFilter, setStatusFilter] = useState('All Status');
   const [orderTypeFilter, setOrderTypeFilter] = useState('All Types');
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [editableOrder, setEditableOrder] = useState<Order | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
@@ -75,13 +78,20 @@ export default function PendingOrdersDashboard() {
   const [userName, setUserName] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
 
-  // Return / Exchange modals
-  const [showReturnModal, setShowReturnModal] = useState(false);
-  const [showExchangeModal, setShowExchangeModal] = useState(false);
-  const [selectedOrderForAction, setSelectedOrderForAction] = useState<any | null>(null);
+  // 🔁 Return / Exchange modal state
+  const [showReturnExchangeModal, setShowReturnExchangeModal] = useState(false);
+  const [returnExchangeType, setReturnExchangeType] = useState<ReturnExchangeType | null>(null);
+  const [returnExchangeItems, setReturnExchangeItems] = useState<
+    { id: number; name: string; sku: string; quantity: number; selectedQty: number; selected: boolean }[]
+  >([]);
 
-  // Editable version of the order for Edit modal
-  const [editableOrder, setEditableOrder] = useState<Order | null>(null);
+  // 🧃 Product picker (for Edit Order)
+  const [showProductPicker, setShowProductPicker] = useState(false);
+  const [productSearch, setProductSearch] = useState('');
+  const [productResults, setProductResults] = useState<any[]>([]);
+  const [isProductLoading, setIsProductLoading] = useState(false);
+  const [pickerBatches, setPickerBatches] = useState<any[]>([]);
+  const [pickerStoreId, setPickerStoreId] = useState<number | null>(null);
 
   useEffect(() => {
     const name = localStorage.getItem('userName') || '';
@@ -111,7 +121,10 @@ export default function PendingOrdersDashboard() {
       });
 
       // Combine both order types
-      const allOrders = [...socialCommerceResponse.data, ...ecommerceResponse.data];
+      const allOrders = [
+        ...socialCommerceResponse.data,
+        ...ecommerceResponse.data
+      ];
 
       // Sort combined orders by date
       allOrders.sort(
@@ -127,9 +140,9 @@ export default function PendingOrdersDashboard() {
         orderTypeLabel: order.order_type_label,
         date: new Date(order.order_date).toLocaleDateString('en-GB'),
         customer: {
-          name: order.customer.name,
-          phone: order.customer.phone,
-          email: order.customer.email || '',
+          name: order.customer?.name || '',
+          phone: order.customer?.phone || '',
+          email: order.customer?.email || '',
           address: order.shipping_address || ''
         },
         items:
@@ -180,7 +193,8 @@ export default function PendingOrdersDashboard() {
         },
         status: order.payment_status === 'paid' ? 'Paid' : 'Pending',
         salesBy: order.salesman?.name || userName || 'N/A',
-        store: order.store.name,
+        store: order.store?.name || '',
+        storeId: order.store?.id,
         notes: order.notes || '',
         fulfillmentStatus: order.fulfillment_status
       }));
@@ -235,7 +249,8 @@ export default function PendingOrdersDashboard() {
       filtered = filtered.filter((o) => {
         if (orderTypeFilter === 'Social Commerce')
           return o.orderType === 'social_commerce';
-        if (orderTypeFilter === 'E-Commerce') return o.orderType === 'ecommerce';
+        if (orderTypeFilter === 'E-Commerce')
+          return o.orderType === 'ecommerce';
         return true;
       });
     }
@@ -249,10 +264,8 @@ export default function PendingOrdersDashboard() {
     setActiveMenu(null);
 
     try {
-      // Fetch full order details with items
       const fullOrder = await orderService.getById(order.id);
 
-      // Transform the full order data
       const transformedOrder: Order = {
         id: fullOrder.id,
         orderNumber: fullOrder.order_number,
@@ -301,6 +314,7 @@ export default function PendingOrdersDashboard() {
         status: fullOrder.payment_status === 'paid' ? 'Paid' : 'Pending',
         salesBy: fullOrder.salesman?.name || userName || 'N/A',
         store: fullOrder.store.name,
+        storeId: fullOrder.store.id,
         notes: fullOrder.notes || '',
         fulfillmentStatus: fullOrder.fulfillment_status
       };
@@ -321,10 +335,8 @@ export default function PendingOrdersDashboard() {
     setShowEditModal(true);
 
     try {
-      // Fetch full order details with items
       const fullOrder = await orderService.getById(order.id);
 
-      // Transform the full order data
       const transformedOrder: Order = {
         id: fullOrder.id,
         orderNumber: fullOrder.order_number,
@@ -373,44 +385,86 @@ export default function PendingOrdersDashboard() {
         status: fullOrder.payment_status === 'paid' ? 'Paid' : 'Pending',
         salesBy: fullOrder.salesman?.name || userName || 'N/A',
         store: fullOrder.store.name,
+        storeId: fullOrder.store.id,
         notes: fullOrder.notes || '',
         fulfillmentStatus: fullOrder.fulfillment_status
       };
 
-      setSelectedOrder(transformedOrder); // used for header text if needed
-      setEditableOrder(transformedOrder); // used for editing
+      setSelectedOrder(transformedOrder);
+      setEditableOrder(transformedOrder);
+      if (fullOrder.store?.id) {
+        setPickerStoreId(fullOrder.store.id);
+      }
     } catch (error: any) {
       console.error('Failed to load order details:', error);
       alert('Failed to load order details: ' + error.message);
       setShowEditModal(false);
+      setEditableOrder(null);
     } finally {
       setIsLoadingDetails(false);
     }
   };
 
-  const handleReturnOrder = async (order: Order) => {
-    setActiveMenu(null);
-
-    try {
-      const fullOrder = await orderService.getById(order.id);
-      setSelectedOrderForAction(fullOrder);
-      setShowReturnModal(true);
-    } catch (error: any) {
-      console.error('Failed to load order details for return:', error);
-      alert('Failed to load order details. Please try again.');
-    }
+  // 🔁 Return / Exchange logic
+  const prepareReturnExchange = (order: Order, type: ReturnExchangeType) => {
+    setSelectedOrder(order);
+    setReturnExchangeType(type);
+    const items = order.items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      sku: item.sku,
+      quantity: item.quantity,
+      selectedQty: 1,
+      selected: false
+    }));
+    setReturnExchangeItems(items);
+    setShowReturnExchangeModal(true);
   };
 
-  const handleExchangeOrder = async (order: Order) => {
+  const handleReturnOrder = (order: Order) => {
     setActiveMenu(null);
+    prepareReturnExchange(order, 'return');
+  };
 
-    try {
-      const fullOrder = await orderService.getById(order.id);
-      setSelectedOrderForAction(fullOrder);
-      setShowExchangeModal(true);
-    } catch (error: any) {
-      console.error('Failed to load order details for exchange:', error);
-      alert('Failed to load order details. Please try again.');
+  const handleExchangeOrder = (order: Order) => {
+    setActiveMenu(null);
+    prepareReturnExchange(order, 'exchange');
+  };
+
+  const handleSubmitReturnExchange = () => {
+    if (!selectedOrder || !returnExchangeType) return;
+
+    const selectedItems = returnExchangeItems.filter(
+      (item) => item.selected && item.selectedQty > 0
+    );
+
+    if (selectedItems.length === 0) {
+      alert('Please select at least one item and quantity.');
+      return;
+    }
+
+    const context = {
+      type: returnExchangeType,
+      orderId: selectedOrder.id,
+      orderNumber: selectedOrder.orderNumber,
+      items: selectedItems.map((i) => ({
+        id: i.id,
+        name: i.name,
+        sku: i.sku,
+        quantity: i.quantity,
+        selectedQty: i.selectedQty
+      }))
+    };
+
+    const key =
+      returnExchangeType === 'return' ? 'returnOrder' : 'exchangeOrder';
+    sessionStorage.setItem(key, JSON.stringify(context));
+
+    // 🔁 Redirect to dedicated page where you can process the return/exchange
+    if (returnExchangeType === 'return') {
+      window.location.href = '/orders/returns/new';
+    } else {
+      window.location.href = '/orders/exchanges/new';
     }
   };
 
@@ -425,254 +479,6 @@ export default function PendingOrdersDashboard() {
     } catch (error: any) {
       console.error('Error cancelling order:', error);
       alert(`Failed to cancel order: ${error.message}`);
-    }
-  };
-
-  const handleReturnSubmit = async (returnData: {
-    selectedProducts: Array<{
-      order_item_id: number;
-      quantity: number;
-      product_barcode_id?: number;
-    }>;
-    refundMethods: {
-      cash: number;
-      card: number;
-      bkash: number;
-      nagad: number;
-      total: number;
-    };
-    returnReason:
-      | 'defective_product'
-      | 'wrong_item'
-      | 'not_as_described'
-      | 'customer_dissatisfaction'
-      | 'size_issue'
-      | 'color_issue'
-      | 'quality_issue'
-      | 'late_delivery'
-      | 'changed_mind'
-      | 'duplicate_order'
-      | 'other';
-    returnType: 'customer_return' | 'store_return' | 'warehouse_return';
-    customerNotes?: string;
-  }) => {
-    try {
-      if (!selectedOrderForAction) return;
-
-      console.log('🔄 Processing return with data:', returnData);
-
-      const returnRequest: CreateReturnRequest = {
-        order_id: selectedOrderForAction.id,
-        return_reason: returnData.returnReason,
-        return_type: returnData.returnType,
-        items: returnData.selectedProducts.map((item) => ({
-          order_item_id: item.order_item_id,
-          quantity: item.quantity,
-          product_barcode_id: item.product_barcode_id
-        })),
-        customer_notes: returnData.customerNotes || 'Customer initiated return'
-      };
-
-      console.log('📤 Creating return request:', returnRequest);
-      const returnResponse = await productReturnService.create(returnRequest);
-      const returnId = returnResponse.data.id;
-      console.log('✅ Return created with ID:', returnId);
-
-      console.log('⏳ Updating return quality check...');
-      await productReturnService.update(returnId, {
-        quality_check_passed: true,
-        quality_check_notes: 'Auto-approved via POS'
-      });
-
-      console.log('⏳ Approving return...');
-      await productReturnService.approve(returnId, {
-        internal_notes: 'Approved via POS system'
-      });
-
-      console.log('⏳ Processing return (restoring inventory)...');
-      await productReturnService.process(returnId, {
-        restore_inventory: true
-      });
-
-      console.log('⏳ Completing return...');
-      await productReturnService.complete(returnId);
-
-      if (returnData.refundMethods.total > 0) {
-        console.log('💰 Creating refund...');
-        const refundRequest: CreateRefundRequest = {
-          return_id: returnId,
-          refund_type: 'full',
-          refund_method: 'cash',
-          refund_method_details: {
-            cash: returnData.refundMethods.cash,
-            card: returnData.refundMethods.card,
-            bkash: returnData.refundMethods.bkash,
-            nagad: returnData.refundMethods.nagad
-          },
-          internal_notes: 'Refund processed via POS'
-        };
-
-        const refundResponse = await refundService.create(refundRequest);
-        const refundId = refundResponse.data.id;
-
-        console.log('⏳ Processing and completing refund...');
-        await refundService.process(refundId);
-        await refundService.complete(refundId, {
-          transaction_reference: `POS-REFUND-${Date.now()}`
-        });
-        console.log('✅ Refund completed');
-      }
-
-      console.log('🔄 Refreshing order list...');
-      await loadOrders();
-
-      alert('✅ Return processed successfully!');
-      setShowReturnModal(false);
-      setSelectedOrderForAction(null);
-    } catch (error: any) {
-      console.error('❌ Return processing failed:', error);
-      const errorMsg =
-        error.response?.data?.message ||
-        error.message ||
-        'Failed to process return';
-      alert(`Error: ${errorMsg}`);
-    }
-  };
-
-  const handleExchangeSubmit = async (exchangeData: {
-    removedProducts: Array<{
-      order_item_id: number;
-      quantity: number;
-      product_barcode_id?: number;
-    }>;
-    replacementProducts: Array<{
-      product_id: number;
-      batch_id: number;
-      quantity: number;
-      unit_price: number;
-      barcode?: string;
-      barcode_id?: number;
-    }>;
-    paymentRefund: {
-      type: 'payment' | 'refund' | 'none';
-      cash: number;
-      card: number;
-      bkash: number;
-      nagad: number;
-      total: number;
-    };
-  }) => {
-    try {
-      if (!selectedOrderForAction) return;
-
-      console.log('🔄 Processing exchange with data:', exchangeData);
-      console.log('📦 Original order:', selectedOrderForAction.order_number);
-
-      console.log('\n📤 STEP 1: Creating return for old products...');
-      const returnRequest: CreateReturnRequest = {
-        order_id: selectedOrderForAction.id,
-        return_reason: 'other',
-        return_type: 'customer_return',
-        items: exchangeData.removedProducts.map((item) => ({
-          order_item_id: item.order_item_id,
-          quantity: item.quantity,
-          product_barcode_id: item.product_barcode_id
-        })),
-        customer_notes: `Exchange transaction - Original Order: ${selectedOrderForAction.order_number}`
-      };
-
-      const returnResponse = await productReturnService.create(returnRequest);
-      const returnId = returnResponse.data.id;
-      const returnNumber = returnResponse.data.return_number;
-      console.log(`✅ Return created: #${returnNumber} (ID: ${returnId})`);
-
-      console.log('\n⚙️ STEP 2: Auto-approving and processing return...');
-      await productReturnService.update(returnId, {
-        quality_check_passed: true,
-        quality_check_notes: 'Exchange - Auto-approved via POS'
-      });
-      await productReturnService.approve(returnId, {
-        internal_notes: 'Exchange - Auto-approved via POS'
-      });
-      await productReturnService.process(returnId, {
-        restore_inventory: true
-      });
-      await productReturnService.complete(returnId);
-
-      console.log('\n💰 STEP 3: Creating FULL refund for returned items...');
-      const refundRequest: CreateRefundRequest = {
-        return_id: returnId,
-        refund_type: 'full',
-        refund_method: 'cash',
-        internal_notes: `Full refund for exchange - Original Order: ${selectedOrderForAction.order_number}`
-      };
-
-      const refundResponse = await refundService.create(refundRequest);
-      const refundId = refundResponse.data.id;
-      await refundService.process(refundId);
-      await refundService.complete(refundId, {
-        transaction_reference: `EXCHANGE-REFUND-${Date.now()}`
-      });
-
-      console.log('\n🛒 STEP 4: Creating new order for replacement products...');
-      const newOrderTotal = exchangeData.replacementProducts.reduce(
-        (sum, p) => sum + p.unit_price * p.quantity,
-        0
-      );
-
-      const newOrderData = {
-        order_type: selectedOrderForAction.order_type as
-          | 'counter'
-          | 'social_commerce'
-          | 'ecommerce',
-        store_id: selectedOrderForAction.store.id,
-        customer_id: selectedOrderForAction.customer?.id,
-        items: exchangeData.replacementProducts.map((p) => ({
-          product_id: p.product_id,
-          batch_id: p.batch_id,
-          quantity: p.quantity,
-          unit_price: p.unit_price,
-          barcode: p.barcode,
-          barcode_id: p.barcode_id
-        })),
-        payment: {
-          payment_method_id: 1, // Cash
-          amount: newOrderTotal,
-          payment_type: 'full' as const
-        },
-        notes: `Exchange from order #${selectedOrderForAction.order_number} | Return: #${returnNumber}`
-      };
-
-      const newOrder = await orderService.create(newOrderData);
-      await orderService.complete(newOrder.id);
-
-      let successMessage = `✅ Exchange processed successfully!\n\n`;
-      successMessage += `Return: #${returnNumber}\n`;
-      successMessage += `New Order: #${newOrder.order_number}\n\n`;
-
-      if (exchangeData.paymentRefund.type === 'payment') {
-        successMessage += `💳 Customer paid additional: ৳${exchangeData.paymentRefund.total.toLocaleString()}\n`;
-        successMessage += `(New items cost more than returned items)`;
-      } else if (exchangeData.paymentRefund.type === 'refund') {
-        successMessage += `💵 Additional refund to customer: ৳${exchangeData.paymentRefund.total.toLocaleString()}\n`;
-        successMessage += `(Returned items cost more than new items)\n`;
-        successMessage += `Please give customer the refund difference in cash/selected method`;
-      } else {
-        successMessage += `📊 Even exchange - no payment difference`;
-      }
-
-      await loadOrders();
-      alert(successMessage);
-
-      setShowExchangeModal(false);
-      setSelectedOrderForAction(null);
-    } catch (error: any) {
-      console.error('❌ EXCHANGE PROCESSING FAILED:', error);
-      const errorMsg =
-        error.response?.data?.message ||
-        error.message ||
-        'Failed to process exchange';
-      alert(`❌ Exchange failed: ${errorMsg}\n\nPlease check the console for details.`);
     }
   };
 
@@ -698,13 +504,188 @@ export default function PendingOrdersDashboard() {
     return null;
   };
 
-  const totalRevenue = orders.reduce((sum, order) => sum + order.amounts.total, 0);
+  const totalRevenue = orders.reduce(
+    (sum, order) => sum + order.amounts.total,
+    0
+  );
   const paidOrders = orders.filter((o) => o.amounts.due === 0).length;
   const pendingOrders = orders.filter((o) => o.amounts.due > 0).length;
   const socialCommerceCount = orders.filter(
     (o) => o.orderType === 'social_commerce'
   ).length;
-  const ecommerceCount = orders.filter((o) => o.orderType === 'ecommerce').length;
+  const ecommerceCount = orders.filter(
+    (o) => o.orderType === 'ecommerce'
+  ).length;
+
+  // 🔁 Product picker helpers (similar spirit to Social Commerce page)
+
+  const fetchBatchesForStore = async (storeId: number) => {
+    try {
+      setIsProductLoading(true);
+
+      try {
+        const batchesData = await batchService.getAvailableBatches(storeId);
+        if (batchesData && batchesData.length > 0) {
+          const availableBatches = batchesData.filter(
+            (batch: any) => batch.quantity > 0
+          );
+          setPickerBatches(availableBatches);
+          return;
+        }
+      } catch (err) {
+        console.warn('getAvailableBatches failed, trying getBatchesArray...', err);
+      }
+
+      try {
+        const batchesData = await batchService.getBatchesArray({
+          store_id: storeId,
+          status: 'available'
+        });
+        if (batchesData && batchesData.length > 0) {
+          const availableBatches = batchesData.filter(
+            (batch: any) => batch.quantity > 0
+          );
+          setPickerBatches(availableBatches);
+          return;
+        }
+      } catch (err) {
+        console.warn('getBatchesArray failed, trying getBatchesByStore...', err);
+      }
+
+      try {
+        const batchesData = await batchService.getBatchesByStore(storeId);
+        if (batchesData && batchesData.length > 0) {
+          const availableBatches = batchesData.filter(
+            (batch: any) => batch.quantity > 0
+          );
+          setPickerBatches(availableBatches);
+          return;
+        }
+      } catch (err) {
+        console.error('All batch fetch methods failed', err);
+      }
+
+      setPickerBatches([]);
+    } finally {
+      setIsProductLoading(false);
+    }
+  };
+
+  const fetchProductResults = async (query: string) => {
+    if (!pickerStoreId) return;
+    if (!query.trim()) {
+      setProductResults([]);
+      return;
+    }
+
+    setIsProductLoading(true);
+    try {
+      const response = await axios.post('/products/advanced-search', {
+        query,
+        is_archived: false,
+        enable_fuzzy: true,
+        fuzzy_threshold: 60,
+        search_fields: ['name', 'sku', 'description', 'category'],
+        per_page: 50
+      });
+
+      const results: any[] = [];
+
+      if (response.data?.success) {
+        const products =
+          response.data.data?.items ||
+          response.data.data?.data?.items ||
+          response.data.data ||
+          [];
+
+        for (const prod of products) {
+          const productBatches = pickerBatches.filter((batch: any) => {
+            const batchProductId = batch.product?.id || batch.product_id;
+            return batchProductId === prod.id && batch.quantity > 0;
+          });
+
+          if (productBatches.length > 0) {
+            for (const batch of productBatches) {
+              results.push({
+                id: prod.id,
+                name: prod.name,
+                sku: prod.sku,
+                batchId: batch.id,
+                batchNumber: batch.batch_number,
+                price: Number(
+                  String(batch.sell_price ?? '0').replace(/[^0-9.-]/g, '')
+                ),
+                available: batch.quantity,
+                relevance_score: prod.relevance_score || 0,
+                search_stage: prod.search_stage || 'api'
+              });
+            }
+          }
+        }
+
+        results.sort(
+          (a, b) => (b.relevance_score || 0) - (a.relevance_score || 0)
+        );
+        setProductResults(results);
+      } else {
+        setProductResults([]);
+      }
+    } catch (err) {
+      console.error('Product search failed', err);
+      setProductResults([]);
+    } finally {
+      setIsProductLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!showProductPicker || !productSearch.trim()) {
+      setProductResults([]);
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      fetchProductResults(productSearch);
+    }, 300);
+
+    return () => clearTimeout(timeout);
+  }, [productSearch, showProductPicker, pickerStoreId, pickerBatches]);
+
+  const handleSelectProductForOrder = (product: any) => {
+    setEditableOrder((prev) => {
+      if (!prev) return prev;
+      const newItem = {
+        id: Date.now(),
+        name: product.name,
+        sku: product.sku,
+        quantity: 1,
+        price: product.price || 0,
+        discount: 0
+      };
+      return {
+        ...prev,
+        items: [...(prev.items || []), newItem]
+      };
+    });
+
+    setShowProductPicker(false);
+    setProductSearch('');
+    setProductResults([]);
+  };
+
+  const openProductPicker = () => {
+    if (!editableOrder?.storeId && !pickerStoreId) {
+      alert('Store information is missing for this order.');
+      return;
+    }
+    const storeId = editableOrder?.storeId || pickerStoreId;
+    if (!storeId) return;
+    setPickerStoreId(storeId);
+    fetchBatchesForStore(storeId);
+    setShowProductPicker(true);
+    setProductSearch('');
+    setProductResults([]);
+  };
 
   return (
     <div className={darkMode ? 'dark' : ''}>
@@ -732,8 +713,8 @@ export default function PendingOrdersDashboard() {
                         Pending Orders
                       </h1>
                       <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-none mt-0.5">
-                        {filteredOrders.length} of {orders.length} orders awaiting
-                        fulfillment
+                        {filteredOrders.length} of {orders.length} orders
+                        awaiting fulfillment
                       </p>
                     </div>
                   </div>
@@ -960,10 +941,13 @@ export default function PendingOrdersDashboard() {
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  const rect = e.currentTarget.getBoundingClientRect();
-                                  const menuHeight = 280; // approximate
-                                  const spaceBelow = window.innerHeight - rect.bottom;
-                                  const spaceRight = window.innerWidth - rect.right;
+                                  const rect =
+                                    e.currentTarget.getBoundingClientRect();
+                                  const menuHeight = 280; // Approx height of menu
+                                  const spaceBelow =
+                                    window.innerHeight - rect.bottom;
+                                  const spaceRight =
+                                    window.innerWidth - rect.right;
 
                                   let top = rect.bottom + 4;
                                   let left = rect.right - 224; // 224px = w-56
@@ -978,7 +962,9 @@ export default function PendingOrdersDashboard() {
 
                                   setMenuPosition({ top, left });
                                   setActiveMenu(
-                                    activeMenu === order.id ? null : order.id
+                                    activeMenu === order.id
+                                      ? null
+                                      : order.id
                                   );
                                 }}
                                 className="p-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
@@ -1066,7 +1052,7 @@ export default function PendingOrdersDashboard() {
       {/* Order Details Modal */}
       {showDetailsModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-4xl w-full max-height-[90vh] max-h-[90vh] overflow-auto border border-gray-200 dark:border-gray-800">
+          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-auto border border-gray-200 dark:border-gray-800">
             {/* Modal Header */}
             <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between z-10">
               <div>
@@ -1350,7 +1336,7 @@ export default function PendingOrdersDashboard() {
                   Edit Order
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  {editableOrder?.orderNumber || 'Loading...'}
+                  {selectedOrder?.orderNumber || 'Loading...'}
                 </p>
               </div>
               <button
@@ -1375,7 +1361,7 @@ export default function PendingOrdersDashboard() {
               </div>
             ) : editableOrder ? (
               <div className="p-6 space-y-6">
-                {/* Customer Information */}
+                {/* Customer Information (kept as before, uncontrolled inputs) */}
                 <div>
                   <h3 className="text-sm font-bold text-black dark:text-white mb-3">
                     Customer Information
@@ -1387,20 +1373,7 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <input
                         type="text"
-                        value={editableOrder.customer.name}
-                        onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  customer: {
-                                    ...prev.customer,
-                                    name: e.target.value
-                                  }
-                                }
-                              : prev
-                          )
-                        }
+                        defaultValue={editableOrder.customer.name}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -1410,20 +1383,7 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <input
                         type="text"
-                        value={editableOrder.customer.phone}
-                        onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  customer: {
-                                    ...prev.customer,
-                                    phone: e.target.value
-                                  }
-                                }
-                              : prev
-                          )
-                        }
+                        defaultValue={editableOrder.customer.phone}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -1433,20 +1393,7 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <input
                         type="email"
-                        value={editableOrder.customer.email}
-                        onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  customer: {
-                                    ...prev.customer,
-                                    email: e.target.value
-                                  }
-                                }
-                              : prev
-                          )
-                        }
+                        defaultValue={editableOrder.customer.email}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -1456,27 +1403,14 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <textarea
                         rows={2}
-                        value={editableOrder.customer.address}
-                        onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  customer: {
-                                    ...prev.customer,
-                                    address: e.target.value
-                                  }
-                                }
-                              : prev
-                          )
-                        }
+                        defaultValue={editableOrder.customer.address}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* Order Items */}
+                {/* Order Items with Add / Remove */}
                 <div>
                   <h3 className="text-sm font-bold text-black dark:text-white mb-3">
                     Order Items
@@ -1489,26 +1423,10 @@ export default function PendingOrdersDashboard() {
                           className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
                         >
                           <div className="flex-1">
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                              Product Name
-                            </label>
-                            <input
-                              type="text"
-                              value={item.name}
-                              onChange={(e) =>
-                                setEditableOrder((prev) => {
-                                  if (!prev) return prev;
-                                  const items = [...prev.items];
-                                  items[index] = {
-                                    ...items[index],
-                                    name: e.target.value
-                                  };
-                                  return { ...prev, items };
-                                })
-                              }
-                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-black dark:text-white text-sm"
-                            />
-                            <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                            <p className="text-sm font-medium text-black dark:text-white">
+                              {item.name}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-500">
                               SKU: {item.sku}
                             </p>
                           </div>
@@ -1518,23 +1436,8 @@ export default function PendingOrdersDashboard() {
                             </label>
                             <input
                               type="number"
-                              min={1}
-                              value={item.quantity}
-                              onChange={(e) =>
-                                setEditableOrder((prev) => {
-                                  if (!prev) return prev;
-                                  const qty = Math.max(
-                                    1,
-                                    Number(e.target.value) || 1
-                                  );
-                                  const items = [...prev.items];
-                                  items[index] = {
-                                    ...items[index],
-                                    quantity: qty
-                                  };
-                                  return { ...prev, items };
-                                })
-                              }
+                              defaultValue={item.quantity}
+                              min="1"
                               className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-black dark:text-white text-sm"
                             />
                           </div>
@@ -1544,91 +1447,42 @@ export default function PendingOrdersDashboard() {
                             </label>
                             <input
                               type="number"
+                              defaultValue={item.price}
                               step="0.01"
-                              value={item.price}
-                              onChange={(e) =>
-                                setEditableOrder((prev) => {
-                                  if (!prev) return prev;
-                                  const price = Number(e.target.value) || 0;
-                                  const items = [...prev.items];
-                                  items[index] = {
-                                    ...items[index],
-                                    price
-                                  };
-                                  return { ...prev, items };
-                                })
-                              }
                               className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-black dark:text-white text-sm"
                             />
                           </div>
                           <button
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
                               setEditableOrder((prev) => {
                                 if (!prev) return prev;
-                                const items = prev.items.filter(
-                                  (_, i) => i !== index
+                                const newItems = prev.items.filter(
+                                  (_it, i) => i !== index
                                 );
-                                return { ...prev, items };
-                              })
-                            }
-                            className="px-3 py-1.5 text-xs font-medium text-red-600 dark:text-red-400 border border-red-200 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
+                                return { ...prev, items: newItems };
+                              });
+                            }}
+                            className="text-xs text-red-600 hover:text-red-700 font-medium"
                           >
                             Remove
                           </button>
                         </div>
                       ))}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setEditableOrder((prev) => {
-                            if (!prev) return prev;
-                            const newItem = {
-                              id: Date.now(),
-                              name: '',
-                              sku: '',
-                              quantity: 1,
-                              price: 0,
-                              discount: 0
-                            };
-                            return {
-                              ...prev,
-                              items: [...prev.items, newItem]
-                            };
-                          })
-                        }
-                        className="mt-2 inline-flex items-center px-3 py-2 text-xs font-medium rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-                      >
-                        + Add Item
-                      </button>
                     </div>
                   ) : (
-                    <div>
-                      <p className="text-sm text-gray-500 mb-2">
-                        No items in this order.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setEditableOrder((prev) => {
-                            if (!prev) return prev;
-                            const newItem = {
-                              id: Date.now(),
-                              name: '',
-                              sku: '',
-                              quantity: 1,
-                              price: 0,
-                              discount: 0
-                            };
-                            return { ...prev, items: [newItem] };
-                          })
-                        }
-                        className="inline-flex items-center px-3 py-2 text-xs font-medium rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-                      >
-                        + Add First Item
-                      </button>
-                    </div>
+                    <p className="text-sm text-gray-500">
+                      No items in this order
+                    </p>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={openProductPicker}
+                    className="mt-3 inline-flex items-center px-3 py-2 text-xs font-medium rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  >
+                    + Add Item
+                  </button>
                 </div>
 
                 {/* Order Details */}
@@ -1643,18 +1497,8 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <input
                         type="number"
+                        defaultValue={editableOrder.discount}
                         step="0.01"
-                        value={editableOrder.discount}
-                        onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  discount: Number(e.target.value) || 0
-                                }
-                              : prev
-                          )
-                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -1664,18 +1508,8 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <input
                         type="number"
+                        defaultValue={editableOrder.shipping}
                         step="0.01"
-                        value={editableOrder.shipping}
-                        onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  shipping: Number(e.target.value) || 0
-                                }
-                              : prev
-                          )
-                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -1685,17 +1519,7 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <textarea
                         rows={3}
-                        value={editableOrder.notes}
-                        onChange={(e) =>
-                          setEditableOrder((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  notes: e.target.value
-                                }
-                              : prev
-                          )
-                        }
+                        defaultValue={editableOrder.notes}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -1716,11 +1540,10 @@ export default function PendingOrdersDashboard() {
                   </button>
                   <button
                     onClick={() => {
-                      console.log('Edited order to save:', editableOrder);
                       alert(
-                        'Save functionality will be implemented with API integration.\nCheck console log for edited payload.'
+                        'Save functionality will be implemented with API integration'
                       );
-                      // TODO: orderService.update(editableOrder.id, payloadBuiltFromEditableOrder)
+                      // TODO: Implement save order changes (use editableOrder state)
                     }}
                     className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
                   >
@@ -1733,34 +1556,224 @@ export default function PendingOrdersDashboard() {
         </div>
       )}
 
+      {/* Product Picker Modal for Edit Order */}
+      {showProductPicker && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-hidden border border-gray-200 dark:border-gray-800">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800">
+              <h3 className="text-sm font-semibold text-black dark:text-white">
+                Add Product to Order
+              </h3>
+              <button
+                onClick={() => {
+                  setShowProductPicker(false);
+                  setProductSearch('');
+                  setProductResults([]);
+                }}
+                className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                <X className="h-4 w-4 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  placeholder="Search by product name or SKU..."
+                  className="w-full pl-10 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
+                />
+              </div>
+
+              <div className="border border-gray-200 dark:border-gray-800 rounded-lg max-h-72 overflow-auto p-2">
+                {isProductLoading ? (
+                  <div className="p-6 text-center">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Loading products...
+                    </p>
+                  </div>
+                ) : productResults.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-gray-500 dark:text-gray-400">
+                    Type to search products for this store
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {productResults.map((product) => (
+                      <button
+                        type="button"
+                        key={`${product.id}-${product.batchId}`}
+                        onClick={() => handleSelectProductForOrder(product)}
+                        className="border border-gray-200 dark:border-gray-600 rounded p-2 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                      >
+                        <p className="text-xs font-medium text-black dark:text-white truncate">
+                          {product.name}
+                        </p>
+                        {product.batchNumber && (
+                          <p className="text-[11px] text-blue-600 dark:text-blue-400 truncate">
+                            Batch: {product.batchNumber}
+                          </p>
+                        )}
+                        <p className="text-[11px] text-gray-600 dark:text-gray-400">
+                          Price: {product.price} Tk
+                        </p>
+                        <p className="text-[11px] text-green-600 dark:text-green-400">
+                          Available: {product.available}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Return / Exchange Modal */}
+      {showReturnExchangeModal && selectedOrder && returnExchangeType && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-3xl w-full max-h-[85vh] overflow-hidden border border-gray-200 dark:border-gray-800">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800">
+              <div>
+                <h3 className="text-sm font-semibold text-black dark:text-white">
+                  {returnExchangeType === 'return'
+                    ? 'Create Return'
+                    : 'Create Exchange'}
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Order: {selectedOrder.orderNumber}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowReturnExchangeModal(false);
+                  setReturnExchangeItems([]);
+                  setReturnExchangeType(null);
+                }}
+                className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                <X className="h-4 w-4 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              <p className="text-xs text-gray-600 dark:text-gray-400">
+                Select items and quantities to{' '}
+                {returnExchangeType === 'return' ? 'return' : 'exchange'}.
+              </p>
+
+              <div className="border border-gray-200 dark:border-gray-800 rounded-lg max-h-64 overflow-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">
+                        Item
+                      </th>
+                      <th className="px-3 py-2 text-center font-medium text-gray-700 dark:text-gray-300">
+                        Ordered
+                      </th>
+                      <th className="px-3 py-2 text-center font-medium text-gray-700 dark:text-gray-300">
+                        Qty
+                      </th>
+                      <th className="px-3 py-2 text-center font-medium text-gray-700 dark:text-gray-300">
+                        Select
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {returnExchangeItems.map((item, index) => (
+                      <tr
+                        key={item.id}
+                        className="border-b border-gray-200 dark:border-gray-800"
+                      >
+                        <td className="px-3 py-2">
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {item.name}
+                          </p>
+                          <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                            SKU: {item.sku}
+                          </p>
+                        </td>
+                        <td className="px-3 py-2 text-center text-gray-900 dark:text-white">
+                          {item.quantity}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            type="number"
+                            min={1}
+                            max={item.quantity}
+                            value={item.selectedQty}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value || '0', 10);
+                              setReturnExchangeItems((prev) => {
+                                const copy = [...prev];
+                                copy[index] = {
+                                  ...copy[index],
+                                  selectedQty: Math.max(
+                                    1,
+                                    Math.min(val || 1, item.quantity)
+                                  )
+                                };
+                                return copy;
+                              });
+                            }}
+                            className="w-16 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs"
+                          />
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={item.selected}
+                            onChange={(e) => {
+                              const checked = e.target.checked;
+                              setReturnExchangeItems((prev) => {
+                                const copy = [...prev];
+                                copy[index] = {
+                                  ...copy[index],
+                                  selected: checked
+                                };
+                                return copy;
+                              });
+                            }}
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2 border-t border-gray-200 dark:border-gray-800">
+                <button
+                  onClick={() => {
+                    setShowReturnExchangeModal(false);
+                    setReturnExchangeItems([]);
+                    setReturnExchangeType(null);
+                  }}
+                  className="px-4 py-2 text-xs border border-gray-300 dark:border-gray-600 rounded-lg text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSubmitReturnExchange}
+                  className="px-4 py-2 text-xs bg-teal-600 hover:bg-teal-700 text-white rounded-lg"
+                >
+                  Continue
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Click outside to close menu */}
       {activeMenu !== null && (
         <div
           className="fixed inset-0 z-[55]"
           onClick={() => setActiveMenu(null)}
-        />
-      )}
-
-      {/* Return / Exchange Modals */}
-      {showReturnModal && selectedOrderForAction && (
-        <ReturnProductModal
-          order={selectedOrderForAction}
-          onClose={() => {
-            setShowReturnModal(false);
-            setSelectedOrderForAction(null);
-          }}
-          onReturn={handleReturnSubmit}
-        />
-      )}
-
-      {showExchangeModal && selectedOrderForAction && (
-        <ExchangeProductModal
-          order={selectedOrderForAction}
-          onClose={() => {
-            setShowExchangeModal(false);
-            setSelectedOrderForAction(null);
-          }}
-          onExchange={handleExchangeSubmit}
         />
       )}
 

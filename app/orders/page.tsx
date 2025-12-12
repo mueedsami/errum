@@ -77,6 +77,7 @@ export default function PendingOrdersDashboard() {
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
   const [userName, setUserName] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
 
   // 🔁 Return / Exchange modal state
   const [showReturnExchangeModal, setShowReturnExchangeModal] = useState(false);
@@ -93,10 +94,55 @@ export default function PendingOrdersDashboard() {
   const [pickerBatches, setPickerBatches] = useState<any[]>([]);
   const [pickerStoreId, setPickerStoreId] = useState<number | null>(null);
 
+  // Helper: transform backend order into frontend Order type
+  const transformOrder = (order: any): Order => {
+    const num = (val: any) =>
+      Number(String(val ?? '0').replace(/[^0-9.-]/g, ''));
+
+    return {
+      id: order.id,
+      orderNumber: order.order_number,
+      orderType: order.order_type,
+      orderTypeLabel: order.order_type_label,
+      date: new Date(order.order_date).toLocaleDateString('en-GB'),
+      customer: {
+        name: order.customer?.name || '',
+        phone: order.customer?.phone || '',
+        email: order.customer?.email || '',
+        // NOTE: backend shipping_address might be string or JSON; keeping as-is
+        address: order.shipping_address || ''
+      },
+      items:
+        order.items?.map((item: any) => ({
+          id: item.id,
+          name: item.product_name,
+          sku: item.product_sku,
+          quantity: item.quantity,
+          price: num(item.unit_price),
+          discount: num(item.discount_amount)
+        })) || [],
+      subtotal: num(order.subtotal),
+      discount: num(order.discount_amount),
+      shipping: num(order.shipping_amount),
+      amounts: {
+        total: num(order.total_amount),
+        paid: num(order.paid_amount),
+        due: num(order.outstanding_amount)
+      },
+      status: order.payment_status === 'paid' ? 'Paid' : 'Pending',
+      salesBy: order.salesman?.name || userName || 'N/A',
+      store: order.store?.name || '',
+      storeId: order.store?.id,
+      notes: order.notes || '',
+      fulfillmentStatus: order.fulfillment_status
+    };
+  };
+
   useEffect(() => {
     const name = localStorage.getItem('userName') || '';
     setUserName(name);
     loadOrders();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadOrders = async () => {
@@ -133,71 +179,9 @@ export default function PendingOrdersDashboard() {
       );
 
       // Transform the orders
-      const transformedOrders = allOrders.map((order: any) => ({
-        id: order.id,
-        orderNumber: order.order_number,
-        orderType: order.order_type,
-        orderTypeLabel: order.order_type_label,
-        date: new Date(order.order_date).toLocaleDateString('en-GB'),
-        customer: {
-          name: order.customer?.name || '',
-          phone: order.customer?.phone || '',
-          email: order.customer?.email || '',
-          address: order.shipping_address || ''
-        },
-        items:
-          order.items?.map((item: any) => {
-            const unitPrice = Number(
-              String(item.unit_price ?? '0').replace(/[^0-9.-]/g, '')
-            );
-            const discountAmount = Number(
-              String(item.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
-            );
-
-            console.log('Item data:', {
-              product_name: item.product_name,
-              unit_price_raw: item.unit_price,
-              unit_price_cleaned: unitPrice,
-              discount_raw: item.discount_amount,
-              discount_cleaned: discountAmount
-            });
-
-            return {
-              id: item.id,
-              name: item.product_name,
-              sku: item.product_sku,
-              quantity: item.quantity,
-              price: unitPrice,
-              discount: discountAmount
-            };
-          }) || [],
-        subtotal: Number(
-          String(order.subtotal ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        discount: Number(
-          String(order.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        shipping: Number(
-          String(order.shipping_amount ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        amounts: {
-          total: Number(
-            String(order.total_amount ?? '0').replace(/[^0-9.-]/g, '')
-          ),
-          paid: Number(
-            String(order.paid_amount ?? '0').replace(/[^0-9.-]/g, '')
-          ),
-          due: Number(
-            String(order.outstanding_amount ?? '0').replace(/[^0-9.-]/g, '')
-          )
-        },
-        status: order.payment_status === 'paid' ? 'Paid' : 'Pending',
-        salesBy: order.salesman?.name || userName || 'N/A',
-        store: order.store?.name || '',
-        storeId: order.store?.id,
-        notes: order.notes || '',
-        fulfillmentStatus: order.fulfillment_status
-      }));
+      const transformedOrders: Order[] = allOrders.map((order: any) =>
+        transformOrder(order)
+      );
 
       setOrders(transformedOrders);
       setFilteredOrders(transformedOrders);
@@ -265,60 +249,7 @@ export default function PendingOrdersDashboard() {
 
     try {
       const fullOrder = await orderService.getById(order.id);
-
-      const transformedOrder: Order = {
-        id: fullOrder.id,
-        orderNumber: fullOrder.order_number,
-        orderType: fullOrder.order_type,
-        orderTypeLabel: fullOrder.order_type_label,
-        date: new Date(fullOrder.order_date).toLocaleDateString('en-GB'),
-        customer: {
-          name: fullOrder.customer.name,
-          phone: fullOrder.customer.phone,
-          email: fullOrder.customer.email || '',
-          address: fullOrder.shipping_address || ''
-        },
-        items:
-          fullOrder.items?.map((item: any) => ({
-            id: item.id,
-            name: item.product_name,
-            sku: item.product_sku,
-            quantity: item.quantity,
-            price: Number(
-              String(item.unit_price ?? '0').replace(/[^0-9.-]/g, '')
-            ),
-            discount: Number(
-              String(item.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
-            )
-          })) || [],
-        subtotal: Number(
-          String(fullOrder.subtotal ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        discount: Number(
-          String(fullOrder.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        shipping: Number(
-          String(fullOrder.shipping_amount ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        amounts: {
-          total: Number(
-            String(fullOrder.total_amount ?? '0').replace(/[^0-9.-]/g, '')
-          ),
-          paid: Number(
-            String(fullOrder.paid_amount ?? '0').replace(/[^0-9.-]/g, '')
-          ),
-          due: Number(
-            String(fullOrder.outstanding_amount ?? '0').replace(/[^0-9.-]/g, '')
-          )
-        },
-        status: fullOrder.payment_status === 'paid' ? 'Paid' : 'Pending',
-        salesBy: fullOrder.salesman?.name || userName || 'N/A',
-        store: fullOrder.store.name,
-        storeId: fullOrder.store.id,
-        notes: fullOrder.notes || '',
-        fulfillmentStatus: fullOrder.fulfillment_status
-      };
-
+      const transformedOrder = transformOrder(fullOrder);
       setSelectedOrder(transformedOrder);
     } catch (error: any) {
       console.error('Failed to load order details:', error);
@@ -336,62 +267,11 @@ export default function PendingOrdersDashboard() {
 
     try {
       const fullOrder = await orderService.getById(order.id);
-
-      const transformedOrder: Order = {
-        id: fullOrder.id,
-        orderNumber: fullOrder.order_number,
-        orderType: fullOrder.order_type,
-        orderTypeLabel: fullOrder.order_type_label,
-        date: new Date(fullOrder.order_date).toLocaleDateString('en-GB'),
-        customer: {
-          name: fullOrder.customer.name,
-          phone: fullOrder.customer.phone,
-          email: fullOrder.customer.email || '',
-          address: fullOrder.shipping_address || ''
-        },
-        items:
-          fullOrder.items?.map((item: any) => ({
-            id: item.id,
-            name: item.product_name,
-            sku: item.product_sku,
-            quantity: item.quantity,
-            price: Number(
-              String(item.unit_price ?? '0').replace(/[^0-9.-]/g, '')
-            ),
-            discount: Number(
-              String(item.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
-            )
-          })) || [],
-        subtotal: Number(
-          String(fullOrder.subtotal ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        discount: Number(
-          String(fullOrder.discount_amount ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        shipping: Number(
-          String(fullOrder.shipping_amount ?? '0').replace(/[^0-9.-]/g, '')
-        ),
-        amounts: {
-          total: Number(
-            String(fullOrder.total_amount ?? '0').replace(/[^0-9.-]/g, '')
-          ),
-          paid: Number(
-            String(fullOrder.paid_amount ?? '0').replace(/[^0-9.-]/g, '')
-          ),
-          due: Number(
-            String(fullOrder.outstanding_amount ?? '0').replace(/[^0-9.-]/g, '')
-          )
-        },
-        status: fullOrder.payment_status === 'paid' ? 'Paid' : 'Pending',
-        salesBy: fullOrder.salesman?.name || userName || 'N/A',
-        store: fullOrder.store.name,
-        storeId: fullOrder.store.id,
-        notes: fullOrder.notes || '',
-        fulfillmentStatus: fullOrder.fulfillment_status
-      };
+      const transformedOrder = transformOrder(fullOrder);
 
       setSelectedOrder(transformedOrder);
       setEditableOrder(transformedOrder);
+
       if (fullOrder.store?.id) {
         setPickerStoreId(fullOrder.store.id);
       }
@@ -402,6 +282,50 @@ export default function PendingOrdersDashboard() {
       setEditableOrder(null);
     } finally {
       setIsLoadingDetails(false);
+    }
+  };
+
+  // 🔁 Save order via new OrderController@update (no items, only meta fields)
+  const handleSaveOrder = async () => {
+    if (!editableOrder) return;
+
+    setIsSaving(true);
+    try {
+      const payload = {
+        customer_name: editableOrder.customer.name,
+        customer_phone: editableOrder.customer.phone,
+        customer_email: editableOrder.customer.email,
+        customer_address: editableOrder.customer.address,
+        discount_amount: editableOrder.discount ?? 0,
+        shipping_amount: editableOrder.shipping ?? 0,
+        notes: editableOrder.notes ?? ''
+        // NOTE: Not sending shipping_address or items here,
+        // as per backend API contract.
+      };
+
+      const res = await axios.patch(`/orders/${editableOrder.id}`, payload);
+      const updatedRaw = res.data?.data ?? res.data;
+      const updated = transformOrder(updatedRaw);
+
+      // Update local state (orders + filteredOrders + modals)
+      setOrders((prev) => prev.map((o) => (o.id === updated.id ? updated : o)));
+      setFilteredOrders((prev) =>
+        prev.map((o) => (o.id === updated.id ? updated : o))
+      );
+      setSelectedOrder(updated);
+      setEditableOrder(updated);
+
+      alert('Order updated successfully');
+      setShowEditModal(false);
+    } catch (error: any) {
+      console.error('Failed to update order:', error);
+      const msg =
+        error?.response?.data?.message ||
+        error?.message ||
+        'Failed to update order.';
+      alert(msg);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -460,7 +384,6 @@ export default function PendingOrdersDashboard() {
       returnExchangeType === 'return' ? 'returnOrder' : 'exchangeOrder';
     sessionStorage.setItem(key, JSON.stringify(context));
 
-    // 🔁 Redirect to dedicated page where you can process the return/exchange
     if (returnExchangeType === 'return') {
       window.location.href = '/orders/returns/new';
     } else {
@@ -517,7 +440,7 @@ export default function PendingOrdersDashboard() {
     (o) => o.orderType === 'ecommerce'
   ).length;
 
-  // 🔁 Product picker helpers (similar spirit to Social Commerce page)
+  // 🔁 Product picker helpers
 
   const fetchBatchesForStore = async (storeId: number) => {
     try {
@@ -649,6 +572,7 @@ export default function PendingOrdersDashboard() {
     }, 300);
 
     return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productSearch, showProductPicker, pickerStoreId, pickerBatches]);
 
   const handleSelectProductForOrder = (product: any) => {
@@ -1361,7 +1285,7 @@ export default function PendingOrdersDashboard() {
               </div>
             ) : editableOrder ? (
               <div className="p-6 space-y-6">
-                {/* Customer Information (kept as before, uncontrolled inputs) */}
+                {/* Customer Information (controlled inputs) */}
                 <div>
                   <h3 className="text-sm font-bold text-black dark:text-white mb-3">
                     Customer Information
@@ -1373,7 +1297,20 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <input
                         type="text"
-                        defaultValue={editableOrder.customer.name}
+                        value={editableOrder.customer.name}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  customer: {
+                                    ...prev.customer,
+                                    name: e.target.value
+                                  }
+                                }
+                              : prev
+                          )
+                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -1383,7 +1320,20 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <input
                         type="text"
-                        defaultValue={editableOrder.customer.phone}
+                        value={editableOrder.customer.phone}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  customer: {
+                                    ...prev.customer,
+                                    phone: e.target.value
+                                  }
+                                }
+                              : prev
+                          )
+                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -1393,7 +1343,20 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <input
                         type="email"
-                        defaultValue={editableOrder.customer.email}
+                        value={editableOrder.customer.email}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  customer: {
+                                    ...prev.customer,
+                                    email: e.target.value
+                                  }
+                                }
+                              : prev
+                          )
+                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -1403,14 +1366,27 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <textarea
                         rows={2}
-                        defaultValue={editableOrder.customer.address}
+                        value={editableOrder.customer.address}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  customer: {
+                                    ...prev.customer,
+                                    address: e.target.value
+                                  }
+                                }
+                              : prev
+                          )
+                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
                   </div>
                 </div>
 
-                {/* Order Items with Add / Remove */}
+                {/* Order Items with Add / Remove (UI only, not persisted via this API) */}
                 <div>
                   <h3 className="text-sm font-bold text-black dark:text-white mb-3">
                     Order Items
@@ -1497,7 +1473,17 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <input
                         type="number"
-                        defaultValue={editableOrder.discount}
+                        value={editableOrder.discount}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  discount: Number(e.target.value || 0)
+                                }
+                              : prev
+                          )
+                        }
                         step="0.01"
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
@@ -1508,7 +1494,17 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <input
                         type="number"
-                        defaultValue={editableOrder.shipping}
+                        value={editableOrder.shipping}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  shipping: Number(e.target.value || 0)
+                                }
+                              : prev
+                          )
+                        }
                         step="0.01"
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
@@ -1519,7 +1515,12 @@ export default function PendingOrdersDashboard() {
                       </label>
                       <textarea
                         rows={3}
-                        defaultValue={editableOrder.notes}
+                        value={editableOrder.notes}
+                        onChange={(e) =>
+                          setEditableOrder((prev) =>
+                            prev ? { ...prev, notes: e.target.value } : prev
+                          )
+                        }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       />
                     </div>
@@ -1535,19 +1536,16 @@ export default function PendingOrdersDashboard() {
                       setEditableOrder(null);
                     }}
                     className="px-6 py-2.5 border border-gray-300 dark:border-gray-600 text-black dark:text-white rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors font-medium"
+                    disabled={isSaving}
                   >
                     Cancel
                   </button>
                   <button
-                    onClick={() => {
-                      alert(
-                        'Save functionality will be implemented with API integration'
-                      );
-                      // TODO: Implement save order changes (use editableOrder state)
-                    }}
-                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium"
+                    onClick={handleSaveOrder}
+                    disabled={isSaving}
+                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium disabled:opacity-60 disabled:cursor-not-allowed"
                   >
-                    Save Changes
+                    {isSaving ? 'Saving...' : 'Save Changes'}
                   </button>
                 </div>
               </div>

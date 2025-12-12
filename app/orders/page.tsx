@@ -578,39 +578,64 @@ export default function PendingOrdersDashboard() {
   }, [productSearch, showProductPicker, pickerStoreId, pickerBatches]);
 
   const handleSelectProductForOrder = async (product: any) => {
-    if (!editableOrder) return;
+  if (!editableOrder) return;
 
-    try {
-      // 🔑 Send a richer payload so validator is happy
-      const payload = {
-        product_id: product.id,
-        batch_id: product.batchId,
-        quantity: 1,
-        unit_price: product.price,
-        discount_amount: 0
-      };
+  try {
+    const itemPayload = {
+      // Core relations
+      order_id: editableOrder.id,
+      store_id: editableOrder.storeId ?? null,
 
-      console.log('Adding order item payload:', payload);
+      // Product info
+      product_id: product.id,
+      product_name: product.name,
+      product_sku: product.sku,
 
-      await axios.post(`/orders/${editableOrder.id}/items`, payload);
+      // Batch / inventory
+      batch_id: product.batchId,
 
-      await reloadEditableOrder(editableOrder.id);
+      // Pricing
+      quantity: 1,
+      unit_price: product.price,
+      discount_amount: 0
+    };
 
-      setShowProductPicker(false);
-      setProductSearch('');
-      setProductResults([]);
-    } catch (err: any) {
-      console.error('Failed to add item to order:', err);
-      const backendData = err?.response?.data;
-      const msg =
-        backendData?.message ||
-        backendData?.error ||
-        JSON.stringify(backendData || {}) ||
-        err?.message ||
-        'Failed to add item to order.';
-      alert(msg);
-    }
-  };
+    console.log('Adding order item payload:', itemPayload);
+
+    // Send both flat fields AND items[] array to satisfy either kind of validator
+    const payload = {
+      ...itemPayload,
+      items: [itemPayload]
+    };
+
+    const res = await axios.post(
+      `/orders/${editableOrder.id}/items`,
+      payload
+    );
+
+    console.log('Add item response:', res.data);
+
+    await reloadEditableOrder(editableOrder.id);
+
+    setShowProductPicker(false);
+    setProductSearch('');
+    setProductResults([]);
+  } catch (err: any) {
+    console.error('Failed to add item to order (full error):', err);
+    const backendData = err?.response?.data;
+    console.log('Backend 422 data:', backendData);
+
+    const msg =
+      backendData?.message ||
+      backendData?.error ||
+      JSON.stringify(backendData || {}) ||
+      err?.message ||
+      'Failed to add item to order.';
+
+    alert(msg);
+  }
+};
+
 
   const openProductPicker = () => {
     if (!editableOrder?.storeId && !pickerStoreId) {

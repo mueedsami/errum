@@ -31,7 +31,7 @@ export default function HeroSection() {
             <div className="inline-flex items-center gap-2 rounded-full border border-red-100 bg-red-50 px-3.5 py-1.5">
               <Sparkles className="h-3.5 w-3.5 text-red-700" />
               <span className="text-[11px] sm:text-xs font-semibold tracking-wide text-red-800">
-                Signature Collections
+                Signature Drops
               </span>
             </div>
 
@@ -39,13 +39,17 @@ export default function HeroSection() {
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-[1.05] text-gray-900 text-balance">
                 {BRAND}{" "}
                 <span className="bg-gradient-to-r from-red-800 to-rose-500 bg-clip-text text-transparent">
-                  Sarees
+                  Lifestyle
                 </span>{" "}
-                for timeless elegance
+                essentials for everyday style
               </h1>
+
               <p className="text-base sm:text-lg text-gray-600 max-w-xl">
-                Refined drapes, premium fabrics, and curated designs that move
-                beautifully from everyday grace to statement celebrations.
+                A complete lifestyle brand — shop{" "}
+                <span className="font-semibold text-gray-800">
+                  shoes, clothing, watches, and bags
+                </span>{" "}
+                curated for comfort, quality, and a clean premium look.
               </p>
             </div>
 
@@ -53,7 +57,7 @@ export default function HeroSection() {
             <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs sm:text-sm text-gray-500">
               <span className="inline-flex items-center gap-2">
                 <span className="h-1.5 w-1.5 rounded-full bg-red-700" />
-                Authentic sourcing
+                Comfort-first picks
               </span>
               <span className="inline-flex items-center gap-2">
                 <span className="h-1.5 w-1.5 rounded-full bg-red-700" />
@@ -91,7 +95,7 @@ export default function HeroSection() {
                 <div className="relative h-full w-full overflow-hidden rounded-[1.6rem]">
                   <Image
                     src="/e-commerce-hero.jpg"
-                    alt={`${BRAND} featured saree`}
+                    alt={`${BRAND} lifestyle collection`}
                     fill
                     priority
                     className="object-cover transition-transform duration-700 hover:scale-105"
@@ -102,7 +106,7 @@ export default function HeroSection() {
               {/* Small floating label */}
               <div className="absolute -bottom-5 left-5 rounded-2xl bg-white/95 backdrop-blur px-4 py-2.5 shadow-xl ring-1 ring-gray-200/60">
                 <p className="text-[10px] uppercase tracking-wide text-gray-500">
-                  Curated in-store & online
+                  In-store & online
                 </p>
                 <p className="text-sm font-semibold text-gray-900">
                   Mirpur • Jamuna • Bashundhara

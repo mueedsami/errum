@@ -48,8 +48,9 @@ export default function Footer() {
                 {BRAND}
               </h3>
               <p className="text-sm text-gray-400 mt-2 max-w-sm">
-                Premium sarees curated for modern elegance and timeless Bangladeshi heritage.
-              </p>
+  A complete lifestyle brand — footwear, clothing, watches, and bags curated for everyday confidence.
+</p>
+
             </div>
 
             {/* Minimal quick nav (optional tiny) */}
@@ -93,7 +94,7 @@ export default function Footer() {
             <div className="space-y-3">
               <div className="rounded-xl bg-white/5 border border-white/10 p-4">
                 <p className="text-sm font-semibold text-white">
-                  Curated Premium Fabrics
+                  Comfort & quality assured
                 </p>
                 <p className="text-xs text-gray-400 mt-1">
                   Thoughtfully selected designs with quality finishing.

@@ -33,6 +33,20 @@ interface CartProduct {
   defectId?: string;
 }
 
+// Pathao types
+interface PathaoCity {
+  city_id: number;
+  city_name: string;
+}
+interface PathaoZone {
+  zone_id: number;
+  zone_name: string;
+}
+interface PathaoArea {
+  area_id: number;
+  area_name: string;
+}
+
 export default function SocialCommercePage() {
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -49,23 +63,24 @@ export default function SocialCommercePage() {
 
   const [isInternational, setIsInternational] = useState(false);
 
-  const [division, setDivision] = useState('');
-  const [district, setDistrict] = useState('');
-  const [city, setCity] = useState('');
-  const [zone, setZone] = useState('');
-  const [area, setArea] = useState('');
+  // ✅ Domestic (Pathao)
+  const [pathaoCities, setPathaoCities] = useState<PathaoCity[]>([]);
+  const [pathaoZones, setPathaoZones] = useState<PathaoZone[]>([]);
+  const [pathaoAreas, setPathaoAreas] = useState<PathaoArea[]>([]);
+
+  const [pathaoCityId, setPathaoCityId] = useState<string>('');
+  const [pathaoZoneId, setPathaoZoneId] = useState<string>('');
+  const [pathaoAreaId, setPathaoAreaId] = useState<string>('');
+
+  const [streetAddress, setStreetAddress] = useState('');
   const [postalCode, setPostalCode] = useState('');
 
+  // ✅ International
   const [country, setCountry] = useState('');
   const [state, setState] = useState('');
   const [internationalCity, setInternationalCity] = useState('');
   const [internationalPostalCode, setInternationalPostalCode] = useState('');
-
   const [deliveryAddress, setDeliveryAddress] = useState('');
-
-  const [divisions, setDivisions] = useState<any[]>([]);
-  const [districts, setDistricts] = useState<any[]>([]);
-  const [upazillas, setUpazillas] = useState<any[]>([]);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -155,8 +170,8 @@ export default function SocialCommercePage() {
           : Array.isArray(response.data.data)
           ? response.data.data
           : [];
-      } else if (Array.isArray(response.data)) {
-        storesData = response.data;
+      } else if (Array.isArray((response as any)?.data)) {
+        storesData = (response as any).data;
       }
 
       setStores(storesData);
@@ -250,6 +265,40 @@ export default function SocialCommercePage() {
       setBatches([]);
     } finally {
       setIsLoadingData(false);
+    }
+  };
+
+  // ✅ Pathao lookup
+  const fetchPathaoCities = async () => {
+    try {
+      const res = await axios.get('/shipments/pathao/cities');
+      const data = Array.isArray(res.data) ? res.data : res.data?.data ?? [];
+      setPathaoCities(data);
+    } catch (err) {
+      console.error('Failed to load Pathao cities', err);
+      setPathaoCities([]);
+    }
+  };
+
+  const fetchPathaoZones = async (cityId: number) => {
+    try {
+      const res = await axios.get(`/shipments/pathao/zones/${cityId}`);
+      const data = Array.isArray(res.data) ? res.data : res.data?.data ?? [];
+      setPathaoZones(data);
+    } catch (err) {
+      console.error('Failed to load Pathao zones', err);
+      setPathaoZones([]);
+    }
+  };
+
+  const fetchPathaoAreas = async (zoneId: number) => {
+    try {
+      const res = await axios.get(`/shipments/pathao/areas/${zoneId}`);
+      const data = Array.isArray(res.data) ? res.data : res.data?.data ?? [];
+      setPathaoAreas(data);
+    } catch (err) {
+      console.error('Failed to load Pathao areas', err);
+      setPathaoAreas([]);
     }
   };
 
@@ -438,6 +487,48 @@ export default function SocialCommercePage() {
     }
   }, [selectedStore]);
 
+  // ✅ Load Pathao cities when domestic
+  useEffect(() => {
+    if (!isInternational) {
+      fetchPathaoCities();
+    } else {
+      // reset domestic fields if switching to international
+      setPathaoCityId('');
+      setPathaoZoneId('');
+      setPathaoAreaId('');
+      setPathaoZones([]);
+      setPathaoAreas([]);
+    }
+  }, [isInternational]);
+
+  // ✅ Fetch zones when city changes
+  useEffect(() => {
+    if (isInternational) return;
+    if (!pathaoCityId) {
+      setPathaoZoneId('');
+      setPathaoAreaId('');
+      setPathaoZones([]);
+      setPathaoAreas([]);
+      return;
+    }
+    fetchPathaoZones(Number(pathaoCityId));
+    setPathaoZoneId('');
+    setPathaoAreaId('');
+    setPathaoAreas([]);
+  }, [pathaoCityId, isInternational]);
+
+  // ✅ Fetch areas when zone changes
+  useEffect(() => {
+    if (isInternational) return;
+    if (!pathaoZoneId) {
+      setPathaoAreaId('');
+      setPathaoAreas([]);
+      return;
+    }
+    fetchPathaoAreas(Number(pathaoZoneId));
+    setPathaoAreaId('');
+  }, [pathaoZoneId, isInternational]);
+
   useEffect(() => {
     if (!searchQuery.trim() || !Array.isArray(batches)) {
       setSearchResults([]);
@@ -521,37 +612,6 @@ export default function SocialCommercePage() {
 
     return () => clearTimeout(delayDebounce);
   }, [searchQuery, batches, allProducts]);
-
-  useEffect(() => {
-    if (!isInternational) {
-      fetch('https://bdapi.vercel.app/api/v.1/division')
-        .then((res) => res.json())
-        .then((data) => setDivisions(data.data || []))
-        .catch(() => setDivisions([]));
-    }
-  }, [isInternational]);
-
-  useEffect(() => {
-    if (!division || isInternational) return;
-    const selectedDiv = divisions.find((d: any) => d.name === division);
-    if (selectedDiv) {
-      fetch(`https://bdapi.vercel.app/api/v.1/district/${selectedDiv.id}`)
-        .then((res) => res.json())
-        .then((data) => setDistricts(data.data || []))
-        .catch(() => setDistricts([]));
-    }
-  }, [division, divisions, isInternational]);
-
-  useEffect(() => {
-    if (!district || isInternational) return;
-    const selectedDist = districts.find((d: any) => d.name === district);
-    if (selectedDist) {
-      fetch(`https://bdapi.vercel.app/api/v.1/upazilla/${selectedDist.id}`)
-        .then((res) => res.json())
-        .then((data) => setUpazillas(data.data || []))
-        .catch(() => setUpazillas([]));
-    }
-  }, [district, districts, isInternational]);
 
   useEffect(() => {
     if (selectedProduct && quantity) {
@@ -643,14 +703,15 @@ export default function SocialCommercePage() {
       return;
     }
 
+    // ✅ Always delivery validation
     if (isInternational) {
-      if (!country || !internationalCity) {
+      if (!country || !internationalCity || !deliveryAddress) {
         alert('Please fill in international address');
         return;
       }
     } else {
-      if (!division || !district || !city) {
-        alert('Please fill in delivery address');
+      if (!pathaoCityId || !pathaoZoneId || !pathaoAreaId || !streetAddress) {
+        alert('Please select City/Zone/Area and enter Street Address');
         return;
       }
     }
@@ -668,14 +729,38 @@ export default function SocialCommercePage() {
         }\nDo you still want to place another order?`;
 
         const proceed = window.confirm(confirmMsg);
-        if (!proceed) {
-          return;
-        }
+        if (!proceed) return;
       }
     }
 
     try {
       console.log('📦 CREATING SOCIAL COMMERCE ORDER');
+
+      const cityObj = pathaoCities.find((c) => String(c.city_id) === String(pathaoCityId));
+      const zoneObj = pathaoZones.find((z) => String(z.zone_id) === String(pathaoZoneId));
+      const areaObj = pathaoAreas.find((a) => String(a.area_id) === String(pathaoAreaId));
+
+      const shipping_address = isInternational
+        ? {
+            name: userName,
+            phone: userPhone,
+            street: deliveryAddress,
+            city: internationalCity,
+            state: state || undefined,
+            country,
+            postal_code: internationalPostalCode || undefined,
+          }
+        : {
+            name: userName,
+            phone: userPhone,
+            street: streetAddress,
+            area: areaObj?.area_name || '',
+            city: cityObj?.city_name || '',
+            pathao_city_id: Number(pathaoCityId),
+            pathao_zone_id: Number(pathaoZoneId),
+            pathao_area_id: Number(pathaoAreaId),
+            postal_code: postalCode || undefined,
+          };
 
       const orderData = {
         order_type: 'social_commerce',
@@ -684,10 +769,8 @@ export default function SocialCommercePage() {
           name: userName,
           email: userEmail || undefined,
           phone: userPhone,
-          address: isInternational
-            ? `${internationalCity}, ${state ? state + ', ' : ''}${country}`
-            : `${city}, ${district}, ${division}`,
         },
+        shipping_address,
         items: cart.map((item) => ({
           product_id: item.product_id,
           batch_id: item.batch_id,
@@ -706,23 +789,6 @@ export default function SocialCommercePage() {
           salesBy,
           date,
           isInternational,
-          deliveryAddress: isInternational
-            ? {
-                country,
-                state,
-                city: internationalCity,
-                address: deliveryAddress,
-                postalCode: internationalPostalCode,
-              }
-            : {
-                division,
-                district,
-                city,
-                zone,
-                area,
-                address: deliveryAddress,
-                postalCode,
-              },
           subtotal,
           defectiveItems: cart
             .filter((item) => item.isDefective)
@@ -802,9 +868,7 @@ export default function SocialCommercePage() {
                       </option>
                     ))}
                   </select>
-                  {selectedStore && isLoadingData && (
-                    <p className="mt-1 text-xs text-blue-600">Loading batches...</p>
-                  )}
+                  {selectedStore && isLoadingData && <p className="mt-1 text-xs text-blue-600">Loading batches...</p>}
                   {selectedStore && !isLoadingData && batches.length > 0 && (
                     <p className="mt-1 text-xs text-green-600">{batches.length} batches available</p>
                   )}
@@ -869,8 +933,7 @@ export default function SocialCommercePage() {
                                   {existingCustomer.customer_code ? `(${existingCustomer.customer_code})` : ''}
                                 </p>
                                 <p>
-                                  Total Orders:{' '}
-                                  <span className="font-medium">{existingCustomer.total_orders ?? 0}</span>
+                                  Total Orders: <span className="font-medium">{existingCustomer.total_orders ?? 0}</span>
                                 </p>
                                 {lastOrderInfo ? (
                                   <div className="mt-1">
@@ -878,15 +941,12 @@ export default function SocialCommercePage() {
                                     <p>
                                       Date:{' '}
                                       <span className="font-medium">
-                                        {lastOrderInfo.date
-                                          ? new Date(lastOrderInfo.date).toLocaleString()
-                                          : 'N/A'}
+                                        {lastOrderInfo.date ? new Date(lastOrderInfo.date).toLocaleString() : 'N/A'}
                                       </span>
                                     </p>
                                     {lastOrderInfo.summary_text && (
                                       <p>
-                                        Items:{' '}
-                                        <span className="font-medium">{lastOrderInfo.summary_text}</span>
+                                        Items: <span className="font-medium">{lastOrderInfo.summary_text}</span>
                                       </p>
                                     )}
                                   </div>
@@ -921,12 +981,17 @@ export default function SocialCommercePage() {
                       <button
                         onClick={() => {
                           setIsInternational(!isInternational);
-                          setDivision('');
-                          setDistrict('');
-                          setCity('');
-                          setZone('');
-                          setArea('');
+
+                          // reset domestic
+                          setPathaoCityId('');
+                          setPathaoZoneId('');
+                          setPathaoAreaId('');
+                          setPathaoZones([]);
+                          setPathaoAreas([]);
+                          setStreetAddress('');
                           setPostalCode('');
+
+                          // reset international
                           setCountry('');
                           setState('');
                           setInternationalCity('');
@@ -1001,92 +1066,76 @@ export default function SocialCommercePage() {
                       <div className="space-y-3">
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
-                            <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Division*</label>
+                            <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">City (Pathao)*</label>
                             <select
-                              value={division}
-                              onChange={(e) => setDivision(e.target.value)}
+                              value={pathaoCityId}
+                              onChange={(e) => setPathaoCityId(e.target.value)}
                               className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                             >
-                              <option value="">Select Division</option>
-                              {divisions.map((d) => (
-                                <option key={d.id} value={d.name}>
-                                  {d.name}
+                              <option value="">Select City</option>
+                              {pathaoCities.map((c) => (
+                                <option key={c.city_id} value={c.city_id}>
+                                  {c.city_name}
                                 </option>
                               ))}
                             </select>
                           </div>
+
                           <div>
-                            <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">District*</label>
+                            <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Zone (Pathao)*</label>
                             <select
-                              value={district}
-                              onChange={(e) => setDistrict(e.target.value)}
-                              disabled={!division}
+                              value={pathaoZoneId}
+                              onChange={(e) => setPathaoZoneId(e.target.value)}
+                              disabled={!pathaoCityId}
                               className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50"
                             >
-                              <option value="">Select District</option>
-                              {districts.map((d) => (
-                                <option key={d.id} value={d.name}>
-                                  {d.name}
+                              <option value="">Select Zone</option>
+                              {pathaoZones.map((z) => (
+                                <option key={z.zone_id} value={z.zone_id}>
+                                  {z.zone_name}
                                 </option>
                               ))}
                             </select>
                           </div>
                         </div>
+
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div>
-                            <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Upazilla*</label>
+                            <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Area (Pathao)*</label>
                             <select
-                              value={city}
-                              onChange={(e) => setCity(e.target.value)}
-                              disabled={!district}
+                              value={pathaoAreaId}
+                              onChange={(e) => setPathaoAreaId(e.target.value)}
+                              disabled={!pathaoZoneId}
                               className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50"
                             >
-                              <option value="">Select Upazilla</option>
-                              {upazillas.map((u) => (
-                                <option key={u.id} value={u.name}>
-                                  {u.name}
+                              <option value="">Select Area</option>
+                              {pathaoAreas.map((a) => (
+                                <option key={a.area_id} value={a.area_id}>
+                                  {a.area_name}
                                 </option>
                               ))}
                             </select>
                           </div>
+
                           <div>
-                            <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Zone*</label>
+                            <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Postal Code</label>
                             <input
                               type="text"
-                              placeholder="Search Zone..."
-                              value={zone}
-                              onChange={(e) => setZone(e.target.value)}
+                              placeholder="e.g., 1212"
+                              value={postalCode}
+                              onChange={(e) => setPostalCode(e.target.value)}
                               className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400"
                             />
                           </div>
                         </div>
+
                         <div>
-                          <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Area (Optional)</label>
-                          <input
-                            type="text"
-                            placeholder="Search Area..."
-                            value={area}
-                            onChange={(e) => setArea(e.target.value)}
-                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Delivery Address</label>
+                          <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Street Address*</label>
                           <textarea
-                            placeholder="Delivery Address"
-                            value={deliveryAddress}
-                            onChange={(e) => setDeliveryAddress(e.target.value)}
+                            placeholder="House 12, Road 5, etc."
+                            value={streetAddress}
+                            onChange={(e) => setStreetAddress(e.target.value)}
                             rows={2}
-                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Postal Code</label>
-                          <input
-                            type="text"
-                            placeholder="e.g., 1212"
-                            value={postalCode}
-                            onChange={(e) => setPostalCode(e.target.value)}
                             className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400"
                           />
                         </div>
@@ -1324,10 +1373,7 @@ export default function SocialCommercePage() {
                         <tbody>
                           {cart.length === 0 ? (
                             <tr>
-                              <td
-                                colSpan={5}
-                                className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400"
-                              >
+                              <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">
                                 No products in cart
                               </td>
                             </tr>
@@ -1347,15 +1393,9 @@ export default function SocialCommercePage() {
                                     </span>
                                   )}
                                 </td>
-                                <td className="px-3 py-2 text-sm text-gray-900 dark:text-white">
-                                  {item.quantity}
-                                </td>
-                                <td className="px-3 py-2 text-sm text-gray-900 dark:text-white">
-                                  {item.unit_price.toFixed(2)}
-                                </td>
-                                <td className="px-3 py-2 text-sm text-gray-900 dark:text-white">
-                                  {item.amount.toFixed(2)}
-                                </td>
+                                <td className="px-3 py-2 text-sm text-gray-900 dark:text-white">{item.quantity}</td>
+                                <td className="px-3 py-2 text-sm text-gray-900 dark:text-white">{item.unit_price.toFixed(2)}</td>
+                                <td className="px-3 py-2 text-sm text-gray-900 dark:text-white">{item.amount.toFixed(2)}</td>
                                 <td className="px-3 py-2">
                                   <button
                                     onClick={() => removeFromCart(item.id)}
@@ -1375,9 +1415,7 @@ export default function SocialCommercePage() {
                       <div className="p-4 bg-gray-50 dark:bg-gray-700 border-t border-gray-200 dark:border-gray-600">
                         <div className="flex justify-between text-sm mb-3">
                           <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
-                          <span className="text-gray-900 dark:text-white font-medium">
-                            {subtotal.toFixed(2)} Tk
-                          </span>
+                          <span className="text-gray-900 dark:text-white font-medium">{subtotal.toFixed(2)} Tk</span>
                         </div>
                         {isInternational && (
                           <div className="mb-3 p-2 bg-blue-50 dark:bg-blue-900/20 rounded flex items-center gap-2 text-xs text-blue-700 dark:text-blue-400">

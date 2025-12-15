@@ -17,9 +17,14 @@ import {
   ArrowLeftRight,
   X
 } from 'lucide-react';
-import orderService from '@/services/orderService';
+import orderService, { type Order as BackendOrder } from '@/services/orderService';
 import axios from '@/lib/axios';
 import batchService from '@/services/batchService';
+
+import ReturnProductModal from '@/components/sales/ReturnProductModal';
+import ExchangeProductModal from '@/components/sales/ExchangeProductModal';
+import productReturnService, { type CreateReturnRequest } from '@/services/productReturnService';
+import refundService, { type CreateRefundRequest } from '@/services/refundService';
 
 interface Order {
   id: number;
@@ -57,7 +62,114 @@ interface Order {
   fulfillmentStatus?: string | null;
 }
 
-type ReturnExchangeType = 'return' | 'exchange';
+
+// Types expected by ReturnProductModal / ExchangeProductModal (POS components)
+type ReturnModalOrderItem = {
+  id: number;
+  product_id: number;
+  product_name: string;
+  product_sku: string;
+  batch_id: number;
+  batch_number?: string;
+  barcode_id?: number;
+  barcode?: string;
+  quantity: number;
+  unit_price: string;
+  total_amount: string;
+};
+
+type ReturnModalOrder = {
+  id: number;
+  order_number: string;
+  store: { id: number; name: string };
+  customer?: { name: string; phone: string };
+  items: ReturnModalOrderItem[];
+  total_amount: string;
+  paid_amount: string;
+  outstanding_amount: string;
+};
+
+type ExchangeModalOrderItem = {
+  id: number;
+  product_id: number;
+  product_name: string;
+  product_sku: string;
+  batch_id: number;
+  batch_number?: string;
+  barcode_id?: number;
+  barcode?: string;
+  quantity: number;
+  unit_price: string;
+  discount_amount: string;
+  tax_amount: string;
+  total_amount: string;
+  total_price: string;
+};
+
+type ExchangeModalOrder = {
+  id: number;
+  order_number: string;
+  customer?: { id: number; name: string; phone: string };
+  store: { id: number; name: string };
+  items: ExchangeModalOrderItem[];
+  subtotal_amount: string;
+  tax_amount: string;
+  total_amount: string;
+  paid_amount: string;
+};
+
+const toReturnModalOrder = (o: BackendOrder): ReturnModalOrder => ({
+  id: o.id,
+  order_number: o.order_number,
+  store: { id: o.store?.id ?? 0, name: o.store?.name ?? '' },
+  customer: o.customer ? { name: o.customer.name, phone: o.customer.phone } : undefined,
+  items: (o.items ?? []).map((it) => ({
+    id: it.id,
+    product_id: it.product_id,
+    product_name: it.product_name,
+    product_sku: it.product_sku,
+    batch_id: it.batch_id,
+    batch_number: it.batch_number,
+    barcode_id: it.barcode_id,
+    barcode: it.barcode,
+    quantity: it.quantity,
+    unit_price: it.unit_price ?? '0',
+    total_amount: it.total_amount ?? '0',
+  })),
+  total_amount: o.total_amount ?? '0',
+  paid_amount: o.paid_amount ?? '0',
+  outstanding_amount: o.outstanding_amount ?? '0',
+});
+
+const toExchangeModalOrder = (o: BackendOrder): ExchangeModalOrder => ({
+  id: o.id,
+  order_number: o.order_number,
+  customer: o.customer
+    ? { id: o.customer.id, name: o.customer.name, phone: o.customer.phone }
+    : undefined,
+  store: { id: o.store?.id ?? 0, name: o.store?.name ?? '' },
+  items: (o.items ?? []).map((it) => ({
+    id: it.id,
+    product_id: it.product_id,
+    product_name: it.product_name,
+    product_sku: it.product_sku,
+    batch_id: it.batch_id,
+    batch_number: it.batch_number,
+    barcode_id: it.barcode_id,
+    barcode: it.barcode,
+    quantity: it.quantity,
+    unit_price: it.unit_price ?? '0',
+    discount_amount: it.discount_amount ?? '0',
+    tax_amount: it.tax_amount ?? '0',
+    total_amount: it.total_amount ?? '0',
+    total_price: it.total_amount ?? '0',
+  })),
+  subtotal_amount: o.subtotal ?? '0',
+  tax_amount: o.tax_amount ?? '0',
+  total_amount: o.total_amount ?? '0',
+  paid_amount: o.paid_amount ?? '0',
+});
+
 
 export default function PendingOrdersDashboard() {
   const [darkMode, setDarkMode] = useState(false);
@@ -79,12 +191,10 @@ export default function PendingOrdersDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
 
-  // 🔁 Return / Exchange modal state
-  const [showReturnExchangeModal, setShowReturnExchangeModal] = useState(false);
-  const [returnExchangeType, setReturnExchangeType] = useState<ReturnExchangeType | null>(null);
-  const [returnExchangeItems, setReturnExchangeItems] = useState<
-    { id: number; name: string; sku: string; quantity: number; selectedQty: number; selected: boolean }[]
-  >([]);
+  // 🔁 Return / Exchange (re-use POS logic from Purchase History)
+  const [selectedOrderForAction, setSelectedOrderForAction] = useState<BackendOrder | null>(null);
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [showExchangeModal, setShowExchangeModal] = useState(false);
 
   // 🧃 Product picker (for Edit Order)
   const [showProductPicker, setShowProductPicker] = useState(false);
@@ -334,65 +444,278 @@ export default function PendingOrdersDashboard() {
     }
   };
 
-  // 🔁 Return / Exchange logic
-  const prepareReturnExchange = (order: Order, type: ReturnExchangeType) => {
-    setSelectedOrder(order);
-    setReturnExchangeType(type);
-    const items = order.items.map((item) => ({
-      id: item.id,
-      name: item.name,
-      sku: item.sku,
-      quantity: item.quantity,
-      selectedQty: 1,
-      selected: false
-    }));
-    setReturnExchangeItems(items);
-    setShowReturnExchangeModal(true);
-  };
-
-  const handleReturnOrder = (order: Order) => {
+  // 🔁 Return / Exchange (re-use POS logic from Purchase History)
+  // NOTE: These flows are safe only after an order is COMPLETED (inventory already reduced)
+  const openReturnModal = async (order: Order) => {
     setActiveMenu(null);
-    prepareReturnExchange(order, 'return');
-  };
 
-  const handleExchangeOrder = (order: Order) => {
-    setActiveMenu(null);
-    prepareReturnExchange(order, 'exchange');
-  };
+    try {
+      const fullOrder = await orderService.getById(order.id);
 
-  const handleSubmitReturnExchange = () => {
-    if (!selectedOrder || !returnExchangeType) return;
+      if (fullOrder.status !== 'completed') {
+        alert(
+          `Return is available only for completed orders.\n\nOrder: ${fullOrder.order_number}\nCurrent status: ${fullOrder.status}`
+        );
+        return;
+      }
 
-    const selectedItems = returnExchangeItems.filter(
-      (item) => item.selected && item.selectedQty > 0
-    );
-
-    if (selectedItems.length === 0) {
-      alert('Please select at least one item and quantity.');
-      return;
+      setSelectedOrderForAction(fullOrder);
+      setShowReturnModal(true);
+    } catch (error: any) {
+      console.error('Failed to load order for return:', error);
+      alert('Failed to load order details for return. Please try again.');
     }
+  };
 
-    const context = {
-      type: returnExchangeType,
-      orderId: selectedOrder.id,
-      orderNumber: selectedOrder.orderNumber,
-      items: selectedItems.map((i) => ({
-        id: i.id,
-        name: i.name,
-        sku: i.sku,
-        quantity: i.quantity,
-        selectedQty: i.selectedQty
-      }))
+  const openExchangeModal = async (order: Order) => {
+    setActiveMenu(null);
+
+    try {
+      const fullOrder = await orderService.getById(order.id);
+
+      if (fullOrder.status !== 'completed') {
+        alert(
+          `Exchange is available only for completed orders.\n\nOrder: ${fullOrder.order_number}\nCurrent status: ${fullOrder.status}`
+        );
+        return;
+      }
+
+      setSelectedOrderForAction(fullOrder);
+      setShowExchangeModal(true);
+    } catch (error: any) {
+      console.error('Failed to load order for exchange:', error);
+      alert('Failed to load order details for exchange. Please try again.');
+    }
+  };
+
+  const handleReturnSubmit = async (returnData: {
+    selectedProducts: Array<{
+      order_item_id: number;
+      quantity: number;
+      product_barcode_id?: number;
+    }>;
+    refundMethods: {
+      cash: number;
+      card: number;
+      bkash: number;
+      nagad: number;
+      total: number;
     };
+    returnReason:
+      | 'defective_product'
+      | 'wrong_item'
+      | 'not_as_described'
+      | 'customer_dissatisfaction'
+      | 'size_issue'
+      | 'color_issue'
+      | 'quality_issue'
+      | 'late_delivery'
+      | 'changed_mind'
+      | 'duplicate_order'
+      | 'other';
+    returnType: 'customer_return' | 'store_return' | 'warehouse_return';
+    receivedAtStoreId: number;
+    customerNotes?: string;
+  }) => {
+    try {
+      if (!selectedOrderForAction) return;
 
-    const key =
-      returnExchangeType === 'return' ? 'returnOrder' : 'exchangeOrder';
-    sessionStorage.setItem(key, JSON.stringify(context));
+      console.log('🔄 Processing return with data:', returnData);
 
-    if (returnExchangeType === 'return') {
-      window.location.href = '/orders/returns/new';
-    } else {
-      window.location.href = '/orders/exchanges/new';
+      const returnRequest: CreateReturnRequest = {
+        order_id: selectedOrderForAction.id,
+        return_reason: returnData.returnReason,
+        return_type: returnData.returnType,
+        received_at_store_id: returnData.receivedAtStoreId,
+        items: returnData.selectedProducts.map((item) => ({
+          order_item_id: item.order_item_id,
+          quantity: item.quantity,
+          product_barcode_id: item.product_barcode_id,
+        })),
+        customer_notes: returnData.customerNotes || 'Return initiated from Orders (Social/E-com)',
+      };
+
+      const returnResponse = await productReturnService.create(returnRequest);
+      const returnId = returnResponse.data.id;
+
+      await productReturnService.update(returnId, {
+        quality_check_passed: true,
+        quality_check_notes: 'Auto-approved via Orders dashboard',
+      });
+
+      await productReturnService.approve(returnId, {
+        internal_notes: 'Approved via Orders dashboard',
+      });
+
+      await productReturnService.process(returnId, {
+        restore_inventory: true,
+      });
+
+      await productReturnService.complete(returnId);
+
+      // If cashier actually gave money back, record it as a partial amount (accurate ledger)
+      if (returnData.refundMethods.total > 0) {
+        const refundRequest: CreateRefundRequest = {
+          return_id: returnId,
+          refund_type: 'partial_amount',
+          refund_amount: returnData.refundMethods.total,
+          refund_method: 'cash',
+          refund_method_details: {
+            cash: returnData.refundMethods.cash,
+            card: returnData.refundMethods.card,
+            bkash: returnData.refundMethods.bkash,
+            nagad: returnData.refundMethods.nagad,
+          },
+          internal_notes: 'Refund processed via Orders dashboard',
+        };
+
+        const refundResponse = await refundService.create(refundRequest);
+        const refundId = refundResponse.data.id;
+
+        await refundService.process(refundId);
+        await refundService.complete(refundId, {
+          transaction_reference: `ORD-REFUND-${Date.now()}`,
+        });
+      }
+
+      await loadOrders();
+      alert('✅ Return processed successfully!');
+
+      setShowReturnModal(false);
+      setSelectedOrderForAction(null);
+    } catch (error: any) {
+      console.error('❌ Return processing failed:', error);
+      const errorMsg = error.response?.data?.message || error.message || 'Failed to process return';
+      alert(`Error: ${errorMsg}`);
+    }
+  };
+
+  const handleExchangeSubmit = async (exchangeData: {
+    removedProducts: Array<{
+      order_item_id: number;
+      quantity: number;
+      product_barcode_id?: number;
+    }>;
+    replacementProducts: Array<{
+      product_id: number;
+      batch_id: number;
+      quantity: number;
+      unit_price: number;
+      barcode?: string;
+      barcode_id?: number;
+    }>;
+    paymentRefund: {
+      type: 'payment' | 'refund' | 'none';
+      cash: number;
+      card: number;
+      bkash: number;
+      nagad: number;
+      total: number;
+    };
+    exchangeAtStoreId: number;
+  }) => {
+    try {
+      if (!selectedOrderForAction) return;
+
+      console.log('🔄 Processing exchange with data:', exchangeData);
+
+      // STEP 1: Create return for removed items
+      const returnRequest: CreateReturnRequest = {
+        order_id: selectedOrderForAction.id,
+        return_reason: 'other',
+        return_type: 'customer_return',
+        received_at_store_id: exchangeData.exchangeAtStoreId,
+        items: exchangeData.removedProducts.map((item) => ({
+          order_item_id: item.order_item_id,
+          quantity: item.quantity,
+          product_barcode_id: item.product_barcode_id,
+        })),
+        customer_notes: `Exchange transaction - Original Order: ${selectedOrderForAction.order_number}`,
+      };
+
+      const returnResponse = await productReturnService.create(returnRequest);
+      const returnId = returnResponse.data.id;
+      const returnNumber = returnResponse.data.return_number;
+
+      await productReturnService.update(returnId, {
+        quality_check_passed: true,
+        quality_check_notes: 'Exchange - Auto-approved via Orders dashboard',
+      });
+
+      await productReturnService.approve(returnId, {
+        internal_notes: 'Exchange - Auto-approved via Orders dashboard',
+      });
+
+      await productReturnService.process(returnId, {
+        restore_inventory: true,
+      });
+
+      await productReturnService.complete(returnId);
+
+      // STEP 2: Create full refund for exchange (refund amount is derived from return)
+      const refundRequest: CreateRefundRequest = {
+        return_id: returnId,
+        refund_type: 'full',
+        refund_method: 'cash',
+        internal_notes: `Full refund for exchange - Original Order: ${selectedOrderForAction.order_number}`,
+      };
+
+      const refundResponse = await refundService.create(refundRequest);
+      const refundId = refundResponse.data.id;
+
+      await refundService.process(refundId);
+      await refundService.complete(refundId, {
+        transaction_reference: `EXCHANGE-REFUND-${Date.now()}`,
+      });
+
+      // STEP 3: Create replacement order in the SAME channel (social/ecom)
+      const newOrderTotal = exchangeData.replacementProducts.reduce(
+        (sum, p) => sum + p.unit_price * p.quantity,
+        0
+      );
+
+      const newOrderData = {
+        order_type: selectedOrderForAction.order_type as 'counter' | 'social_commerce' | 'ecommerce',
+        store_id: exchangeData.exchangeAtStoreId,
+        customer_id: selectedOrderForAction.customer?.id,
+        items: exchangeData.replacementProducts.map((p) => ({
+          product_id: p.product_id,
+          batch_id: p.batch_id,
+          quantity: p.quantity,
+          unit_price: p.unit_price,
+          barcode: p.barcode,
+          barcode_id: p.barcode_id,
+        })),
+        payment: {
+          payment_method_id: 1, // Cash
+          amount: newOrderTotal,
+          payment_type: 'full' as const,
+        },
+        notes: `Exchange from order #${selectedOrderForAction.order_number} | Return: #${returnNumber}`,
+      };
+
+      const newOrder = await orderService.create(newOrderData);
+      await orderService.complete(newOrder.id);
+
+      await loadOrders();
+
+      // Success message
+      let msg = `✅ Exchange processed successfully!\n\n📦 Return: #${returnNumber}\n🛒 New Order: #${newOrder.order_number}`;
+      if (exchangeData.paymentRefund.type === 'payment') {
+        msg += `\n\n💳 Customer paid additional: ৳${exchangeData.paymentRefund.total.toLocaleString()}`;
+      } else if (exchangeData.paymentRefund.type === 'refund') {
+        msg += `\n\n💵 Give customer back: ৳${exchangeData.paymentRefund.total.toLocaleString()}`;
+      } else {
+        msg += `\n\n📊 Even exchange (no difference)`;
+      }
+      alert(msg);
+
+      setShowExchangeModal(false);
+      setSelectedOrderForAction(null);
+    } catch (error: any) {
+      console.error('❌ Exchange processing failed:', error);
+      const errorMsg = error.response?.data?.message || error.message || 'Failed to process exchange';
+      alert(`❌ Exchange failed: ${errorMsg}`);
     }
   };
 
@@ -1069,7 +1392,7 @@ export default function PendingOrdersDashboard() {
             onClick={(e) => {
               e.stopPropagation();
               const order = filteredOrders.find((o) => o.id === activeMenu);
-              if (order) handleReturnOrder(order);
+              if (order) openReturnModal(order);
             }}
             className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700"
           >
@@ -1080,7 +1403,7 @@ export default function PendingOrdersDashboard() {
             onClick={(e) => {
               e.stopPropagation();
               const order = filteredOrders.find((o) => o.id === activeMenu);
-              if (order) handleExchangeOrder(order);
+              if (order) openExchangeModal(order);
             }}
             className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b-2 border-gray-300 dark:border-gray-600"
           >
@@ -1799,141 +2122,28 @@ export default function PendingOrdersDashboard() {
         </div>
       )}
 
-      {/* Return / Exchange Modal */}
-      {showReturnExchangeModal && selectedOrder && returnExchangeType && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70] p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-3xl w-full max-h-[85vh] overflow-hidden border border-gray-200 dark:border-gray-800">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800">
-              <div>
-                <h3 className="text-sm font-semibold text-black dark:text-white">
-                  {returnExchangeType === 'return'
-                    ? 'Create Return'
-                    : 'Create Exchange'}
-                </h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Order: {selectedOrder.orderNumber}
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  setShowReturnExchangeModal(false);
-                  setReturnExchangeItems([]);
-                  setReturnExchangeType(null);
-                }}
-                className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
-              >
-                <X className="h-4 w-4 text-gray-500" />
-              </button>
-            </div>
+      {/* Return Modal */}
+      {showReturnModal && selectedOrderForAction && (
+        <ReturnProductModal
+          order={toReturnModalOrder(selectedOrderForAction)}
+          onClose={() => {
+            setShowReturnModal(false);
+            setSelectedOrderForAction(null);
+          }}
+          onReturn={handleReturnSubmit}
+        />
+      )}
 
-            <div className="p-4 space-y-4">
-              <p className="text-xs text-gray-600 dark:text-gray-400">
-                Select items and quantities to{' '}
-                {returnExchangeType === 'return' ? 'return' : 'exchange'}.
-              </p>
-
-              <div className="border border-gray-200 dark:border-gray-800 rounded-lg max-h-64 overflow-auto">
-                <table className="w-full text-xs">
-                  <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium text-gray-700 dark:text-gray-300">
-                        Item
-                      </th>
-                      <th className="px-3 py-2 text-center font-medium text-gray-700 dark:text-gray-300">
-                        Ordered
-                      </th>
-                      <th className="px-3 py-2 text-center font-medium text-gray-700 dark:text-gray-300">
-                        Qty
-                      </th>
-                      <th className="px-3 py-2 text-center font-medium text-gray-700 dark:text-gray-300">
-                        Select
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {returnExchangeItems.map((item, index) => (
-                      <tr
-                        key={item.id}
-                        className="border-b border-gray-200 dark:border-gray-800"
-                      >
-                        <td className="px-3 py-2">
-                          <p className="font-medium text-gray-900 dark:text-white">
-                            {item.name}
-                          </p>
-                          <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                            SKU: {item.sku}
-                          </p>
-                        </td>
-                        <td className="px-3 py-2 text-center text-gray-900 dark:text-white">
-                          {item.quantity}
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <input
-                            type="number"
-                            min={1}
-                            max={item.quantity}
-                            value={item.selectedQty}
-                            onChange={(e) => {
-                              const val = parseInt(e.target.value || '0', 10);
-                              setReturnExchangeItems((prev) => {
-                                const copy = [...prev];
-                                copy[index] = {
-                                  ...copy[index],
-                                  selectedQty: Math.max(
-                                    1,
-                                    Math.min(val || 1, item.quantity)
-                                  )
-                                };
-                                return copy;
-                              });
-                            }}
-                            className="w-16 px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs"
-                          />
-                        </td>
-                        <td className="px-3 py-2 text-center">
-                          <input
-                            type="checkbox"
-                            checked={item.selected}
-                            onChange={(e) => {
-                              const checked = e.target.checked;
-                              setReturnExchangeItems((prev) => {
-                                const copy = [...prev];
-                                copy[index] = {
-                                  ...copy[index],
-                                  selected: checked
-                                };
-                                return copy;
-                              });
-                            }}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2 border-t border-gray-200 dark:border-gray-800">
-                <button
-                  onClick={() => {
-                    setShowReturnExchangeModal(false);
-                    setReturnExchangeItems([]);
-                    setReturnExchangeType(null);
-                  }}
-                  className="px-4 py-2 text-xs border border-gray-300 dark:border-gray-600 rounded-lg text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSubmitReturnExchange}
-                  className="px-4 py-2 text-xs bg-teal-600 hover:bg-teal-700 text-white rounded-lg"
-                >
-                  Continue
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {/* Exchange Modal */}
+      {showExchangeModal && selectedOrderForAction && (
+        <ExchangeProductModal
+          order={toExchangeModalOrder(selectedOrderForAction)}
+          onClose={() => {
+            setShowExchangeModal(false);
+            setSelectedOrderForAction(null);
+          }}
+          onExchange={handleExchangeSubmit}
+        />
       )}
 
       {/* Click outside to close menu */}

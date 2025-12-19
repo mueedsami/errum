@@ -63,11 +63,11 @@ interface Order {
     due: number;
   };
 
-  // ✅ Use backend order status directly (pending/confirmed/processing/ready_for_pickup/shipped/delivered/cancelled/refunded/...)
+  // ✅ backend order status
   status: string;
   statusLabel: string;
 
-  // ✅ Keep payment status separately (pending/partially_paid/paid/failed/refunded/overdue/...)
+  // ✅ payment status separate
   paymentStatus: string;
   paymentStatusLabel: string;
 
@@ -76,12 +76,11 @@ interface Order {
   storeId?: number;
   notes?: string;
 
-  // optional raw fields you might use later
   createdAt?: string;
   orderDateRaw?: string;
 }
 
-// Types expected by ReturnProductModal / ExchangeProductModal (POS components)
+// Types expected by ReturnProductModal / ExchangeProductModal
 type ReturnModalOrderItem = {
   id: number;
   product_id: number;
@@ -209,7 +208,6 @@ export default function OrdersDashboard() {
   // ✅ Separate filters
   const [orderStatusFilter, setOrderStatusFilter] = useState('All Order Status');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Status');
-  const [orderTypeFilter, setOrderTypeFilter] = useState('All Types');
 
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [editableOrder, setEditableOrder] = useState<Order | null>(null);
@@ -288,7 +286,6 @@ export default function OrdersDashboard() {
   const derivePaymentStatus = (order: any) => {
     const raw = normalize(order?.payment_status);
     if (raw) return raw;
-    // fallback from amounts
     const total = parseMoney(order?.total_amount);
     const due = parseMoney(order?.outstanding_amount);
     if (total <= 0) return 'pending';
@@ -346,7 +343,7 @@ export default function OrdersDashboard() {
     );
   };
 
-  // 🔧 Central transformer (aligned with backend OrderController format)
+  // 🔧 Central transformer
   const transformOrder = (order: any): Order => {
     const paid = parseMoney(order.paid_amount);
     const due = parseMoney(order.outstanding_amount);
@@ -389,11 +386,9 @@ export default function OrdersDashboard() {
         due: due,
       },
 
-      // ✅ backend order status
       status: normalize(oStatusRaw) || 'pending',
       statusLabel: statusLabel(oStatusRaw || 'pending'),
 
-      // ✅ payment status separate
       paymentStatus: normalize(pStatusRaw) || 'pending',
       paymentStatusLabel: statusLabel(pStatusRaw || 'pending'),
 
@@ -425,17 +420,18 @@ export default function OrdersDashboard() {
     };
   };
 
+  // ✅ ONLY Social Commerce orders
   const loadOrders = async () => {
     setIsLoading(true);
     try {
-      // ✅ “Every order” = pull all types. If you want only social+ecom, remove the counter call.
-      const [social, ecommerce, counter] = await Promise.all([
-        orderService.getAll({ order_type: 'social_commerce', sort_by: 'created_at', sort_order: 'desc', per_page: 1000 }),
-        orderService.getAll({ order_type: 'ecommerce', sort_by: 'created_at', sort_order: 'desc', per_page: 1000 }),
-        orderService.getAll({ order_type: 'counter', sort_by: 'created_at', sort_order: 'desc', per_page: 1000 }),
-      ]);
+      const social = await orderService.getAll({
+        order_type: 'social_commerce',
+        sort_by: 'created_at',
+        sort_order: 'desc',
+        per_page: 1000,
+      });
 
-      const allOrders = [...(social.data || []), ...(ecommerce.data || []), ...(counter.data || [])];
+      const allOrders = [...(social.data || [])];
 
       allOrders.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
@@ -444,7 +440,6 @@ export default function OrdersDashboard() {
       setOrders(transformedOrders);
       setFilteredOrders(transformedOrders);
 
-      // keep selection safe if list changes
       setSelectedOrders((prev) => {
         const stillExists = new Set(transformedOrders.map((o) => o.id));
         const next = new Set<number>();
@@ -530,15 +525,6 @@ export default function OrdersDashboard() {
       });
     }
 
-    if (orderTypeFilter !== 'All Types') {
-      filtered = filtered.filter((o) => {
-        if (orderTypeFilter === 'Social Commerce') return o.orderType === 'social_commerce';
-        if (orderTypeFilter === 'E-Commerce') return o.orderType === 'ecommerce';
-        if (orderTypeFilter === 'Counter') return o.orderType === 'counter';
-        return true;
-      });
-    }
-
     if (orderStatusFilter !== 'All Order Status') {
       const target = normalize(orderStatusFilter);
       filtered = filtered.filter((o) => normalize(o.status) === target);
@@ -550,7 +536,7 @@ export default function OrdersDashboard() {
     }
 
     setFilteredOrders(filtered);
-  }, [search, dateFilter, orderTypeFilter, orderStatusFilter, paymentStatusFilter, orders]);
+  }, [search, dateFilter, orderStatusFilter, paymentStatusFilter, orders]);
 
   const handleViewDetails = async (order: Order) => {
     setIsLoadingDetails(true);
@@ -609,11 +595,9 @@ export default function OrdersDashboard() {
 
   const canReturnOrExchange = (statusRaw: any) => {
     const s = normalize(statusRaw);
-    // backend allows delivered/completed (controller checks delivered or completed)
     return s === 'delivered' || s === 'completed';
   };
 
-  // 🔁 Return / Exchange (safe only after DELIVERED/COMPLETED)
   const openReturnModal = async (order: Order) => {
     setActiveMenu(null);
     try {
@@ -799,7 +783,7 @@ export default function OrdersDashboard() {
       const newOrderTotal = exchangeData.replacementProducts.reduce((sum, p) => sum + p.unit_price * p.quantity, 0);
 
       const newOrderData = {
-        order_type: selectedOrderForAction.order_type as 'counter' | 'social_commerce' | 'ecommerce',
+        order_type: selectedOrderForAction.order_type as 'social_commerce',
         store_id: exchangeData.exchangeAtStoreId,
         customer_id: selectedOrderForAction.customer?.id,
         items: exchangeData.replacementProducts.map((p) => ({
@@ -856,6 +840,7 @@ export default function OrdersDashboard() {
   };
 
   const getOrderTypeBadge = (orderType: string) => {
+    // since we show only socials, this is fine as-is
     if (orderType === 'social_commerce') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">
@@ -872,22 +857,15 @@ export default function OrdersDashboard() {
         </span>
       );
     }
-    if (orderType === 'counter') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300">
-          <Package className="h-3 w-3" />
-          Counter
-        </span>
-      );
-    }
-    return null;
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300">
+        <Package className="h-3 w-3" />
+        Other
+      </span>
+    );
   };
 
   const totalRevenue = orders.reduce((sum, order) => sum + order.amounts.total, 0);
-  const socialCommerceCount = orders.filter((o) => o.orderType === 'social_commerce').length;
-  const ecommerceCount = orders.filter((o) => o.orderType === 'ecommerce').length;
-  const counterCount = orders.filter((o) => o.orderType === 'counter').length;
-
   const paidOrders = orders.filter((o) => normalize(o.paymentStatus) === 'paid').length;
   const dueOrders = orders.filter((o) => normalize(o.paymentStatus) !== 'paid').length;
 
@@ -1484,10 +1462,10 @@ export default function OrdersDashboard() {
                 <div className="max-w-7xl mx-auto flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="p-1.5 bg-black dark:bg-white rounded">
-                      <Package className="w-4 h-4 text-white dark:text-black" />
+                      <ShoppingBag className="w-4 h-4 text-white dark:text-black" />
                     </div>
                     <div>
-                      <h1 className="text-lg font-bold text-black dark:text-white leading-none">Orders</h1>
+                      <h1 className="text-lg font-bold text-black dark:text-white leading-none">Social Orders</h1>
                       <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-none mt-0.5">
                         {filteredOrders.length} of {orders.length} orders
                       </p>
@@ -1548,26 +1526,18 @@ export default function OrdersDashboard() {
             {/* Stats */}
             <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-800">
               <div className="max-w-7xl mx-auto">
-                <div className="grid grid-cols-6 gap-2">
+                <div className="grid grid-cols-4 gap-2">
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
                     <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Total</p>
                     <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{orders.length}</p>
                   </div>
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Social</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{socialCommerceCount}</p>
-                  </div>
-                  <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">E-Com</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{ecommerceCount}</p>
-                  </div>
-                  <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Counter</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{counterCount}</p>
-                  </div>
-                  <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
                     <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Paid</p>
                     <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{paidOrders}</p>
+                  </div>
+                  <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Due/Not Paid</p>
+                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{dueOrders}</p>
                   </div>
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
                     <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Revenue</p>
@@ -1576,10 +1546,6 @@ export default function OrdersDashboard() {
                     </p>
                   </div>
                 </div>
-
-                <p className="mt-2 text-[10px] text-gray-500 dark:text-gray-500">
-                  Due/Not Paid: {dueOrders}
-                </p>
               </div>
             </div>
 
@@ -1603,17 +1569,6 @@ export default function OrdersDashboard() {
                   onChange={(e) => setDateFilter(e.target.value)}
                   className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
                 />
-
-                <select
-                  value={orderTypeFilter}
-                  onChange={(e) => setOrderTypeFilter(e.target.value)}
-                  className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
-                >
-                  <option>All Types</option>
-                  <option>Social Commerce</option>
-                  <option>E-Commerce</option>
-                  <option>Counter</option>
-                </select>
 
                 <select
                   value={orderStatusFilter}
@@ -1643,7 +1598,7 @@ export default function OrdersDashboard() {
               </div>
 
               <p className="text-xs text-gray-500 dark:text-gray-500">
-                Showing {filteredOrders.length} of {orders.length} orders
+                Showing {filteredOrders.length} of {orders.length} social orders
               </p>
             </div>
 
@@ -1832,9 +1787,7 @@ export default function OrdersDashboard() {
                           <td className="px-4 py-3">
                             <div className="flex flex-col gap-1">
                               {getOrderStatusBadge(order.status)}
-                              <div className="flex items-center gap-1">
-                                {getPaymentStatusBadge(order.paymentStatus)}
-                              </div>
+                              <div className="flex items-center gap-1">{getPaymentStatusBadge(order.paymentStatus)}</div>
                             </div>
                           </td>
 
@@ -1920,7 +1873,6 @@ export default function OrdersDashboard() {
             <span>Edit Order</span>
           </button>
 
-          {/* ✅ Single: Print */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -1942,7 +1894,6 @@ export default function OrdersDashboard() {
             </span>
           </button>
 
-          {/* ✅ Single: Pathao */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -2187,6 +2138,9 @@ export default function OrdersDashboard() {
         </div>
       )}
 
+      {/* Edit Modal + Product Picker + Return/Exchange modals are unchanged from before */}
+      {/* (kept intentionally; only the listing is restricted to social orders) */}
+
       {/* Edit Order Modal */}
       {showEditModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -2215,6 +2169,7 @@ export default function OrdersDashboard() {
               </div>
             ) : editableOrder ? (
               <div className="p-6 space-y-6">
+                {/* Customer */}
                 <div>
                   <h3 className="text-sm font-bold text-black dark:text-white mb-3">Customer Information</h3>
                   <div className="grid grid-cols-2 gap-4">
@@ -2277,6 +2232,7 @@ export default function OrdersDashboard() {
                   </div>
                 </div>
 
+                {/* Items */}
                 <div>
                   <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Items</h3>
                   {editableOrder.items && editableOrder.items.length > 0 ? (
@@ -2361,6 +2317,7 @@ export default function OrdersDashboard() {
                   </button>
                 </div>
 
+                {/* Totals */}
                 <div>
                   <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Details</h3>
                   <div className="grid grid-cols-2 gap-4">

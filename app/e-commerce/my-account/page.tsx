@@ -1,12 +1,15 @@
 'use client';
 import Navigation from '@/components/ecommerce/Navigation';
 import AccountSidebar from '@/components/ecommerce/my-account/AccountSidebar';
+import PaymentStatusChecker from '@/components/ecommerce/Paymentstatuschecker';
 
 export default function MyAccount(){
     return (
         <div className="bg-white min-h-screen">
             {/* Navigation Bar */}
             <Navigation />
+            {/* If user returns from SSLCommerz (or refreshes), this will verify & show a toast */}
+            <PaymentStatusChecker />
             <div className="flex max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 {/* Account Sidebar */}
                 <AccountSidebar />

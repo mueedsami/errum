@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, ShoppingCart, Loader2, AlertCircle } from 'lucide-react';
 import Navigation from '@/components/ecommerce/Navigation';
@@ -8,7 +8,34 @@ import cartService, { CartItem, Cart } from '@/services/cartService';
 
 export default function CartPage() {
   const router = useRouter();
-  
+
+  // =========================
+  // ✅ Image URL Resolver Fix
+  // =========================
+  const BACKEND_URL =
+    process.env.NEXT_PUBLIC_BACKEND_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    '';
+
+  const resolveImageUrl = (raw?: string | null) => {
+    if (!raw) return null;
+
+    // already absolute
+    if (/^https?:\/\//i.test(raw)) return raw;
+
+    // if starts with // (protocol-relative)
+    if (raw.startsWith('//')) return `https:${raw}`;
+
+    // normalize leading slash
+    const path = raw.startsWith('/') ? raw.slice(1) : raw;
+
+    // If no backend url configured, return root-relative (best effort)
+    if (!BACKEND_URL) return `/${path}`;
+
+    return `${BACKEND_URL.replace(/\/$/, '')}/${path}`;
+  };
+
   // State
   const [cart, setCart] = useState<Cart | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -19,7 +46,8 @@ export default function CartPage() {
 
   // ✅ FIX: Check for both token types
   const isAuthenticated = () => {
-    const token = localStorage.getItem('customer_token') || localStorage.getItem('auth_token');
+    const token =
+      localStorage.getItem('customer_token') || localStorage.getItem('auth_token');
     return !!token;
   };
 
@@ -31,12 +59,13 @@ export default function CartPage() {
     }
 
     fetchCart();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Select all items by default when cart items change
   useEffect(() => {
     if (cart?.cart_items && cart.cart_items.length > 0) {
-      setSelectedItems(new Set(cart.cart_items.map(item => item.id)));
+      setSelectedItems(new Set(cart.cart_items.map((item) => item.id)));
     }
   }, [cart?.cart_items?.length]);
 
@@ -48,9 +77,12 @@ export default function CartPage() {
       setCart(cartData);
     } catch (err: any) {
       console.error('❌ Error fetching cart:', err);
-      setError(err.message || 'Failed to load cart');
-      
-      if (err.message?.includes('401') || err.message?.includes('Unauthenticated')) {
+      setError(err?.message || 'Failed to load cart');
+
+      if (
+        err?.message?.includes('401') ||
+        err?.message?.includes('Unauthenticated')
+      ) {
         router.push('/e-commerce/login');
       }
     } finally {
@@ -60,11 +92,11 @@ export default function CartPage() {
 
   const toggleSelectAll = () => {
     if (!cart?.cart_items) return;
-    
+
     if (selectedItems.size === cart.cart_items.length) {
       setSelectedItems(new Set());
     } else {
-      setSelectedItems(new Set(cart.cart_items.map(item => item.id)));
+      setSelectedItems(new Set(cart.cart_items.map((item) => item.id)));
     }
   };
 
@@ -81,16 +113,16 @@ export default function CartPage() {
   const handleUpdateQuantity = async (cartItemId: number, newQuantity: number) => {
     if (newQuantity < 1) return;
 
-    setIsUpdating(prev => new Set(prev).add(cartItemId));
-    
+    setIsUpdating((prev) => new Set(prev).add(cartItemId));
+
     try {
       await cartService.updateQuantity(cartItemId, { quantity: newQuantity });
       await fetchCart();
     } catch (err: any) {
       console.error('❌ Error updating quantity:', err);
-      alert(err.message || 'Failed to update quantity');
+      alert(err?.message || 'Failed to update quantity');
     } finally {
-      setIsUpdating(prev => {
+      setIsUpdating((prev) => {
         const next = new Set(prev);
         next.delete(cartItemId);
         return next;
@@ -101,23 +133,23 @@ export default function CartPage() {
   const handleRemoveItem = async (cartItemId: number) => {
     if (!confirm('Are you sure you want to remove this item?')) return;
 
-    setIsUpdating(prev => new Set(prev).add(cartItemId));
-    
+    setIsUpdating((prev) => new Set(prev).add(cartItemId));
+
     try {
       await cartService.removeFromCart(cartItemId);
-      
-      setSelectedItems(prev => {
+
+      setSelectedItems((prev) => {
         const next = new Set(prev);
         next.delete(cartItemId);
         return next;
       });
-      
+
       await fetchCart();
     } catch (err: any) {
       console.error('❌ Error removing item:', err);
-      alert(err.message || 'Failed to remove item');
+      alert(err?.message || 'Failed to remove item');
     } finally {
-      setIsUpdating(prev => {
+      setIsUpdating((prev) => {
         const next = new Set(prev);
         next.delete(cartItemId);
         return next;
@@ -127,19 +159,20 @@ export default function CartPage() {
 
   const handleDeleteSelected = async () => {
     if (selectedItems.size === 0) return;
-    
-    if (!confirm(`Are you sure you want to remove ${selectedItems.size} item(s)?`)) return;
+
+    if (!confirm(`Are you sure you want to remove ${selectedItems.size} item(s)?`))
+      return;
 
     const itemsToDelete = Array.from(selectedItems);
     setIsUpdating(new Set(itemsToDelete));
-    
+
     try {
-      await Promise.all(itemsToDelete.map(id => cartService.removeFromCart(id)));
+      await Promise.all(itemsToDelete.map((id) => cartService.removeFromCart(id)));
       setSelectedItems(new Set());
       await fetchCart();
     } catch (err: any) {
       console.error('❌ Error deleting items:', err);
-      alert(err.message || 'Failed to delete items');
+      alert(err?.message || 'Failed to delete items');
     } finally {
       setIsUpdating(new Set());
     }
@@ -155,7 +188,7 @@ export default function CartPage() {
       await fetchCart();
     } catch (err: any) {
       console.error('❌ Error clearing cart:', err);
-      alert(err.message || 'Failed to clear cart');
+      alert(err?.message || 'Failed to clear cart');
     } finally {
       setIsLoading(false);
     }
@@ -163,13 +196,14 @@ export default function CartPage() {
 
   const getSelectedTotal = (): number => {
     if (!cart?.cart_items) return 0;
-    
+
     return cart.cart_items
-      .filter(item => selectedItems.has(item.id))
+      .filter((item) => selectedItems.has(item.id))
       .reduce((total, item) => {
-        const itemTotal = typeof item.total_price === 'string' 
-          ? parseFloat(item.total_price) 
-          : item.total_price;
+        const itemTotal =
+          typeof item.total_price === 'string'
+            ? parseFloat(item.total_price)
+            : item.total_price;
         return total + itemTotal;
       }, 0);
   };
@@ -192,9 +226,9 @@ export default function CartPage() {
     try {
       // Validate cart before checkout
       const validation = await cartService.validateCart();
-      
+
       if (!validation.is_valid) {
-        const issues = validation.issues.map(issue => issue.issue).join('\n');
+        const issues = validation.issues.map((issue: any) => issue.issue).join('\n');
         alert(`Cart validation failed:\n${issues}`);
         await fetchCart();
         return;
@@ -202,11 +236,14 @@ export default function CartPage() {
 
       // ✅ CRITICAL: Save to localStorage SYNCHRONOUSLY before ANY navigation
       const selectedItemsArray = Array.from(selectedItems);
-      localStorage.setItem('checkout-selected-items', JSON.stringify(selectedItemsArray));
-      
+      localStorage.setItem(
+        'checkout-selected-items',
+        JSON.stringify(selectedItemsArray)
+      );
+
       // ✅ Force a small delay to ensure localStorage write completes
-      await new Promise(resolve => setTimeout(resolve, 100));
-      
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
       // Verify save succeeded
       const saved = localStorage.getItem('checkout-selected-items');
       if (!saved) {
@@ -215,13 +252,15 @@ export default function CartPage() {
 
       // Now navigate
       router.push('/e-commerce/checkout');
-
     } catch (err: any) {
       console.error('❌ Error during checkout:', err);
-      alert(err.message || 'Failed to proceed to checkout. Please try again.');
+      alert(err?.message || 'Failed to proceed to checkout. Please try again.');
     }
   };
 
+  // =========================
+  // UI: Loading / Error / Empty
+  // =========================
   if (isLoading) {
     return (
       <div className="min-h-screen bg-white">
@@ -243,7 +282,9 @@ export default function CartPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
           <div className="text-center">
             <AlertCircle className="h-24 w-24 text-red-500 mx-auto mb-4" />
-            <h1 className="text-3xl font-bold text-gray-900 mb-4">Error Loading Cart</h1>
+            <h1 className="text-3xl font-bold text-gray-900 mb-4">
+              Error Loading Cart
+            </h1>
             <p className="text-gray-600 mb-8">{error}</p>
             <button
               onClick={fetchCart}
@@ -278,19 +319,22 @@ export default function CartPage() {
     );
   }
 
+  // =========================
+  // Main UI
+  // =========================
   return (
     <div className="min-h-screen bg-white">
       <Navigation />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        
         {/* Free Shipping Progress */}
         {remaining > 0 && (
           <div className="mb-8 p-6 border-2 border-dashed border-gray-300 rounded-lg">
             <p className="text-gray-700 mb-3">
-              Add <span className="font-bold text-red-700">৳{remaining.toFixed(2)}</span> to cart and get free shipping!
+              Add <span className="font-bold text-red-700">৳{remaining.toFixed(2)}</span>{' '}
+              to cart and get free shipping!
             </p>
             <div className="w-full bg-gray-200 rounded-full h-3">
-              <div 
+              <div
                 className="bg-red-700 h-3 rounded-full transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
@@ -306,12 +350,16 @@ export default function CartPage() {
               <label className="flex items-center gap-3 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={selectedItems.size === cart.cart_items.length && cart.cart_items.length > 0}
+                  checked={
+                    selectedItems.size === cart.cart_items.length &&
+                    cart.cart_items.length > 0
+                  }
                   onChange={toggleSelectAll}
                   className="w-5 h-5 cursor-pointer accent-red-700"
                 />
                 <span className="text-gray-700 font-medium">
-                  SELECT ALL ({cart.cart_items.length} ITEM{cart.cart_items.length !== 1 ? 'S' : ''})
+                  SELECT ALL ({cart.cart_items.length} ITEM
+                  {cart.cart_items.length !== 1 ? 'S' : ''})
                 </span>
               </label>
               <div className="flex gap-2">
@@ -350,18 +398,32 @@ export default function CartPage() {
             {/* Cart Items */}
             <div className="space-y-4 mt-6">
               {cart.cart_items.map((item: CartItem) => {
-                const price = typeof item.unit_price === 'string' 
-                  ? parseFloat(item.unit_price) 
-                  : item.unit_price;
-                const itemTotal = typeof item.total_price === 'string' 
-                  ? parseFloat(item.total_price) 
-                  : item.total_price;
+                const price =
+                  typeof item.unit_price === 'string'
+                    ? parseFloat(item.unit_price)
+                    : item.unit_price;
+
+                const itemTotal =
+                  typeof item.total_price === 'string'
+                    ? parseFloat(item.total_price)
+                    : item.total_price;
+
                 const isItemUpdating = isUpdating.has(item.id);
-                const productImage = item.product.images?.[0]?.image_url || '/placeholder-product.jpg';
+
+                // ✅ Prefer actual product image, resolve relative paths to backend domain
+                const rawImage =
+                  (item.product as any)?.images?.find((img: any) => img?.image_url)
+                    ?.image_url ||
+                  (item.product as any)?.image_url ||
+                  (item.product as any)?.thumbnail_url ||
+                  (item.product as any)?.featured_image ||
+                  null;
+
+                const productImage = resolveImageUrl(rawImage);
 
                 return (
-                  <div 
-                    key={item.id} 
+                  <div
+                    key={item.id}
                     className={`grid grid-cols-1 md:grid-cols-12 gap-4 py-6 border-b items-center transition-opacity ${
                       isItemUpdating ? 'opacity-50' : 'opacity-100'
                     }`}
@@ -380,14 +442,28 @@ export default function CartPage() {
                     {/* Product Info */}
                     <div className="md:col-span-5 flex items-center gap-4">
                       <div className="relative">
-                        <img
-                          src={productImage}
-                          alt={item.product.name}
-                          className="w-24 h-24 object-cover rounded"
-                          onError={(e) => {
-                            e.currentTarget.src = '/placeholder-product.jpg';
-                          }}
-                        />
+                        {productImage ? (
+                          <img
+                            src={productImage}
+                            alt={item.product.name}
+                            className="w-24 h-24 object-cover rounded bg-gray-50"
+                            onError={(e) => {
+                              // ✅ Don’t force a placeholder that might 404 too
+                              console.warn(
+                                '❌ Product image failed to load:',
+                                productImage,
+                                'raw:',
+                                rawImage
+                              );
+                              e.currentTarget.style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <div className="w-24 h-24 bg-gray-100 rounded flex items-center justify-center text-gray-400 text-xs">
+                            No image
+                          </div>
+                        )}
+
                         <button
                           onClick={() => handleRemoveItem(item.id)}
                           disabled={isItemUpdating}
@@ -400,46 +476,48 @@ export default function CartPage() {
                           )}
                         </button>
                       </div>
+
                       <div>
-                        <h3 className="font-semibold text-gray-900">
-                          {item.product.name}
-                        </h3>
-                        
+                        <h3 className="font-semibold text-gray-900">{item.product.name}</h3>
+
                         {item.variant_options && (
                           <div className="flex gap-2 mt-1">
-                            {item.variant_options.color && (
+                            {(item as any).variant_options?.color && (
                               <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
-                                Color: {item.variant_options.color}
+                                Color: {(item as any).variant_options.color}
                               </span>
                             )}
-                            {item.variant_options.size && (
+                            {(item as any).variant_options?.size && (
                               <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
-                                Size: {item.variant_options.size}
+                                Size: {(item as any).variant_options.size}
                               </span>
                             )}
                           </div>
                         )}
-                        
-                        {item.product.category && (
+
+                        {(item.product as any).category && (
                           <p className="text-sm text-gray-500 mt-1">
-                            {typeof item.product.category === 'string' 
-                              ? item.product.category 
-                              : item.product.category}
+                            {typeof (item.product as any).category === 'string'
+                              ? (item.product as any).category
+                              : (item.product as any).category}
                           </p>
                         )}
+
                         {!item.product.in_stock && (
                           <p className="text-sm text-red-600 font-medium mt-1">
                             Out of Stock
                           </p>
                         )}
+
                         {item.product.in_stock && item.product.stock_quantity < 5 && (
                           <p className="text-sm text-orange-600 font-medium mt-1">
                             Only {item.product.stock_quantity} left in stock
                           </p>
                         )}
-                        {item.notes && (
+
+                        {(item as any).notes && (
                           <p className="text-sm text-gray-500 mt-1 italic">
-                            Note: {item.notes}
+                            Note: {(item as any).notes}
                           </p>
                         )}
                       </div>
@@ -474,7 +552,7 @@ export default function CartPage() {
                           }}
                           disabled={isItemUpdating}
                           className="w-16 text-center border-x border-gray-300 outline-none py-2 disabled:bg-gray-50"
-                          min="1"
+                          min={1}
                           max={item.product.stock_quantity}
                         />
                         <button
@@ -508,7 +586,7 @@ export default function CartPage() {
                 placeholder="Coupon code"
                 className="flex-1 px-4 py-3 border border-gray-300 rounded outline-none focus:ring-2 focus:ring-red-700"
               />
-              <button 
+              <button
                 onClick={() => {
                   console.log('Apply coupon:', couponCode);
                   alert('Coupon functionality coming soon!');
@@ -525,7 +603,7 @@ export default function CartPage() {
           <div className="lg:w-96">
             <div className="bg-white border border-gray-200 rounded-lg p-6 sticky top-4">
               <h2 className="text-2xl font-bold text-gray-900 mb-6">CART TOTALS</h2>
-              
+
               <div className="space-y-4">
                 <div className="flex justify-between py-3 border-b">
                   <span className="text-gray-700">Subtotal ({selectedItems.size} items)</span>
@@ -543,14 +621,12 @@ export default function CartPage() {
                   <div className="flex justify-between">
                     <span className="text-gray-700">Shipping</span>
                     <span className="font-semibold text-gray-900">
-                      {shippingFee > 0 ? (
-                        `৳${shippingFee.toFixed(2)}`
-                      ) : (
+                      {shippingFee > 0 ? `৳${shippingFee.toFixed(2)}` : (
                         <span className="text-green-600">Free shipping</span>
                       )}
                     </span>
                   </div>
-                  <button 
+                  <button
                     onClick={() => {
                       alert('Address change functionality coming soon!');
                     }}
@@ -567,7 +643,7 @@ export default function CartPage() {
                   </span>
                 </div>
 
-                <button 
+                <button
                   onClick={handleProceedToCheckout}
                   disabled={selectedItems.size === 0 || isUpdating.size > 0}
                   className="w-full bg-red-700 text-white py-4 rounded font-bold text-lg hover:bg-red-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -592,6 +668,12 @@ export default function CartPage() {
             </div>
           </div>
         </div>
+
+        {/* Optional Debug (remove later)
+        <pre className="mt-8 text-xs bg-gray-50 p-4 rounded border overflow-auto">
+          BACKEND_URL: {BACKEND_URL || '(not set)'}
+        </pre>
+        */}
       </div>
     </div>
   );

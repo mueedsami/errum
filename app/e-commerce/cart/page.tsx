@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { X, ShoppingCart, Loader2, AlertCircle } from 'lucide-react';
 import Navigation from '@/components/ecommerce/Navigation';
@@ -10,13 +10,16 @@ export default function CartPage() {
   const router = useRouter();
 
   // =========================
-  // ✅ Image URL Resolver Fix
+  // ✅ Image URL Resolver (fix /api issue)
   // =========================
-  const BACKEND_URL =
+  const API_BASE =
     process.env.NEXT_PUBLIC_BACKEND_URL ||
     process.env.NEXT_PUBLIC_API_BASE_URL ||
     process.env.NEXT_PUBLIC_API_URL ||
     '';
+
+  // If env accidentally ends with /api, strip it for assets like /storage/*
+  const ASSET_BASE = API_BASE.replace(/\/api\/?$/, '');
 
   const resolveImageUrl = (raw?: string | null) => {
     if (!raw) return null;
@@ -24,16 +27,16 @@ export default function CartPage() {
     // already absolute
     if (/^https?:\/\//i.test(raw)) return raw;
 
-    // if starts with // (protocol-relative)
+    // protocol-relative
     if (raw.startsWith('//')) return `https:${raw}`;
 
-    // normalize leading slash
-    const path = raw.startsWith('/') ? raw.slice(1) : raw;
+    // ensure leading slash
+    const path = raw.startsWith('/') ? raw : `/${raw}`;
 
-    // If no backend url configured, return root-relative (best effort)
-    if (!BACKEND_URL) return `/${path}`;
+    // If no backend url configured, return relative
+    if (!ASSET_BASE) return path;
 
-    return `${BACKEND_URL.replace(/\/$/, '')}/${path}`;
+    return `${ASSET_BASE.replace(/\/$/, '')}${path}`;
   };
 
   // State
@@ -57,7 +60,6 @@ export default function CartPage() {
       router.push('/e-commerce/login');
       return;
     }
-
     fetchCart();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -79,10 +81,7 @@ export default function CartPage() {
       console.error('❌ Error fetching cart:', err);
       setError(err?.message || 'Failed to load cart');
 
-      if (
-        err?.message?.includes('401') ||
-        err?.message?.includes('Unauthenticated')
-      ) {
+      if (err?.message?.includes('401') || err?.message?.includes('Unauthenticated')) {
         router.push('/e-commerce/login');
       }
     } finally {
@@ -102,11 +101,8 @@ export default function CartPage() {
 
   const toggleSelectItem = (id: number) => {
     const newSelected = new Set(selectedItems);
-    if (newSelected.has(id)) {
-      newSelected.delete(id);
-    } else {
-      newSelected.add(id);
-    }
+    if (newSelected.has(id)) newSelected.delete(id);
+    else newSelected.add(id);
     setSelectedItems(newSelected);
   };
 
@@ -114,7 +110,6 @@ export default function CartPage() {
     if (newQuantity < 1) return;
 
     setIsUpdating((prev) => new Set(prev).add(cartItemId));
-
     try {
       await cartService.updateQuantity(cartItemId, { quantity: newQuantity });
       await fetchCart();
@@ -134,7 +129,6 @@ export default function CartPage() {
     if (!confirm('Are you sure you want to remove this item?')) return;
 
     setIsUpdating((prev) => new Set(prev).add(cartItemId));
-
     try {
       await cartService.removeFromCart(cartItemId);
 
@@ -159,9 +153,7 @@ export default function CartPage() {
 
   const handleDeleteSelected = async () => {
     if (selectedItems.size === 0) return;
-
-    if (!confirm(`Are you sure you want to remove ${selectedItems.size} item(s)?`))
-      return;
+    if (!confirm(`Are you sure you want to remove ${selectedItems.size} item(s)?`)) return;
 
     const itemsToDelete = Array.from(selectedItems);
     setIsUpdating(new Set(itemsToDelete));
@@ -208,7 +200,7 @@ export default function CartPage() {
       }, 0);
   };
 
-  // Calculate totals
+  // Totals
   const subtotal = getSelectedTotal();
   const freeShippingThreshold = 5000;
   const remaining = Math.max(0, freeShippingThreshold - subtotal);
@@ -216,7 +208,7 @@ export default function CartPage() {
   const shippingFee = subtotal >= freeShippingThreshold ? 0 : 60;
   const total = subtotal + shippingFee;
 
-  // ✅ CRITICAL FIX: Synchronous localStorage save before navigation
+  // ✅ Checkout
   const handleProceedToCheckout = async () => {
     if (selectedItems.size === 0) {
       alert('Please select at least one item to checkout');
@@ -224,9 +216,7 @@ export default function CartPage() {
     }
 
     try {
-      // Validate cart before checkout
       const validation = await cartService.validateCart();
-
       if (!validation.is_valid) {
         const issues = validation.issues.map((issue: any) => issue.issue).join('\n');
         alert(`Cart validation failed:\n${issues}`);
@@ -234,23 +224,14 @@ export default function CartPage() {
         return;
       }
 
-      // ✅ CRITICAL: Save to localStorage SYNCHRONOUSLY before ANY navigation
       const selectedItemsArray = Array.from(selectedItems);
-      localStorage.setItem(
-        'checkout-selected-items',
-        JSON.stringify(selectedItemsArray)
-      );
+      localStorage.setItem('checkout-selected-items', JSON.stringify(selectedItemsArray));
 
-      // ✅ Force a small delay to ensure localStorage write completes
       await new Promise((resolve) => setTimeout(resolve, 100));
 
-      // Verify save succeeded
       const saved = localStorage.getItem('checkout-selected-items');
-      if (!saved) {
-        throw new Error('Failed to save checkout data');
-      }
+      if (!saved) throw new Error('Failed to save checkout data');
 
-      // Now navigate
       router.push('/e-commerce/checkout');
     } catch (err: any) {
       console.error('❌ Error during checkout:', err);
@@ -282,9 +263,7 @@ export default function CartPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
           <div className="text-center">
             <AlertCircle className="h-24 w-24 text-red-500 mx-auto mb-4" />
-            <h1 className="text-3xl font-bold text-gray-900 mb-4">
-              Error Loading Cart
-            </h1>
+            <h1 className="text-3xl font-bold text-gray-900 mb-4">Error Loading Cart</h1>
             <p className="text-gray-600 mb-8">{error}</p>
             <button
               onClick={fetchCart}
@@ -362,19 +341,17 @@ export default function CartPage() {
                   {cart.cart_items.length !== 1 ? 'S' : ''})
                 </span>
               </label>
+
               <div className="flex gap-2">
                 <button
                   onClick={handleDeleteSelected}
                   disabled={selectedItems.size === 0 || isUpdating.size > 0}
                   className="flex items-center gap-2 text-gray-600 hover:text-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {isUpdating.size > 0 ? (
-                    <Loader2 size={18} className="animate-spin" />
-                  ) : (
-                    <X size={18} />
-                  )}
+                  {isUpdating.size > 0 ? <Loader2 size={18} className="animate-spin" /> : <X size={18} />}
                   <span className="text-sm font-medium">DELETE SELECTED</span>
                 </button>
+
                 <button
                   onClick={handleClearCart}
                   disabled={isUpdating.size > 0}
@@ -410,10 +387,9 @@ export default function CartPage() {
 
                 const isItemUpdating = isUpdating.has(item.id);
 
-                // ✅ Prefer actual product image, resolve relative paths to backend domain
+                // ✅ Prefer actual product image (DO NOT fallback to placeholder url here)
                 const rawImage =
-                  (item.product as any)?.images?.find((img: any) => img?.image_url)
-                    ?.image_url ||
+                  (item.product as any)?.images?.find((img: any) => img?.image_url)?.image_url ||
                   (item.product as any)?.image_url ||
                   (item.product as any)?.thumbnail_url ||
                   (item.product as any)?.featured_image ||
@@ -448,13 +424,8 @@ export default function CartPage() {
                             alt={item.product.name}
                             className="w-24 h-24 object-cover rounded bg-gray-50"
                             onError={(e) => {
-                              // ✅ Don’t force a placeholder that might 404 too
-                              console.warn(
-                                '❌ Product image failed to load:',
-                                productImage,
-                                'raw:',
-                                rawImage
-                              );
+                              // Hide if broken (no placeholder fetch)
+                              console.warn('❌ Product image failed to load:', productImage, 'raw:', rawImage);
                               e.currentTarget.style.display = 'none';
                             }}
                           />
@@ -504,9 +475,7 @@ export default function CartPage() {
                         )}
 
                         {!item.product.in_stock && (
-                          <p className="text-sm text-red-600 font-medium mt-1">
-                            Out of Stock
-                          </p>
+                          <p className="text-sm text-red-600 font-medium mt-1">Out of Stock</p>
                         )}
 
                         {item.product.in_stock && item.product.stock_quantity < 5 && (
@@ -627,9 +596,7 @@ export default function CartPage() {
                     </span>
                   </div>
                   <button
-                    onClick={() => {
-                      alert('Address change functionality coming soon!');
-                    }}
+                    onClick={() => alert('Address change functionality coming soon!')}
                     className="text-sm text-red-700 hover:underline mt-2"
                   >
                     Change address
@@ -669,9 +636,10 @@ export default function CartPage() {
           </div>
         </div>
 
-        {/* Optional Debug (remove later)
+        {/* Debug (temporarily enable if needed)
         <pre className="mt-8 text-xs bg-gray-50 p-4 rounded border overflow-auto">
-          BACKEND_URL: {BACKEND_URL || '(not set)'}
+          API_BASE: {API_BASE || '(not set)'}{"\n"}
+          ASSET_BASE: {ASSET_BASE || '(not set)'}
         </pre>
         */}
       </div>

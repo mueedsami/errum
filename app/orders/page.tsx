@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import {
@@ -62,12 +62,23 @@ interface Order {
     paid: number;
     due: number;
   };
+
+  // ✅ Use backend order status directly (pending/confirmed/processing/ready_for_pickup/shipped/delivered/cancelled/refunded/...)
   status: string;
+  statusLabel: string;
+
+  // ✅ Keep payment status separately (pending/partially_paid/paid/failed/refunded/overdue/...)
+  paymentStatus: string;
+  paymentStatusLabel: string;
+
   salesBy: string;
   store: string;
   storeId?: number;
   notes?: string;
-  fulfillmentStatus?: string | null;
+
+  // optional raw fields you might use later
+  createdAt?: string;
+  orderDateRaw?: string;
 }
 
 // Types expected by ReturnProductModal / ExchangeProductModal (POS components)
@@ -175,7 +186,17 @@ const toExchangeModalOrder = (o: BackendOrder): ExchangeModalOrder => ({
   paid_amount: o.paid_amount ?? '0',
 });
 
-export default function PendingOrdersDashboard() {
+const normalize = (v: any) => String(v ?? '').trim().toLowerCase();
+
+const titleCase = (s: string) =>
+  s
+    .replace(/_/g, ' ')
+    .split(' ')
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+
+export default function OrdersDashboard() {
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -184,7 +205,10 @@ export default function PendingOrdersDashboard() {
 
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('');
-  const [statusFilter, setStatusFilter] = useState('All Status');
+
+  // ✅ Separate filters
+  const [orderStatusFilter, setOrderStatusFilter] = useState('All Order Status');
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Status');
   const [orderTypeFilter, setOrderTypeFilter] = useState('All Types');
 
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
@@ -201,7 +225,7 @@ export default function PendingOrdersDashboard() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSavingOrder, setIsSavingOrder] = useState(false);
 
-  // 🔁 Return / Exchange (re-use POS logic from Purchase History)
+  // 🔁 Return / Exchange
   const [selectedOrderForAction, setSelectedOrderForAction] = useState<BackendOrder | null>(null);
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [showExchangeModal, setShowExchangeModal] = useState(false);
@@ -261,13 +285,81 @@ export default function PendingOrdersDashboard() {
 
   const parseMoney = (val: any) => Number(String(val ?? '0').replace(/[^0-9.-]/g, ''));
 
-  // 🔧 Central transformer to avoid bugs
+  const derivePaymentStatus = (order: any) => {
+    const raw = normalize(order?.payment_status);
+    if (raw) return raw;
+    // fallback from amounts
+    const total = parseMoney(order?.total_amount);
+    const due = parseMoney(order?.outstanding_amount);
+    if (total <= 0) return 'pending';
+    if (due <= 0) return 'paid';
+    if (due < total) return 'partially_paid';
+    return 'pending';
+  };
+
+  const statusLabel = (raw: string) => {
+    const s = normalize(raw);
+    return s ? titleCase(s) : 'Unknown';
+  };
+
+  const getOrderStatusBadge = (raw: string) => {
+    const s = normalize(raw);
+    const cls =
+      s === 'delivered' || s === 'completed'
+        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+        : s === 'shipped'
+        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400'
+        : s === 'processing' || s === 'confirmed' || s === 'ready_for_pickup'
+        ? 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400'
+        : s === 'cancelled'
+        ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+        : s === 'refunded'
+        ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'
+        : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+
+    return (
+      <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${cls}`}>
+        {statusLabel(raw)}
+      </span>
+    );
+  };
+
+  const getPaymentStatusBadge = (raw: string, compact = true) => {
+    const s = normalize(raw);
+    const cls =
+      s === 'paid'
+        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+        : s === 'partially_paid'
+        ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+        : s === 'overdue'
+        ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+        : s === 'failed'
+        ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400'
+        : s === 'refunded'
+        ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400'
+        : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300';
+
+    return (
+      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium ${cls}`}>
+        {compact ? statusLabel(raw) : `Payment: ${statusLabel(raw)}`}
+      </span>
+    );
+  };
+
+  // 🔧 Central transformer (aligned with backend OrderController format)
   const transformOrder = (order: any): Order => {
+    const paid = parseMoney(order.paid_amount);
+    const due = parseMoney(order.outstanding_amount);
+    const total = parseMoney(order.total_amount);
+
+    const oStatusRaw = order.status ?? '';
+    const pStatusRaw = derivePaymentStatus(order);
+
     return {
       id: order.id,
       orderNumber: order.order_number,
       orderType: order.order_type,
-      orderTypeLabel: order.order_type_label,
+      orderTypeLabel: order.order_type_label ?? titleCase(order.order_type ?? ''),
       date: new Date(order.order_date).toLocaleDateString('en-GB'),
       customer: {
         name: order.customer_name ?? order.customer?.name ?? '',
@@ -292,16 +384,25 @@ export default function PendingOrdersDashboard() {
       discount: parseMoney(order.discount_amount),
       shipping: parseMoney(order.shipping_amount),
       amounts: {
-        total: parseMoney(order.total_amount),
-        paid: parseMoney(order.paid_amount),
-        due: parseMoney(order.outstanding_amount),
+        total: total,
+        paid: paid,
+        due: due,
       },
-      status: order.payment_status === 'paid' ? 'Paid' : 'Pending',
+
+      // ✅ backend order status
+      status: normalize(oStatusRaw) || 'pending',
+      statusLabel: statusLabel(oStatusRaw || 'pending'),
+
+      // ✅ payment status separate
+      paymentStatus: normalize(pStatusRaw) || 'pending',
+      paymentStatusLabel: statusLabel(pStatusRaw || 'pending'),
+
       salesBy: order.salesman?.name || userName || 'N/A',
       store: order.store?.name || '',
       storeId: order.store?.id,
       notes: order.notes || '',
-      fulfillmentStatus: order.fulfillment_status,
+      createdAt: order.created_at,
+      orderDateRaw: order.order_date,
     };
   };
 
@@ -327,32 +428,23 @@ export default function PendingOrdersDashboard() {
   const loadOrders = async () => {
     setIsLoading(true);
     try {
-      const socialCommerceResponse = await orderService.getAll({
-        order_type: 'social_commerce',
-        status: 'pending',
-        sort_by: 'created_at',
-        sort_order: 'desc',
-        per_page: 1000,
-      });
+      // ✅ “Every order” = pull all types. If you want only social+ecom, remove the counter call.
+      const [social, ecommerce, counter] = await Promise.all([
+        orderService.getAll({ order_type: 'social_commerce', sort_by: 'created_at', sort_order: 'desc', per_page: 1000 }),
+        orderService.getAll({ order_type: 'ecommerce', sort_by: 'created_at', sort_order: 'desc', per_page: 1000 }),
+        orderService.getAll({ order_type: 'counter', sort_by: 'created_at', sort_order: 'desc', per_page: 1000 }),
+      ]);
 
-      const ecommerceResponse = await orderService.getAll({
-        order_type: 'ecommerce',
-        status: 'pending',
-        sort_by: 'created_at',
-        sort_order: 'desc',
-        per_page: 1000,
-      });
-
-      const allOrders = [...socialCommerceResponse.data, ...ecommerceResponse.data];
+      const allOrders = [...(social.data || []), ...(ecommerce.data || []), ...(counter.data || [])];
 
       allOrders.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
-      const transformedOrders = allOrders.map((order: any) => transformOrder(order));
+      const transformedOrders = allOrders.map((o: any) => transformOrder(o));
 
       setOrders(transformedOrders);
       setFilteredOrders(transformedOrders);
 
-      // If filters change, selected ids might include now-missing orders; keep selection safe
+      // keep selection safe if list changes
       setSelectedOrders((prev) => {
         const stillExists = new Set(transformedOrders.map((o) => o.id));
         const next = new Set<number>();
@@ -400,15 +492,28 @@ export default function PendingOrdersDashboard() {
     setShowPrinterSelect(false);
   };
 
+  const orderStatusOptions = useMemo(() => {
+    const set = new Set<string>();
+    orders.forEach((o) => set.add(o.status));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [orders]);
+
+  const paymentStatusOptions = useMemo(() => {
+    const set = new Set<string>();
+    orders.forEach((o) => set.add(o.paymentStatus));
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [orders]);
+
   useEffect(() => {
     let filtered = orders;
 
     if (search.trim()) {
+      const q = search.trim().toLowerCase();
       filtered = filtered.filter(
         (o) =>
-          o.id.toString().includes(search.trim()) ||
-          o.orderNumber?.toLowerCase().includes(search.toLowerCase()) ||
-          o.customer.name.toLowerCase().includes(search.toLowerCase()) ||
+          o.id.toString().includes(q) ||
+          o.orderNumber?.toLowerCase().includes(q) ||
+          o.customer.name.toLowerCase().includes(q) ||
           o.customer.phone.includes(search.trim())
       );
     }
@@ -425,20 +530,27 @@ export default function PendingOrdersDashboard() {
       });
     }
 
-    if (statusFilter !== 'All Status') {
-      filtered = filtered.filter((o) => (statusFilter === 'Paid' ? o.amounts.due === 0 : o.amounts.due > 0));
-    }
-
     if (orderTypeFilter !== 'All Types') {
       filtered = filtered.filter((o) => {
         if (orderTypeFilter === 'Social Commerce') return o.orderType === 'social_commerce';
         if (orderTypeFilter === 'E-Commerce') return o.orderType === 'ecommerce';
+        if (orderTypeFilter === 'Counter') return o.orderType === 'counter';
         return true;
       });
     }
 
+    if (orderStatusFilter !== 'All Order Status') {
+      const target = normalize(orderStatusFilter);
+      filtered = filtered.filter((o) => normalize(o.status) === target);
+    }
+
+    if (paymentStatusFilter !== 'All Payment Status') {
+      const target = normalize(paymentStatusFilter);
+      filtered = filtered.filter((o) => normalize(o.paymentStatus) === target);
+    }
+
     setFilteredOrders(filtered);
-  }, [search, dateFilter, statusFilter, orderTypeFilter, orders]);
+  }, [search, dateFilter, orderTypeFilter, orderStatusFilter, paymentStatusFilter, orders]);
 
   const handleViewDetails = async (order: Order) => {
     setIsLoadingDetails(true);
@@ -495,15 +607,21 @@ export default function PendingOrdersDashboard() {
     }
   };
 
-  // 🔁 Return / Exchange (safe only after COMPLETED)
+  const canReturnOrExchange = (statusRaw: any) => {
+    const s = normalize(statusRaw);
+    // backend allows delivered/completed (controller checks delivered or completed)
+    return s === 'delivered' || s === 'completed';
+  };
+
+  // 🔁 Return / Exchange (safe only after DELIVERED/COMPLETED)
   const openReturnModal = async (order: Order) => {
     setActiveMenu(null);
     try {
       const fullOrder = await orderService.getById(order.id);
 
-      if (fullOrder.status !== 'completed') {
+      if (!canReturnOrExchange(fullOrder.status)) {
         alert(
-          `Return is available only for completed orders.\n\nOrder: ${fullOrder.order_number}\nCurrent status: ${fullOrder.status}`
+          `Return is available only for delivered/completed orders.\n\nOrder: ${fullOrder.order_number}\nCurrent status: ${fullOrder.status}`
         );
         return;
       }
@@ -521,9 +639,9 @@ export default function PendingOrdersDashboard() {
     try {
       const fullOrder = await orderService.getById(order.id);
 
-      if (fullOrder.status !== 'completed') {
+      if (!canReturnOrExchange(fullOrder.status)) {
         alert(
-          `Exchange is available only for completed orders.\n\nOrder: ${fullOrder.order_number}\nCurrent status: ${fullOrder.status}`
+          `Exchange is available only for delivered/completed orders.\n\nOrder: ${fullOrder.order_number}\nCurrent status: ${fullOrder.status}`
         );
         return;
       }
@@ -568,7 +686,7 @@ export default function PendingOrdersDashboard() {
           quantity: item.quantity,
           product_barcode_id: item.product_barcode_id,
         })),
-        customer_notes: returnData.customerNotes || 'Return initiated from Orders (Social/E-com)',
+        customer_notes: returnData.customerNotes || 'Return initiated from Orders dashboard',
       };
 
       const returnResponse = await productReturnService.create(returnRequest);
@@ -754,14 +872,24 @@ export default function PendingOrdersDashboard() {
         </span>
       );
     }
+    if (orderType === 'counter') {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300">
+          <Package className="h-3 w-3" />
+          Counter
+        </span>
+      );
+    }
     return null;
   };
 
   const totalRevenue = orders.reduce((sum, order) => sum + order.amounts.total, 0);
-  const paidOrders = orders.filter((o) => o.amounts.due === 0).length;
-  const pendingOrders = orders.filter((o) => o.amounts.due > 0).length;
   const socialCommerceCount = orders.filter((o) => o.orderType === 'social_commerce').length;
   const ecommerceCount = orders.filter((o) => o.orderType === 'ecommerce').length;
+  const counterCount = orders.filter((o) => o.orderType === 'counter').length;
+
+  const paidOrders = orders.filter((o) => normalize(o.paymentStatus) === 'paid').length;
+  const dueOrders = orders.filter((o) => normalize(o.paymentStatus) !== 'paid').length;
 
   // ✅ Bulk selection helpers
   const handleToggleSelectAll = () => {
@@ -799,12 +927,16 @@ export default function PendingOrdersDashboard() {
       details: [],
     });
 
+    let successCount = 0;
+    let failedCount = 0;
+
     try {
       const selectedOrdersList = orders.filter((o) => selectedOrders.has(o.id));
       const shipmentIdsToSend: number[] = [];
 
-      for (const order of selectedOrdersList) {
-        setPathaoProgress((prev) => ({ ...prev, current: prev.current + 1 }));
+      for (let idx = 0; idx < selectedOrdersList.length; idx++) {
+        const order = selectedOrdersList[idx];
+        setPathaoProgress((prev) => ({ ...prev, current: idx + 1 }));
 
         try {
           let existingShipment: any = null;
@@ -816,17 +948,13 @@ export default function PendingOrdersDashboard() {
 
           if (existingShipment) {
             if (existingShipment.pathao_consignment_id) {
+              failedCount++;
               setPathaoProgress((prev) => ({
                 ...prev,
-                failed: prev.failed + 1,
+                failed: failedCount,
                 details: [
                   ...prev.details,
-                  {
-                    orderId: order.id,
-                    orderNumber: order.orderNumber,
-                    status: 'failed',
-                    message: 'Already sent to Pathao',
-                  },
+                  { orderId: order.id, orderNumber: order.orderNumber, status: 'failed', message: 'Already sent to Pathao' },
                 ],
               }));
               continue;
@@ -842,9 +970,10 @@ export default function PendingOrdersDashboard() {
             shipmentIdsToSend.push(newShipment.id);
           }
         } catch (error: any) {
+          failedCount++;
           setPathaoProgress((prev) => ({
             ...prev,
-            failed: prev.failed + 1,
+            failed: failedCount,
             details: [
               ...prev.details,
               {
@@ -857,16 +986,17 @@ export default function PendingOrdersDashboard() {
           }));
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, 250));
       }
 
       if (shipmentIdsToSend.length > 0) {
         const result = await shipmentService.bulkSendToPathao(shipmentIdsToSend);
 
         (result?.success || []).forEach((item: any) => {
+          successCount++;
           setPathaoProgress((prev) => ({
             ...prev,
-            success: prev.success + 1,
+            success: successCount,
             details: [
               ...prev.details,
               {
@@ -880,9 +1010,10 @@ export default function PendingOrdersDashboard() {
         });
 
         (result?.failed || []).forEach((item: any) => {
+          failedCount++;
           setPathaoProgress((prev) => ({
             ...prev,
-            failed: prev.failed + 1,
+            failed: failedCount,
             details: [
               ...prev.details,
               {
@@ -896,7 +1027,7 @@ export default function PendingOrdersDashboard() {
         });
       }
 
-      alert(`Bulk Send to Pathao Completed!\n\nSuccess: ${pathaoProgress.success}\nFailed: ${pathaoProgress.failed}`);
+      alert(`Bulk Send to Pathao Completed!\n\nSuccess: ${successCount}\nFailed: ${failedCount}`);
       setSelectedOrders(new Set());
       await loadOrders();
     } catch (error: any) {
@@ -906,7 +1037,7 @@ export default function PendingOrdersDashboard() {
       setIsSendingBulk(false);
       setTimeout(() => {
         setPathaoProgress({ show: false, current: 0, total: 0, success: 0, failed: 0, details: [] });
-      }, 3000);
+      }, 2500);
     }
   };
 
@@ -919,7 +1050,7 @@ export default function PendingOrdersDashboard() {
 
     try {
       await checkPrinterStatus();
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 350));
     } catch {
       alert('Failed to connect to QZ Tray. Please ensure QZ Tray is running and try again.');
       return;
@@ -947,11 +1078,10 @@ export default function PendingOrdersDashboard() {
 
       let successCount = 0;
       let failedCount = 0;
-      let currentIndex = 0;
 
-      for (const order of selectedOrdersList) {
-        currentIndex++;
-        setBulkPrintProgress((prev) => ({ ...prev, current: currentIndex }));
+      for (let i = 0; i < selectedOrdersList.length; i++) {
+        const order = selectedOrdersList[i];
+        setBulkPrintProgress((prev) => ({ ...prev, current: i + 1 }));
 
         try {
           await printBulkReceipts([order as any], selectedPrinter);
@@ -962,7 +1092,7 @@ export default function PendingOrdersDashboard() {
           setBulkPrintProgress((prev) => ({ ...prev, failed: failedCount }));
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 800));
+        await new Promise((resolve) => setTimeout(resolve, 650));
       }
 
       alert(`Bulk print completed!\nSuccess: ${successCount}\nFailed: ${failedCount}`);
@@ -1345,11 +1475,7 @@ export default function PendingOrdersDashboard() {
         <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
 
         <div className="flex-1 flex flex-col overflow-hidden">
-          <Header
-            darkMode={darkMode}
-            setDarkMode={setDarkMode}
-            toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-          />
+          <Header darkMode={darkMode} setDarkMode={setDarkMode} toggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
 
           <main className="flex-1 overflow-auto bg-white dark:bg-black">
             {/* Header */}
@@ -1361,11 +1487,9 @@ export default function PendingOrdersDashboard() {
                       <Package className="w-4 h-4 text-white dark:text-black" />
                     </div>
                     <div>
-                      <h1 className="text-lg font-bold text-black dark:text-white leading-none">
-                        Pending Orders
-                      </h1>
+                      <h1 className="text-lg font-bold text-black dark:text-white leading-none">Orders</h1>
                       <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-none mt-0.5">
-                        {filteredOrders.length} of {orders.length} orders awaiting fulfillment
+                        {filteredOrders.length} of {orders.length} orders
                       </p>
                     </div>
                   </div>
@@ -1392,9 +1516,7 @@ export default function PendingOrdersDashboard() {
                         {showPrinterSelect && (
                           <div className="absolute right-0 top-full mt-1 bg-white dark:bg-black border border-gray-300 dark:border-gray-700 rounded shadow-lg w-64 z-50">
                             <div className="px-2 py-1 border-b border-gray-200 dark:border-gray-800">
-                              <p className="text-[9px] font-bold text-gray-500 dark:text-gray-400 uppercase">
-                                Printers
-                              </p>
+                              <p className="text-[9px] font-bold text-gray-500 dark:text-gray-400 uppercase">Printers</p>
                             </div>
                             {printers.map((printer) => (
                               <button
@@ -1429,33 +1551,23 @@ export default function PendingOrdersDashboard() {
                 <div className="grid grid-cols-6 gap-2">
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
                     <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Total</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">
-                      {orders.length}
-                    </p>
+                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{orders.length}</p>
                   </div>
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
                     <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Social</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">
-                      {socialCommerceCount}
-                    </p>
+                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{socialCommerceCount}</p>
                   </div>
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
                     <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">E-Com</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">
-                      {ecommerceCount}
-                    </p>
+                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{ecommerceCount}</p>
+                  </div>
+                  <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Counter</p>
+                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{counterCount}</p>
                   </div>
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
                     <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Paid</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">
-                      {paidOrders}
-                    </p>
-                  </div>
-                  <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Due</p>
-                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">
-                      {pendingOrders}
-                    </p>
+                    <p className="text-lg font-bold text-black dark:text-white leading-none mt-0.5">{paidOrders}</p>
                   </div>
                   <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
                     <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-medium">Revenue</p>
@@ -1464,6 +1576,10 @@ export default function PendingOrdersDashboard() {
                     </p>
                   </div>
                 </div>
+
+                <p className="mt-2 text-[10px] text-gray-500 dark:text-gray-500">
+                  Due/Not Paid: {dueOrders}
+                </p>
               </div>
             </div>
 
@@ -1474,7 +1590,7 @@ export default function PendingOrdersDashboard() {
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                   <input
                     type="text"
-                    placeholder="Search Order ID or Customer..."
+                    placeholder="Search order no / customer / phone..."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
@@ -1496,16 +1612,33 @@ export default function PendingOrdersDashboard() {
                   <option>All Types</option>
                   <option>Social Commerce</option>
                   <option>E-Commerce</option>
+                  <option>Counter</option>
                 </select>
 
                 <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
+                  value={orderStatusFilter}
+                  onChange={(e) => setOrderStatusFilter(e.target.value)}
                   className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
                 >
-                  <option>All Status</option>
-                  <option>Paid</option>
-                  <option>Pending</option>
+                  <option>All Order Status</option>
+                  {orderStatusOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {statusLabel(s)}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={paymentStatusFilter}
+                  onChange={(e) => setPaymentStatusFilter(e.target.value)}
+                  className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
+                >
+                  <option>All Payment Status</option>
+                  {paymentStatusOptions.map((s) => (
+                    <option key={s} value={s}>
+                      {statusLabel(s)}
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -1521,13 +1654,9 @@ export default function PendingOrdersDashboard() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className="w-6 h-6 bg-black dark:bg-white rounded flex items-center justify-center">
-                        <span className="text-white dark:text-black text-[10px] font-bold">
-                          {selectedOrders.size}
-                        </span>
+                        <span className="text-white dark:text-black text-[10px] font-bold">{selectedOrders.size}</span>
                       </div>
-                      <p className="text-[10px] font-semibold text-black dark:text-white">
-                        {selectedOrders.size} selected
-                      </p>
+                      <p className="text-[10px] font-semibold text-black dark:text-white">{selectedOrders.size} selected</p>
                     </div>
 
                     <div className="flex items-center gap-1.5">
@@ -1564,9 +1693,7 @@ export default function PendingOrdersDashboard() {
                     <div className="flex items-center gap-2">
                       <div className="flex items-center gap-0.5">
                         <CheckCircle className="w-3 h-3 text-black dark:text-white" />
-                        <span className="text-[10px] font-medium text-black dark:text-white">
-                          {pathaoProgress.success}
-                        </span>
+                        <span className="text-[10px] font-medium text-black dark:text-white">{pathaoProgress.success}</span>
                       </div>
                       <div className="flex items-center gap-0.5">
                         <XCircle className="w-3 h-3 text-gray-500" />
@@ -1596,9 +1723,7 @@ export default function PendingOrdersDashboard() {
                     <div className="flex items-center gap-2">
                       <div className="flex items-center gap-0.5">
                         <CheckCircle className="w-3 h-3 text-black dark:text-white" />
-                        <span className="text-[10px] font-medium text-black dark:text-white">
-                          {bulkPrintProgress.success}
-                        </span>
+                        <span className="text-[10px] font-medium text-black dark:text-white">{bulkPrintProgress.success}</span>
                       </div>
                       <div className="flex items-center gap-0.5">
                         <XCircle className="w-3 h-3 text-gray-500" />
@@ -1628,7 +1753,7 @@ export default function PendingOrdersDashboard() {
               ) : filteredOrders.length === 0 ? (
                 <div className="bg-white dark:bg-gray-900 rounded-xl p-12 text-center border border-gray-200 dark:border-gray-800">
                   <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500 dark:text-gray-400 font-medium">No pending orders found</p>
+                  <p className="text-gray-500 dark:text-gray-400 font-medium">No orders found</p>
                 </div>
               ) : (
                 <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
@@ -1666,12 +1791,10 @@ export default function PendingOrdersDashboard() {
                         </th>
                       </tr>
                     </thead>
+
                     <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                       {filteredOrders.map((order) => (
-                        <tr
-                          key={order.id}
-                          className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-                        >
+                        <tr key={order.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                           <td className="px-3 py-3">
                             <input
                               type="checkbox"
@@ -1683,6 +1806,7 @@ export default function PendingOrdersDashboard() {
 
                           <td className="px-4 py-3">
                             <p className="text-sm font-semibold text-black dark:text-white">{order.orderNumber}</p>
+                            <p className="text-[10px] text-gray-500 dark:text-gray-500">#{order.id}</p>
                           </td>
 
                           <td className="px-4 py-3">{getOrderTypeBadge(order.orderType)}</td>
@@ -1706,25 +1830,18 @@ export default function PendingOrdersDashboard() {
                           </td>
 
                           <td className="px-4 py-3">
-                            <span
-                              className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                                order.status === 'Paid'
-                                  ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                                  : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
-                              }`}
-                            >
-                              {order.status}
-                            </span>
+                            <div className="flex flex-col gap-1">
+                              {getOrderStatusBadge(order.status)}
+                              <div className="flex items-center gap-1">
+                                {getPaymentStatusBadge(order.paymentStatus)}
+                              </div>
+                            </div>
                           </td>
 
                           <td className="px-4 py-3 text-right">
-                            <p className="text-sm font-bold text-black dark:text-white">
-                              ৳{order.amounts.total.toFixed(2)}
-                            </p>
+                            <p className="text-sm font-bold text-black dark:text-white">৳{order.amounts.total.toFixed(2)}</p>
                             {order.amounts.due > 0 && (
-                              <p className="text-xs text-red-600 dark:text-red-400">
-                                Due: ৳{order.amounts.due.toFixed(2)}
-                              </p>
+                              <p className="text-xs text-red-600 dark:text-red-400">Due: ৳{order.amounts.due.toFixed(2)}</p>
                             )}
                           </td>
 
@@ -1742,7 +1859,7 @@ export default function PendingOrdersDashboard() {
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   const rect = e.currentTarget.getBoundingClientRect();
-                                  const menuHeight = 360; // taller now
+                                  const menuHeight = 360;
                                   const spaceBelow = window.innerHeight - rect.bottom;
                                   const spaceRight = window.innerWidth - rect.right;
 
@@ -1917,22 +2034,22 @@ export default function PendingOrdersDashboard() {
                     <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Order Type</p>
                     {getOrderTypeBadge(selectedOrder.orderType)}
                   </div>
+
                   <div>
-                    <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Status</p>
-                    <span
-                      className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${
-                        selectedOrder.status === 'Paid'
-                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
-                          : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
-                      }`}
-                    >
-                      {selectedOrder.status}
-                    </span>
+                    <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Order Status</p>
+                    {getOrderStatusBadge(selectedOrder.status)}
                   </div>
+
+                  <div>
+                    <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Payment Status</p>
+                    {getPaymentStatusBadge(selectedOrder.paymentStatus, false)}
+                  </div>
+
                   <div>
                     <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Date</p>
                     <p className="text-sm font-medium text-black dark:text-white">{selectedOrder.date}</p>
                   </div>
+
                   <div>
                     <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Store</p>
                     <p className="text-sm font-medium text-black dark:text-white">{selectedOrder.store}</p>
@@ -2109,10 +2226,7 @@ export default function PendingOrdersDashboard() {
                         onChange={(e) =>
                           setEditableOrder((prev) => {
                             if (!prev) return prev;
-                            return {
-                              ...prev,
-                              customer: { ...prev.customer, name: e.target.value },
-                            };
+                            return { ...prev, customer: { ...prev.customer, name: e.target.value } };
                           })
                         }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -2126,10 +2240,7 @@ export default function PendingOrdersDashboard() {
                         onChange={(e) =>
                           setEditableOrder((prev) => {
                             if (!prev) return prev;
-                            return {
-                              ...prev,
-                              customer: { ...prev.customer, phone: e.target.value },
-                            };
+                            return { ...prev, customer: { ...prev.customer, phone: e.target.value } };
                           })
                         }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -2143,10 +2254,7 @@ export default function PendingOrdersDashboard() {
                         onChange={(e) =>
                           setEditableOrder((prev) => {
                             if (!prev) return prev;
-                            return {
-                              ...prev,
-                              customer: { ...prev.customer, email: e.target.value },
-                            };
+                            return { ...prev, customer: { ...prev.customer, email: e.target.value } };
                           })
                         }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -2160,10 +2268,7 @@ export default function PendingOrdersDashboard() {
                         onChange={(e) =>
                           setEditableOrder((prev) => {
                             if (!prev) return prev;
-                            return {
-                              ...prev,
-                              customer: { ...prev.customer, address: e.target.value },
-                            };
+                            return { ...prev, customer: { ...prev.customer, address: e.target.value } };
                           })
                         }
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -2260,9 +2365,7 @@ export default function PendingOrdersDashboard() {
                   <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Details</h3>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                        Discount (৳)
-                      </label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Discount (৳)</label>
                       <input
                         type="number"
                         value={editableOrder.discount}
@@ -2278,9 +2381,7 @@ export default function PendingOrdersDashboard() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                        Shipping (৳)
-                      </label>
+                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Shipping (৳)</label>
                       <input
                         type="number"
                         value={editableOrder.shipping}

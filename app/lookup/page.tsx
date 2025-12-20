@@ -26,7 +26,6 @@ type BarcodeHistoryItem = {
   performed_by?: string | null;
   notes?: string | null;
 
-  // Some backends may return these too (we handle safely)
   order_id?: number | string | null;
   order_number?: string | null;
   customer?: any;
@@ -37,7 +36,7 @@ type BarcodeHistoryItem = {
 type BarcodeHistoryData = {
   barcode: string;
   product: { id: number; name: string; sku: string | null };
-  current_location: any;
+  current_location: any; // backend-dependent
   total_movements: number;
   history: BarcodeHistoryItem[];
 };
@@ -48,6 +47,9 @@ type BatchLookupData = {
     batch_number: string;
     product: { id: number; name: string; sku: string | null };
     original_quantity: number;
+    // some backends may include pricing:
+    cost_price?: string | number | null;
+    selling_price?: string | number | null;
   };
   summary: {
     total_units: number;
@@ -69,11 +71,15 @@ type BatchLookupData = {
     is_defective: boolean;
     is_available_for_sale: boolean;
     location_updated_at: string;
+
+    // optional fields your backend may have:
+    metadata?: any;
+    meta?: any;
   }>;
 };
 
 export default function LookupPage() {
-  // Layout (required by Header/Sidebar)
+  // Layout
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -84,7 +90,7 @@ export default function LookupPage() {
   const [error, setError] = useState('');
 
   // =========================
-  // CUSTOMER LOOKUP (existing)
+  // CUSTOMER LOOKUP
   // =========================
   const [phoneNumber, setPhoneNumber] = useState('');
   const [loading, setLoading] = useState(false);
@@ -96,7 +102,7 @@ export default function LookupPage() {
   const [searchLoading, setSearchLoading] = useState(false);
 
   // ======================
-  // ORDER LOOKUP (existing)
+  // ORDER LOOKUP
   // ======================
   const [orderNumber, setOrderNumber] = useState('');
   const [singleOrder, setSingleOrder] = useState<CustomerOrder | null>(null);
@@ -105,18 +111,20 @@ export default function LookupPage() {
   const [orderSearchLoading, setOrderSearchLoading] = useState(false);
 
   // ======================
-  // BARCODE LOOKUP (new)
+  // BARCODE LOOKUP
   // ======================
   const [barcodeInput, setBarcodeInput] = useState('');
   const [barcodeLoading, setBarcodeLoading] = useState(false);
   const [barcodeData, setBarcodeData] = useState<BarcodeHistoryData | null>(null);
 
-  // Cache to resolve order/customer from barcode history
-  const [orderMetaCache, setOrderMetaCache] = useState<Record<number, { order_number?: string; customer?: { name?: string; phone?: string } }>>({});
+  // Cache to resolve order/customer for barcode history + current_location
+  const [orderMetaCache, setOrderMetaCache] = useState<
+    Record<number, { order_number?: string; customer?: { name?: string; phone?: string } }>
+  >({});
   const [orderMetaLoading, setOrderMetaLoading] = useState(false);
 
   // ======================
-  // BATCH LOOKUP (new)
+  // BATCH LOOKUP
   // ======================
   const [batchQuery, setBatchQuery] = useState('');
   const [batchLoading, setBatchLoading] = useState(false);
@@ -127,13 +135,29 @@ export default function LookupPage() {
   const [batchSearchLoading, setBatchSearchLoading] = useState(false);
   const [selectedBatchId, setSelectedBatchId] = useState<number | null>(null);
 
+  // Batch → click barcode → show details + order info (modal)
+  const [batchBarcodeModalOpen, setBatchBarcodeModalOpen] = useState(false);
+  const [batchSelectedBarcode, setBatchSelectedBarcode] = useState<string | null>(null);
+  const [batchBarcodeLoading, setBatchBarcodeLoading] = useState(false);
+  const [batchBarcodeData, setBatchBarcodeData] = useState<BarcodeHistoryData | null>(null);
+  const [batchResolvedOrder, setBatchResolvedOrder] = useState<{
+    orderId?: number | null;
+    orderNumber?: string | null;
+    customer?: any;
+  } | null>(null);
+
   // -----------------------
   // Helpers
   // -----------------------
   const formatPhoneNumber = (phone: string) => phone.replace(/\D/g, '');
 
+  const safeNum = (v: any) => {
+    const n = typeof v === 'number' ? v : v != null ? parseFloat(String(v)) : NaN;
+    return Number.isFinite(n) ? n : 0;
+  };
+
   const formatCurrency = (amount: string | number) => {
-    const numAmount = typeof amount === 'string' ? parseFloat(amount) : amount;
+    const numAmount = safeNum(amount);
     return new Intl.NumberFormat('en-BD', {
       style: 'currency',
       currency: 'BDT',
@@ -181,9 +205,11 @@ export default function LookupPage() {
       partially_paid: { bg: 'bg-yellow-100 dark:bg-yellow-900/30', text: 'text-yellow-800 dark:text-yellow-300' },
       pending: { bg: 'bg-orange-100 dark:bg-orange-900/30', text: 'text-orange-800 dark:text-orange-300' },
       failed: { bg: 'bg-red-100 dark:bg-red-900/30', text: 'text-red-800 dark:text-red-300' },
+      completed: { bg: 'bg-green-100 dark:bg-green-900/30', text: 'text-green-800 dark:text-green-300' },
     };
 
-    const config = statusConfig[status.toLowerCase()] || statusConfig['pending'];
+    const key = status.toLowerCase();
+    const config = statusConfig[key] || statusConfig['pending'];
 
     return (
       <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium ${config.bg} ${config.text}`}>
@@ -199,30 +225,97 @@ export default function LookupPage() {
   // ---------- Order + Barcode linking helpers ----------
   const isOrderRef = (refType?: string | null) => (refType || '').toLowerCase().includes('order');
 
-  const extractOrderIdFromHistory = (h: any): number | null => {
-    const meta = h?.metadata || h?.meta || {};
-    const raw =
-      meta.order_id ??
-      h.order_id ??
-      (isOrderRef(h.reference_type) ? h.reference_id : null);
-
-    const n = Number(raw);
-    return Number.isFinite(n) && n > 0 ? n : null;
-  };
-
   const isSoldLike = (h: any) => {
     const t = String(h?.movement_type || '').toLowerCase();
+    const after = String(h?.status_after || '').toLowerCase();
     return (
       t.includes('sold') ||
       t.includes('sale') ||
       t.includes('sell') ||
       t.includes('fulfilled') ||
       t.includes('dispatch') ||
-      t.includes('delivered')
+      t.includes('delivered') ||
+      after.includes('sold')
     );
   };
 
-  // ---------- Normalize backend Order -> CustomerOrder shape for this page ----------
+  const readMeta = (x: any) => x?.metadata ?? x?.meta ?? {};
+
+  const extractOrderIdLoose = (x: any): number | null => {
+    const meta = readMeta(x);
+    const raw = meta.order_id ?? x?.order_id ?? (isOrderRef(x?.reference_type) ? x?.reference_id : null);
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  const extractOrderNumberLoose = (x: any): string | null => {
+    const meta = readMeta(x);
+    const v = x?.order_number ?? meta?.order_number ?? meta?.orderNo ?? meta?.order ?? null;
+    return typeof v === 'string' && v.trim() ? v.trim() : null;
+  };
+
+  const extractSoldViaLoose = (x: any): string | null => {
+    const meta = readMeta(x);
+    const v = meta?.sold_via ?? meta?.soldVia ?? null;
+    return typeof v === 'string' && v.trim() ? v.trim() : null;
+  };
+
+  const normalizeStatusKey = (s: any) =>
+    String(s || '')
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, '_');
+
+  const statusLabelFromKey = (key: string) => {
+    const k = normalizeStatusKey(key);
+    const map: Record<string, string> = {
+      sold: 'Sold',
+      in_warehouse: 'In Warehouse',
+      inwarehouse: 'In Warehouse',
+      warehouse: 'In Warehouse',
+      available: 'Available',
+      available_for_sale: 'Available',
+      defective: 'Defective',
+      inactive: 'Inactive',
+      returned: 'Returned',
+      exchanged: 'Exchanged',
+    };
+    return map[k] || (key ? String(key) : 'Unknown Status');
+  };
+
+  const isSoldFromCurrentLocation = (loc: any, history?: any[]) => {
+    const key = normalizeStatusKey(loc?.current_status ?? loc?.status ?? loc?.status_key ?? loc?.status_label);
+    if (key === 'sold') return true;
+    const meta = readMeta(loc);
+    if (String(loc?.status_label || '').toLowerCase().includes('sold')) return true;
+    if (String(loc?.current_status || '').toLowerCase() === 'sold') return true;
+    if (extractSoldViaLoose(loc) === 'order') return true;
+    if (extractSoldViaLoose(loc) === 'pos') return true;
+    // sometimes sold means inactive + has sold meta
+    if (loc?.is_active === false && (meta?.order_number || meta?.order_id || meta?.sold_via)) {
+      // only treat as sold if meta hints order/pos
+      if (String(meta?.sold_via || '').toLowerCase().includes('order') || String(meta?.sold_via || '').toLowerCase().includes('pos')) {
+        return true;
+      }
+    }
+    // fallback: any history movement indicates sold
+    if (Array.isArray(history) && history.some((h) => isSoldLike(h))) return true;
+    return false;
+  };
+
+  const getCurrentStatusLabel = (loc: any, history?: any[]) => {
+    if (!loc) return 'Unknown Status';
+    // prefer sold detection
+    if (isSoldFromCurrentLocation(loc, history)) return 'Sold';
+
+    const label = loc?.status_label;
+    if (label) return String(label);
+
+    const key = loc?.current_status ?? loc?.status ?? loc?.status_key;
+    return statusLabelFromKey(String(key || 'Unknown Status'));
+  };
+
+  // ---------- Normalize backend Order -> CustomerOrder ----------
   const normalizeOrderToCustomerOrder = (o: any): CustomerOrder => {
     const items = Array.isArray(o?.items) ? o.items : [];
     return {
@@ -238,11 +331,7 @@ export default function LookupPage() {
       status: String(o.status ?? 'pending'),
       store: o.store || { id: 0, name: '—' },
       items: items.map((it: any) => {
-        const barcodes: string[] = Array.isArray(it.barcodes)
-          ? it.barcodes
-          : it.barcode
-          ? [it.barcode]
-          : [];
+        const barcodes: string[] = Array.isArray(it.barcodes) ? it.barcodes : it.barcode ? [it.barcode] : [];
         return {
           id: it.id,
           product_name: it.product_name,
@@ -251,7 +340,6 @@ export default function LookupPage() {
           unit_price: String(it.unit_price ?? '0'),
           discount_amount: String(it.discount_amount ?? '0'),
           total_amount: String(it.total_amount ?? '0'),
-          // extra fields (TS will allow via "any" when read)
           ...(barcodes.length ? { barcodes } : {}),
         } as any;
       }),
@@ -279,9 +367,8 @@ export default function LookupPage() {
       const safeId = params.barcode.replace(/[^a-zA-Z0-9]/g, '');
       const productName = (params.productName || 'Product').substring(0, 25);
 
-      const priceNum =
-        typeof params.price === 'number' ? params.price : params.price != null ? parseFloat(String(params.price)) : NaN;
-      const showPrice = Number.isFinite(priceNum);
+      const priceNum = safeNum(params.price);
+      const showPrice = Number.isFinite(priceNum) && priceNum > 0;
       const priceText = showPrice ? `৳${Number(priceNum).toLocaleString('en-BD')}` : '';
 
       const data: any[] = [
@@ -344,7 +431,7 @@ export default function LookupPage() {
   };
 
   // -----------------------
-  // Open order by ID (ensures barcodes are fetched via backend mapping)
+  // Open order by ID (ensures barcodes are fetched)
   // -----------------------
   const openOrderById = async (orderId: number) => {
     setLoading(true);
@@ -354,7 +441,6 @@ export default function LookupPage() {
     setOrders([]);
 
     try {
-      // This checks backend: GET /orders/:id and (optionally) GET /orders/:id/items/:itemId/barcodes
       const orderWithBarcodes: any = await barcodeOrderMapper.getOrderWithBarcodes(orderId);
       const orderData = normalizeOrderToCustomerOrder(orderWithBarcodes);
 
@@ -377,6 +463,29 @@ export default function LookupPage() {
       }
     } catch (err: any) {
       setError(err.message || 'An error occurred while loading order data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openOrderByNumber = async (orderNo: string) => {
+    const clean = orderNo.trim();
+    if (!clean) return;
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const res: any = await orderService.getAll({ search: clean.replace(/^#/, ''), per_page: 50 });
+      const list = res?.data || [];
+      const exact = list.find((o: any) => String(o.order_number).toLowerCase() === clean.toLowerCase())
+        || list.find((o: any) => String(o.order_number).toLowerCase().includes(clean.toLowerCase()))
+        || list[0];
+
+      if (!exact?.id) throw new Error(`Order not found: ${clean}`);
+      await openOrderById(exact.id);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to open order');
     } finally {
       setLoading(false);
     }
@@ -461,7 +570,7 @@ export default function LookupPage() {
   };
 
   // -----------------------
-  // BATCH suggestions (new)
+  // BATCH suggestions
   // -----------------------
   const fetchBatchSuggestions = async (term: string) => {
     if (term.trim().length < 2) {
@@ -500,6 +609,7 @@ export default function LookupPage() {
       }
     }, 300);
     return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phoneNumber, activeTab]);
 
   React.useEffect(() => {
@@ -511,6 +621,7 @@ export default function LookupPage() {
       }
     }, 300);
     return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderNumber, activeTab]);
 
   React.useEffect(() => {
@@ -522,6 +633,7 @@ export default function LookupPage() {
       }
     }, 300);
     return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchQuery, activeTab]);
 
   // Click outside close dropdowns
@@ -538,19 +650,22 @@ export default function LookupPage() {
   }, []);
 
   // -----------------------
-  // Enrich barcode history with order/customer data (backend check via /orders/:id)
+  // Enrich barcode history (and current_location) with order/customer data
   // -----------------------
   React.useEffect(() => {
     const run = async () => {
-      if (!barcodeData?.history?.length) return;
+      if (!barcodeData) return;
 
-      const ids = Array.from(
-        new Set(
-          barcodeData.history
-            .map(extractOrderIdFromHistory)
-            .filter((x: any) => typeof x === 'number' && x)
-        )
-      ) as number[];
+      // collect order IDs from:
+      // - history entries
+      // - current_location metadata
+      const idsFromHistory =
+        barcodeData.history?.map(extractOrderIdLoose).filter((x: any) => typeof x === 'number' && x) || [];
+
+      const currentLoc = barcodeData.current_location;
+      const idFromLoc = extractOrderIdLoose(currentLoc);
+
+      const ids = Array.from(new Set([...(idsFromHistory as number[]), ...(idFromLoc ? [idFromLoc] : [])]));
 
       const missing = ids.filter((id) => !orderMetaCache[id]);
       if (missing.length === 0) return;
@@ -559,17 +674,15 @@ export default function LookupPage() {
       try {
         const results = await Promise.all(
           missing.map(async (id) => {
-            // If backend already returned order_number/customer in history metadata, prefer it
-            const fromHistory = (barcodeData.history || []).find((h: any) => Number(extractOrderIdFromHistory(h)) === id);
-            const historyOrderNumber =
-              fromHistory?.order_number ||
-              fromHistory?.metadata?.order_number ||
-              fromHistory?.meta?.order_number;
+            // try to pick from history first
+            const fromHistory = (barcodeData.history || []).find((h: any) => Number(extractOrderIdLoose(h)) === id);
 
+            const historyOrderNumber = extractOrderNumberLoose(fromHistory) || extractOrderNumberLoose(currentLoc);
             const historyCustomer =
               fromHistory?.customer ||
-              fromHistory?.metadata?.customer ||
-              fromHistory?.meta?.customer;
+              readMeta(fromHistory)?.customer ||
+              readMeta(currentLoc)?.customer ||
+              currentLoc?.customer;
 
             try {
               const o: any = await orderService.getById(id);
@@ -692,7 +805,6 @@ export default function LookupPage() {
     setShowOrderSuggestions(false);
     setOrderSuggestions([]);
 
-    // Important: fetch with barcodes (backend check via barcodeOrderMapper)
     await openOrderById(selected.id);
   };
 
@@ -721,19 +833,10 @@ export default function LookupPage() {
         return;
       }
 
-      let found = ordersResponse.data.find(
-        (o: any) => o.order_number.toLowerCase() === cleanOrderNumber.toLowerCase()
-      );
-
-      if (!found) {
-        found = ordersResponse.data.find((o: any) =>
-          o.order_number.toLowerCase().includes(cleanOrderNumber.toLowerCase())
-        );
-      }
-
+      let found = ordersResponse.data.find((o: any) => o.order_number.toLowerCase() === cleanOrderNumber.toLowerCase());
+      if (!found) found = ordersResponse.data.find((o: any) => o.order_number.toLowerCase().includes(cleanOrderNumber.toLowerCase()));
       if (!found) found = ordersResponse.data[0];
 
-      // Fetch full order with barcodes
       await openOrderById(found.id);
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'An error occurred while searching for the order');
@@ -743,7 +846,7 @@ export default function LookupPage() {
   };
 
   // -----------------------
-  // Barcode handlers (new)
+  // Barcode handlers
   // -----------------------
   const handleSearchBarcode = async () => {
     const code = barcodeInput.trim();
@@ -771,7 +874,7 @@ export default function LookupPage() {
   };
 
   // -----------------------
-  // Batch handlers (new)
+  // Batch handlers
   // -----------------------
   const handleSelectBatchSuggestion = async (b: Batch) => {
     setBatchQuery(b.batch_number);
@@ -814,16 +917,117 @@ export default function LookupPage() {
     }
   };
 
-  // Quick open barcode from batch table
-  const openBarcodeFromBatch = (barcode: string) => {
-    setActiveTab('barcode');
-    setBarcodeInput(barcode);
-    setBarcodeData(null);
-    setError('');
-    setTimeout(() => handleSearchBarcode(), 0);
+  // -----------------------
+  // Batch row -> modal details (includes order info)
+  // -----------------------
+  const resolveOrderFromBarcodeData = async (bd: BarcodeHistoryData) => {
+    const loc = bd?.current_location;
+    const idFromLoc = extractOrderIdLoose(loc);
+    const noFromLoc = extractOrderNumberLoose(loc);
+    const fromHistorySold = (bd?.history || []).find((h: any) => isSoldLike(h) || isOrderRef(h.reference_type));
+
+    const idFromHistory = extractOrderIdLoose(fromHistorySold);
+    const noFromHistory = extractOrderNumberLoose(fromHistorySold);
+
+    const orderId = idFromLoc || idFromHistory || null;
+    const orderNo = noFromLoc || noFromHistory || null;
+
+    // best effort fetch customer/order_number if orderId exists
+    if (orderId) {
+      try {
+        const o: any = await orderService.getById(orderId);
+        return {
+          orderId,
+          orderNumber: orderNo || o?.order_number || `#${orderId}`,
+          customer: o?.customer || readMeta(fromHistorySold)?.customer || readMeta(loc)?.customer,
+        };
+      } catch {
+        return { orderId, orderNumber: orderNo || `#${orderId}`, customer: readMeta(loc)?.customer || readMeta(fromHistorySold)?.customer };
+      }
+    }
+
+    // no id: keep whatever order number exists
+    if (orderNo) return { orderId: null, orderNumber: orderNo, customer: readMeta(loc)?.customer || readMeta(fromHistorySold)?.customer };
+
+    return null;
   };
 
-  // Tab switch reset (light)
+  const openBatchBarcodeModal = async (barcode: string) => {
+    setBatchSelectedBarcode(barcode);
+    setBatchBarcodeModalOpen(true);
+    setBatchBarcodeLoading(true);
+    setBatchBarcodeData(null);
+    setBatchResolvedOrder(null);
+    setError('');
+
+    try {
+      const res = await barcodeTrackingService.getBarcodeHistory(barcode);
+      if (!res?.success) {
+        setError('Barcode not found');
+        return;
+      }
+      const bd = res.data as any;
+      setBatchBarcodeData(bd);
+
+      const ord = await resolveOrderFromBarcodeData(bd);
+      setBatchResolvedOrder(ord);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load barcode details');
+    } finally {
+      setBatchBarcodeLoading(false);
+    }
+  };
+
+  // -----------------------
+  // Batch computed summary fix (frontend override)
+  // -----------------------
+  const computeBatchSummary = (bd: BatchLookupData) => {
+    const list = bd?.barcodes || [];
+    const sold = list.filter((b) => normalizeStatusKey(b.current_status) === 'sold' || String(b.status_label || '').toLowerCase().includes('sold')).length;
+    const defective = list.filter((b) => b.is_defective).length;
+    const available = list.filter((b) => b.is_available_for_sale && normalizeStatusKey(b.current_status) !== 'sold').length;
+    const active = list.filter((b) => b.is_active && normalizeStatusKey(b.current_status) !== 'sold').length;
+
+    return {
+      total_units: list.length,
+      active,
+      available_for_sale: available,
+      sold,
+      defective,
+    };
+  };
+
+  const isSoldBarcodeRow = (b: any) =>
+    normalizeStatusKey(b?.current_status) === 'sold' || String(b?.status_label || '').toLowerCase().includes('sold');
+
+  const getBatchRowStatusLabel = (b: any) => {
+    if (isSoldBarcodeRow(b)) return 'Sold';
+    const label = b?.status_label;
+    if (label) return label;
+    return statusLabelFromKey(b?.current_status);
+  };
+
+  const getStatusPill = (label: string) => {
+    const k = normalizeStatusKey(label);
+    if (k === 'sold') {
+      return <span className="text-[9px] px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">sold</span>;
+    }
+    if (k.includes('warehouse')) {
+      return <span className="text-[9px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">warehouse</span>;
+    }
+    if (k.includes('available')) {
+      return <span className="text-[9px] px-2 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">available</span>;
+    }
+    if (k.includes('defect')) {
+      return <span className="text-[9px] px-2 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">defective</span>;
+    }
+    if (k.includes('inactive')) {
+      return <span className="text-[9px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">inactive</span>;
+    }
+    return <span className="text-[9px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300">{label || 'unknown'}</span>;
+  };
+
+  // Tab switch reset
   const switchTab = (tab: LookupTab) => {
     setActiveTab(tab);
     setError('');
@@ -843,26 +1047,38 @@ export default function LookupPage() {
     }
   };
 
+  // -----------------------
+  // BARCODE: quick "sold/order info" section even if history is empty
+  // -----------------------
+  const getBarcodeSaleInfo = (bd: BarcodeHistoryData | null) => {
+    if (!bd) return null;
+    const loc = bd.current_location;
+    const sold = isSoldFromCurrentLocation(loc, bd.history);
+    if (!sold) return null;
+
+    const orderId = extractOrderIdLoose(loc) || extractOrderIdLoose((bd.history || []).find((h: any) => isSoldLike(h) || isOrderRef(h.reference_type)));
+    const orderNo = extractOrderNumberLoose(loc) || extractOrderNumberLoose((bd.history || []).find((h: any) => isSoldLike(h) || isOrderRef(h.reference_type)));
+    const soldVia = extractSoldViaLoose(loc) || extractSoldViaLoose((bd.history || []).find((h: any) => isSoldLike(h)));
+
+    return { orderId, orderNo, soldVia };
+  };
+
+  const barcodeSaleInfo = getBarcodeSaleInfo(barcodeData);
+
   return (
     <div className={darkMode ? 'dark' : ''}>
       <div className="flex h-screen bg-white dark:bg-black">
         <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
 
         <div className="flex-1 flex flex-col overflow-hidden">
-          <Header
-            darkMode={darkMode}
-            setDarkMode={setDarkMode}
-            toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
-          />
+          <Header darkMode={darkMode} setDarkMode={setDarkMode} toggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
 
           <main className="flex-1 overflow-auto bg-white dark:bg-black">
             {/* Header + Tabs */}
             <div className="border-b border-gray-200 dark:border-gray-800">
               <div className="px-4 py-2">
                 <div className="max-w-7xl mx-auto">
-                  <h1 className="text-base font-semibold text-black dark:text-white leading-none mb-2">
-                    Lookup
-                  </h1>
+                  <h1 className="text-base font-semibold text-black dark:text-white leading-none mb-2">Lookup</h1>
 
                   <div className="flex gap-1 flex-wrap">
                     <button
@@ -916,14 +1132,10 @@ export default function LookupPage() {
             {/* Main Content */}
             <div className="max-w-6xl mx-auto px-4 py-4">
               {/* Error */}
-              {error && (
-                <p className="mb-3 text-xs text-red-600 dark:text-red-400">
-                  {error}
-                </p>
-              )}
+              {error && <p className="mb-3 text-xs text-red-600 dark:text-red-400">{error}</p>}
 
               {/* =========================
-                  CUSTOMER PANEL (existing)
+                  CUSTOMER PANEL
                   ========================= */}
               {activeTab === 'customer' && (
                 <>
@@ -969,12 +1181,8 @@ export default function LookupPage() {
                               >
                                 <div className="flex items-center justify-between gap-3">
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-black dark:text-white mb-0.5">
-                                      {s.phone}
-                                    </p>
-                                    <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
-                                      {s.name}
-                                    </p>
+                                    <p className="text-sm font-medium text-black dark:text-white mb-0.5">{s.phone}</p>
+                                    <p className="text-xs text-gray-600 dark:text-gray-400 truncate">{s.name}</p>
                                   </div>
                                   <span className="text-[9px] px-1.5 py-0.5 rounded bg-black dark:bg-white text-white dark:text-black font-medium uppercase">
                                     {s.customer_type}
@@ -1008,9 +1216,7 @@ export default function LookupPage() {
                   {orders.length > 0 && (
                     <div className="border border-gray-200 dark:border-gray-800 rounded-md overflow-hidden">
                       <div className="bg-gray-50 dark:bg-gray-900 px-3 py-2 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
-                        <h2 className="text-xs font-semibold text-black dark:text-white uppercase tracking-wide">
-                          Order History
-                        </h2>
+                        <h2 className="text-xs font-semibold text-black dark:text-white uppercase tracking-wide">Order History</h2>
                         <span className="text-[9px] px-2 py-0.5 bg-black dark:bg-white text-white dark:text-black rounded font-medium">
                           {orders.length}
                         </span>
@@ -1129,7 +1335,7 @@ export default function LookupPage() {
               )}
 
               {/* ======================
-                  ORDER PANEL (updated: show barcodes + reprint)
+                  ORDER PANEL (barcodes + reprint)
                   ====================== */}
               {activeTab === 'order' && (
                 <>
@@ -1174,22 +1380,14 @@ export default function LookupPage() {
                               >
                                 <div className="flex items-center justify-between gap-3">
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-black dark:text-white mb-0.5">
-                                      {s.order_number}
-                                    </p>
+                                    <p className="text-sm font-medium text-black dark:text-white mb-0.5">{s.order_number}</p>
                                     <div className="flex items-center gap-2 text-xs">
-                                      <span className="text-gray-600 dark:text-gray-400">
-                                        {formatDate(s.order_date)}
-                                      </span>
+                                      <span className="text-gray-600 dark:text-gray-400">{formatDate(s.order_date)}</span>
                                       <span className="text-gray-400">•</span>
-                                      <span className="font-medium text-gray-600 dark:text-gray-400">
-                                        {formatCurrency(s.total_amount)}
-                                      </span>
+                                      <span className="font-medium text-gray-600 dark:text-gray-400">{formatCurrency(s.total_amount)}</span>
                                     </div>
                                   </div>
-                                  <div className="flex items-center gap-1.5">
-                                    {getStatusBadge(s.payment_status)}
-                                  </div>
+                                  <div className="flex items-center gap-1.5">{getStatusBadge(s.payment_status)}</div>
                                 </div>
                               </button>
                             ))}
@@ -1202,12 +1400,8 @@ export default function LookupPage() {
                   {singleOrder && (
                     <div className="border border-gray-200 dark:border-gray-800 rounded-md overflow-hidden">
                       <div className="bg-gray-50 dark:bg-gray-900 px-3 py-2 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
-                        <h2 className="text-xs font-semibold text-black dark:text-white uppercase tracking-wide">
-                          Order Details (with Barcodes)
-                        </h2>
-                        <span className="text-[9px] px-2 py-0.5 bg-black dark:bg-white text-white dark:text-black rounded font-medium">
-                          1
-                        </span>
+                        <h2 className="text-xs font-semibold text-black dark:text-white uppercase tracking-wide">Order Details (with Barcodes)</h2>
+                        <span className="text-[9px] px-2 py-0.5 bg-black dark:bg-white text-white dark:text-black rounded font-medium">1</span>
                       </div>
 
                       <div className="p-3">
@@ -1242,11 +1436,7 @@ export default function LookupPage() {
                             </thead>
                             <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                               {singleOrder.items.map((item: any) => {
-                                const barcodes: string[] = Array.isArray(item?.barcodes)
-                                  ? item.barcodes
-                                  : item?.barcode
-                                  ? [item.barcode]
-                                  : [];
+                                const barcodes: string[] = Array.isArray(item?.barcodes) ? item.barcodes : item?.barcode ? [item.barcode] : [];
 
                                 return (
                                   <tr key={item.id}>
@@ -1261,9 +1451,19 @@ export default function LookupPage() {
                                         <div className="flex flex-col gap-1">
                                           {barcodes.slice(0, 12).map((code: string) => (
                                             <div key={code} className="flex items-center gap-2">
-                                              <span className="text-[10px] font-semibold text-black dark:text-white">
+                                              <button
+                                                onClick={() => {
+                                                  setActiveTab('barcode');
+                                                  setBarcodeInput(code);
+                                                  setBarcodeData(null);
+                                                  setError('');
+                                                  setTimeout(() => handleSearchBarcode(), 0);
+                                                }}
+                                                className="text-[10px] font-semibold text-black dark:text-white hover:underline"
+                                                title="Open barcode history"
+                                              >
                                                 {code}
-                                              </span>
+                                              </button>
                                               <button
                                                 onClick={() =>
                                                   printSingleBarcodeLabel({
@@ -1279,20 +1479,14 @@ export default function LookupPage() {
                                               </button>
                                             </div>
                                           ))}
-                                          {barcodes.length > 12 && (
-                                            <span className="text-[10px] text-gray-500">
-                                              +{barcodes.length - 12} more…
-                                            </span>
-                                          )}
+                                          {barcodes.length > 12 && <span className="text-[10px] text-gray-500">+{barcodes.length - 12} more…</span>}
                                         </div>
                                       ) : (
                                         <span className="text-[10px] text-gray-500 dark:text-gray-400">No barcodes</span>
                                       )}
                                     </td>
 
-                                    <td className="px-2 py-1.5 text-right font-semibold text-black dark:text-white">
-                                      {formatCurrency(item.total_amount)}
-                                    </td>
+                                    <td className="px-2 py-1.5 text-right font-semibold text-black dark:text-white">{formatCurrency(item.total_amount)}</td>
                                   </tr>
                                 );
                               })}
@@ -1313,7 +1507,7 @@ export default function LookupPage() {
               )}
 
               {/* ======================
-                  BARCODE PANEL (updated: show order# + customer for sold/order refs)
+                  BARCODE PANEL (FIXED: Sold + Order info + Batch prices)
                   ====================== */}
               {activeTab === 'barcode' && (
                 <>
@@ -1348,9 +1542,7 @@ export default function LookupPage() {
                           <div>
                             <p className="text-xs font-semibold text-black dark:text-white">
                               {barcodeData.product.name}{' '}
-                              <span className="text-gray-500 text-[10px]">
-                                {barcodeData.product.sku ? `(${barcodeData.product.sku})` : ''}
-                              </span>
+                              <span className="text-gray-500 text-[10px]">{barcodeData.product.sku ? `(${barcodeData.product.sku})` : ''}</span>
                             </p>
                             <p className="text-[10px] text-gray-600 dark:text-gray-400">
                               Barcode: <span className="font-semibold">{barcodeData.barcode}</span>
@@ -1363,24 +1555,76 @@ export default function LookupPage() {
 
                         {/* Current location */}
                         {barcodeData.current_location && (
-                          <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+                          <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2">
                             <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
                               <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Status</p>
                               <p className="text-xs font-semibold text-black dark:text-white">
-                                {barcodeData.current_location.status_label || barcodeData.current_location.current_status}
+                                {getCurrentStatusLabel(barcodeData.current_location, barcodeData.history)}
                               </p>
                             </div>
                             <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
                               <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Current Store</p>
-                              <p className="text-xs text-black dark:text-white">
-                                {barcodeData.current_location.current_store?.name || '—'}
-                              </p>
+                              <p className="text-xs text-black dark:text-white">{barcodeData.current_location.current_store?.name || '—'}</p>
                             </div>
                             <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
                               <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Batch</p>
-                              <p className="text-xs text-black dark:text-white">
-                                {barcodeData.current_location.batch?.batch_number || '—'}
+                              <p className="text-xs text-black dark:text-white">{barcodeData.current_location.batch?.batch_number || '—'}</p>
+                            </div>
+
+                            {/* Batch pricing (best effort) */}
+                            <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                              <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Batch Prices</p>
+                              <p className="text-[10px] text-black dark:text-white">
+                                Cost:{' '}
+                                <span className="font-semibold">
+                                  {barcodeData.current_location.batch?.cost_price != null
+                                    ? formatCurrency(barcodeData.current_location.batch?.cost_price)
+                                    : '—'}
+                                </span>
                               </p>
+                              <p className="text-[10px] text-black dark:text-white">
+                                Sell:{' '}
+                                <span className="font-semibold">
+                                  {barcodeData.current_location.batch?.selling_price != null
+                                    ? formatCurrency(barcodeData.current_location.batch?.selling_price)
+                                    : '—'}
+                                </span>
+                              </p>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* SOLD / ORDER INFO (works even if movement history is empty, if backend sends meta) */}
+                        {barcodeSaleInfo && (
+                          <div className="mt-3 border border-gray-200 dark:border-gray-800 rounded p-2 bg-gray-50 dark:bg-gray-900/40">
+                            <div className="flex items-center justify-between gap-2 flex-wrap">
+                              <div>
+                                <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Sale / Order</p>
+                                <p className="text-xs font-semibold text-black dark:text-white">
+                                  Sold{barcodeSaleInfo.soldVia ? ` via ${barcodeSaleInfo.soldVia}` : ''}
+                                </p>
+                                <p className="text-[10px] text-gray-600 dark:text-gray-400">
+                                  Order:{' '}
+                                  <span className="font-semibold text-black dark:text-white">
+                                    {barcodeSaleInfo.orderNo || (barcodeSaleInfo.orderId ? `#${barcodeSaleInfo.orderId}` : '—')}
+                                  </span>
+                                </p>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                {(barcodeSaleInfo.orderId || barcodeSaleInfo.orderNo) && (
+                                  <button
+                                    onClick={async () => {
+                                      setActiveTab('order');
+                                      if (barcodeSaleInfo.orderId) await openOrderById(barcodeSaleInfo.orderId);
+                                      else if (barcodeSaleInfo.orderNo) await openOrderByNumber(barcodeSaleInfo.orderNo);
+                                    }}
+                                    className="text-[10px] px-3 py-1.5 rounded bg-black dark:bg-white text-white dark:text-black hover:opacity-90"
+                                  >
+                                    Open Order
+                                  </button>
+                                )}
+                              </div>
                             </div>
                           </div>
                         )}
@@ -1389,13 +1633,9 @@ export default function LookupPage() {
                       {/* Movement History Table */}
                       <div className="border border-gray-200 dark:border-gray-800 rounded-md overflow-hidden">
                         <div className="bg-gray-50 dark:bg-gray-900 px-3 py-2 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
-                          <h2 className="text-xs font-semibold text-black dark:text-white uppercase tracking-wide">
-                            Barcode Movement History
-                          </h2>
+                          <h2 className="text-xs font-semibold text-black dark:text-white uppercase tracking-wide">Barcode Movement History</h2>
                           <div className="flex items-center gap-2">
-                            {orderMetaLoading && (
-                              <span className="text-[10px] text-gray-500 dark:text-gray-400">loading order/customer…</span>
-                            )}
+                            {orderMetaLoading && <span className="text-[10px] text-gray-500 dark:text-gray-400">loading order/customer…</span>}
                             <span className="text-[9px] px-2 py-0.5 bg-black dark:bg-white text-white dark:text-black rounded font-medium">
                               {barcodeData.history?.length || 0}
                             </span>
@@ -1419,22 +1659,19 @@ export default function LookupPage() {
                             </thead>
                             <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                               {(barcodeData.history || []).map((h: any) => {
-                                const orderId = extractOrderIdFromHistory(h);
+                                const orderId = extractOrderIdLoose(h);
                                 const meta = orderId ? orderMetaCache[orderId] : null;
 
                                 const show = Boolean(orderId) && (isSoldLike(h) || isOrderRef(h.reference_type));
+                                const orderNoFromRow = extractOrderNumberLoose(h);
 
                                 return (
                                   <tr key={h.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/40">
                                     <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{formatDate(h.date)}</td>
-                                    <td className="px-2 py-2 font-semibold text-black dark:text-white">
-                                      {h.movement_type || '—'}
-                                    </td>
+                                    <td className="px-2 py-2 font-semibold text-black dark:text-white">{h.movement_type || '—'}</td>
                                     <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{h.from_store || '—'}</td>
                                     <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{h.to_store || '—'}</td>
-                                    <td className="px-2 py-2 text-gray-700 dark:text-gray-300">
-                                      {(h.status_before || '—') + ' → ' + (h.status_after || '—')}
-                                    </td>
+                                    <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{(h.status_before || '—') + ' → ' + (h.status_after || '—')}</td>
 
                                     {/* Order # */}
                                     <td className="px-2 py-2">
@@ -1447,7 +1684,17 @@ export default function LookupPage() {
                                           className="text-[10px] font-semibold text-black dark:text-white hover:underline"
                                           title="Open order lookup"
                                         >
-                                          {meta?.order_number || `#${orderId}`}
+                                          {meta?.order_number || orderNoFromRow || `#${orderId}`}
+                                        </button>
+                                      ) : orderNoFromRow ? (
+                                        <button
+                                          onClick={async () => {
+                                            setActiveTab('order');
+                                            await openOrderByNumber(orderNoFromRow);
+                                          }}
+                                          className="text-[10px] font-semibold text-black dark:text-white hover:underline"
+                                        >
+                                          {orderNoFromRow}
                                         </button>
                                       ) : (
                                         <span className="text-[10px] text-gray-500 dark:text-gray-400">—</span>
@@ -1456,11 +1703,11 @@ export default function LookupPage() {
 
                                     {/* Customer */}
                                     <td className="px-2 py-2">
-                                      {show && meta?.customer ? (
+                                      {(show && meta?.customer) || readMeta(h)?.customer ? (
                                         <span className="text-[10px] text-black dark:text-white">
-                                          <span className="font-semibold">{meta.customer.name || 'Customer'}</span>
-                                          {meta.customer.phone ? (
-                                            <span className="text-gray-500 dark:text-gray-400"> • {meta.customer.phone}</span>
+                                          <span className="font-semibold">{(meta?.customer || readMeta(h)?.customer)?.name || 'Customer'}</span>
+                                          {(meta?.customer || readMeta(h)?.customer)?.phone ? (
+                                            <span className="text-gray-500 dark:text-gray-400"> • {(meta?.customer || readMeta(h)?.customer)?.phone}</span>
                                           ) : null}
                                         </span>
                                       ) : (
@@ -1478,7 +1725,7 @@ export default function LookupPage() {
                               {!barcodeData.history?.length && (
                                 <tr>
                                   <td colSpan={9} className="px-3 py-6 text-center text-xs text-gray-500 dark:text-gray-400">
-                                    No movement history found for this barcode.
+                                    No movement history found for this barcode. (If it’s sold but history is empty, the backend history endpoint is not returning movements — this UI still shows Sold + Order if metadata exists.)
                                   </td>
                                 </tr>
                               )}
@@ -1492,7 +1739,7 @@ export default function LookupPage() {
               )}
 
               {/* ======================
-                  BATCH PANEL (new)
+                  BATCH PANEL (FIXED: sold vs inactive + click sold shows order details)
                   ====================== */}
               {activeTab === 'batch' && (
                 <>
@@ -1541,9 +1788,7 @@ export default function LookupPage() {
                               >
                                 <div className="flex items-center justify-between gap-3">
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-sm font-medium text-black dark:text-white mb-0.5">
-                                      {b.batch_number}
-                                    </p>
+                                    <p className="text-sm font-medium text-black dark:text-white mb-0.5">{b.batch_number}</p>
                                     <p className="text-xs text-gray-600 dark:text-gray-400 truncate">
                                       {b.product?.name} {b.product?.sku ? `(${b.product.sku})` : ''} • {b.store?.name}
                                     </p>
@@ -1566,46 +1811,56 @@ export default function LookupPage() {
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="text-xs font-semibold text-black dark:text-white">
-                              Batch: {batchData.batch.batch_number}{' '}
-                              <span className="text-gray-500 text-[10px]"> (ID: {batchData.batch.id})</span>
+                              Batch: {batchData.batch.batch_number} <span className="text-gray-500 text-[10px]"> (ID: {batchData.batch.id})</span>
                             </p>
                             <p className="text-[10px] text-gray-600 dark:text-gray-400">
                               Product: <span className="font-semibold">{batchData.batch.product.name}</span>{' '}
                               {batchData.batch.product.sku ? `(${batchData.batch.product.sku})` : ''}
                             </p>
+
+                            {/* Batch price (if backend provides) */}
+                            <div className="mt-1 text-[10px] text-gray-600 dark:text-gray-400">
+                              Cost: <span className="font-semibold text-black dark:text-white">{batchData.batch.cost_price != null ? formatCurrency(batchData.batch.cost_price) : '—'}</span>
+                              <span className="mx-2">•</span>
+                              Sell: <span className="font-semibold text-black dark:text-white">{batchData.batch.selling_price != null ? formatCurrency(batchData.batch.selling_price) : '—'}</span>
+                            </div>
                           </div>
                         </div>
 
-                        <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2">
-                          <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                            <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Total</p>
-                            <p className="text-xs font-semibold text-black dark:text-white">{batchData.summary.total_units}</p>
-                          </div>
-                          <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                            <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Active</p>
-                            <p className="text-xs font-semibold text-black dark:text-white">{batchData.summary.active}</p>
-                          </div>
-                          <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                            <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Available</p>
-                            <p className="text-xs font-semibold text-black dark:text-white">{batchData.summary.available_for_sale}</p>
-                          </div>
-                          <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                            <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Sold</p>
-                            <p className="text-xs font-semibold text-black dark:text-white">{batchData.summary.sold}</p>
-                          </div>
-                          <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
-                            <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Defective</p>
-                            <p className="text-xs font-semibold text-black dark:text-white">{batchData.summary.defective}</p>
-                          </div>
-                        </div>
+                        {/* Use computed summary to fix “sold shows inactive” mismatch */}
+                        {(() => {
+                          const computed = computeBatchSummary(batchData);
+                          return (
+                            <div className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-2">
+                              <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                                <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Total</p>
+                                <p className="text-xs font-semibold text-black dark:text-white">{computed.total_units}</p>
+                              </div>
+                              <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                                <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Active</p>
+                                <p className="text-xs font-semibold text-black dark:text-white">{computed.active}</p>
+                              </div>
+                              <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                                <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Available</p>
+                                <p className="text-xs font-semibold text-black dark:text-white">{computed.available_for_sale}</p>
+                              </div>
+                              <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                                <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Sold</p>
+                                <p className="text-xs font-semibold text-black dark:text-white">{computed.sold}</p>
+                              </div>
+                              <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                                <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Defective</p>
+                                <p className="text-xs font-semibold text-black dark:text-white">{computed.defective}</p>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Barcodes Table */}
                       <div className="border border-gray-200 dark:border-gray-800 rounded-md overflow-hidden">
                         <div className="bg-gray-50 dark:bg-gray-900 px-3 py-2 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
-                          <h2 className="text-xs font-semibold text-black dark:text-white uppercase tracking-wide">
-                            Batch Units (Barcodes)
-                          </h2>
+                          <h2 className="text-xs font-semibold text-black dark:text-white uppercase tracking-wide">Batch Units (Barcodes)</h2>
                           <span className="text-[9px] px-2 py-0.5 bg-black dark:bg-white text-white dark:text-black rounded font-medium">
                             {batchData.barcodes.length}
                           </span>
@@ -1623,47 +1878,45 @@ export default function LookupPage() {
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                              {batchData.barcodes.map((b) => (
-                                <tr key={b.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/40">
-                                  <td className="px-2 py-2">
-                                    <button
-                                      onClick={() => openBarcodeFromBatch(b.barcode)}
-                                      className="text-black dark:text-white font-semibold hover:underline"
-                                      title="Open barcode history"
-                                    >
-                                      {b.barcode}
-                                    </button>
-                                  </td>
-                                  <td className="px-2 py-2 text-gray-700 dark:text-gray-300">
-                                    {b.status_label || b.current_status}
-                                  </td>
-                                  <td className="px-2 py-2 text-gray-700 dark:text-gray-300">
-                                    {b.current_store?.name || '—'}
-                                  </td>
-                                  <td className="px-2 py-2 text-gray-700 dark:text-gray-300">
-                                    {b.location_updated_at ? formatDate(b.location_updated_at) : '—'}
-                                  </td>
-                                  <td className="px-2 py-2 text-gray-700 dark:text-gray-300">
-                                    <div className="flex gap-1 flex-wrap">
-                                      {!b.is_active && (
-                                        <span className="text-[9px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800">
-                                          inactive
-                                        </span>
-                                      )}
-                                      {b.is_defective && (
-                                        <span className="text-[9px] px-2 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">
-                                          defective
-                                        </span>
-                                      )}
-                                      {b.is_available_for_sale && (
-                                        <span className="text-[9px] px-2 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">
-                                          sale
-                                        </span>
-                                      )}
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
+                              {batchData.barcodes.map((b) => {
+                                const sold = isSoldBarcodeRow(b);
+                                const statusLabel = getBatchRowStatusLabel(b);
+
+                                return (
+                                  <tr key={b.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/40">
+                                    <td className="px-2 py-2">
+                                      <button
+                                        onClick={() => openBatchBarcodeModal(b.barcode)}
+                                        className="text-black dark:text-white font-semibold hover:underline"
+                                        title="Open details (shows order if sold)"
+                                      >
+                                        {b.barcode}
+                                      </button>
+                                    </td>
+                                    <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{statusLabel}</td>
+                                    <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{b.current_store?.name || '—'}</td>
+                                    <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{b.location_updated_at ? formatDate(b.location_updated_at) : '—'}</td>
+                                    <td className="px-2 py-2 text-gray-700 dark:text-gray-300">
+                                      <div className="flex gap-1 flex-wrap">
+                                        {/* show SOLD first if sold */}
+                                        {sold && getStatusPill('sold')}
+
+                                        {/* only show inactive if NOT sold */}
+                                        {!sold && !b.is_active && <span className="text-[9px] px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800">inactive</span>}
+
+                                        {b.is_defective && (
+                                          <span className="text-[9px] px-2 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">defective</span>
+                                        )}
+
+                                        {/* sale means available for sale */}
+                                        {b.is_available_for_sale && !sold && (
+                                          <span className="text-[9px] px-2 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300">sale</span>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                               {!batchData.barcodes.length && (
                                 <tr>
                                   <td colSpan={5} className="px-3 py-6 text-center text-xs text-gray-500 dark:text-gray-400">
@@ -1673,6 +1926,168 @@ export default function LookupPage() {
                               )}
                             </tbody>
                           </table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Batch Barcode Modal */}
+                  {batchBarcodeModalOpen && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center">
+                      <div
+                        className="absolute inset-0 bg-black/40"
+                        onClick={() => {
+                          setBatchBarcodeModalOpen(false);
+                          setBatchSelectedBarcode(null);
+                          setBatchBarcodeData(null);
+                          setBatchResolvedOrder(null);
+                        }}
+                      />
+                      <div className="relative w-full max-w-2xl mx-4 bg-white dark:bg-black border border-gray-200 dark:border-gray-800 rounded-lg shadow-xl overflow-hidden">
+                        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+                          <div>
+                            <p className="text-xs font-semibold text-black dark:text-white">Barcode Details</p>
+                            <p className="text-[10px] text-gray-600 dark:text-gray-400">{batchSelectedBarcode}</p>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setBatchBarcodeModalOpen(false);
+                              setBatchSelectedBarcode(null);
+                              setBatchBarcodeData(null);
+                              setBatchResolvedOrder(null);
+                            }}
+                            className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:opacity-90"
+                          >
+                            Close
+                          </button>
+                        </div>
+
+                        <div className="p-4">
+                          {batchBarcodeLoading ? (
+                            <div className="text-center py-10">
+                              <div className="w-5 h-5 border-2 border-gray-300 dark:border-gray-700 border-t-black dark:border-t-white rounded-full animate-spin mx-auto"></div>
+                              <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">Loading…</p>
+                            </div>
+                          ) : batchBarcodeData ? (
+                            <div className="space-y-3">
+                              <div className="border border-gray-200 dark:border-gray-800 rounded p-3">
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-xs font-semibold text-black dark:text-white">
+                                      {batchBarcodeData.product?.name}{' '}
+                                      <span className="text-gray-500 text-[10px]">
+                                        {batchBarcodeData.product?.sku ? `(${batchBarcodeData.product.sku})` : ''}
+                                      </span>
+                                    </p>
+                                    <p className="text-[10px] text-gray-600 dark:text-gray-400">
+                                      Barcode: <span className="font-semibold text-black dark:text-white">{batchBarcodeData.barcode}</span>
+                                    </p>
+                                  </div>
+                                  <span className="text-[10px] px-2 py-1 rounded bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-300">
+                                    {batchBarcodeData.total_movements} movements
+                                  </span>
+                                </div>
+
+                                {batchBarcodeData.current_location && (
+                                  <div className="mt-3 grid grid-cols-1 md:grid-cols-4 gap-2">
+                                    <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                                      <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Status</p>
+                                      <p className="text-xs font-semibold text-black dark:text-white">
+                                        {getCurrentStatusLabel(batchBarcodeData.current_location, batchBarcodeData.history)}
+                                      </p>
+                                    </div>
+                                    <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                                      <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Store</p>
+                                      <p className="text-xs text-black dark:text-white">
+                                        {batchBarcodeData.current_location.current_store?.name || '—'}
+                                      </p>
+                                    </div>
+                                    <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                                      <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Batch</p>
+                                      <p className="text-xs text-black dark:text-white">
+                                        {batchBarcodeData.current_location.batch?.batch_number || '—'}
+                                      </p>
+                                    </div>
+                                    <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                                      <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Batch Prices</p>
+                                      <p className="text-[10px] text-black dark:text-white">
+                                        Cost:{' '}
+                                        <span className="font-semibold">
+                                          {batchBarcodeData.current_location.batch?.cost_price != null
+                                            ? formatCurrency(batchBarcodeData.current_location.batch?.cost_price)
+                                            : '—'}
+                                        </span>
+                                      </p>
+                                      <p className="text-[10px] text-black dark:text-white">
+                                        Sell:{' '}
+                                        <span className="font-semibold">
+                                          {batchBarcodeData.current_location.batch?.selling_price != null
+                                            ? formatCurrency(batchBarcodeData.current_location.batch?.selling_price)
+                                            : '—'}
+                                        </span>
+                                      </p>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Order details if sold */}
+                              {batchResolvedOrder && (
+                                <div className="border border-gray-200 dark:border-gray-800 rounded p-3 bg-gray-50 dark:bg-gray-900/40">
+                                  <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Order Details</p>
+                                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                                    <div>
+                                      <p className="text-xs font-semibold text-black dark:text-white">
+                                        {batchResolvedOrder.orderNumber || (batchResolvedOrder.orderId ? `#${batchResolvedOrder.orderId}` : '—')}
+                                      </p>
+                                      {batchResolvedOrder.customer && (
+                                        <p className="text-[10px] text-gray-600 dark:text-gray-400">
+                                          {batchResolvedOrder.customer?.name || 'Customer'}
+                                          {batchResolvedOrder.customer?.phone ? ` • ${batchResolvedOrder.customer.phone}` : ''}
+                                        </p>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <button
+                                        onClick={() => {
+                                          setActiveTab('barcode');
+                                          setBarcodeInput(batchBarcodeData?.barcode || '');
+                                          setBarcodeData(batchBarcodeData);
+                                          setBatchBarcodeModalOpen(false);
+                                        }}
+                                        className="text-[10px] px-3 py-1.5 rounded bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:opacity-90"
+                                      >
+                                        Open in Barcode Tab
+                                      </button>
+
+                                      {(batchResolvedOrder.orderId || batchResolvedOrder.orderNumber) && (
+                                        <button
+                                          onClick={async () => {
+                                            setBatchBarcodeModalOpen(false);
+                                            setActiveTab('order');
+                                            if (batchResolvedOrder.orderId) await openOrderById(batchResolvedOrder.orderId);
+                                            else if (batchResolvedOrder.orderNumber) await openOrderByNumber(batchResolvedOrder.orderNumber);
+                                          }}
+                                          className="text-[10px] px-3 py-1.5 rounded bg-black dark:bg-white text-white dark:text-black hover:opacity-90"
+                                        >
+                                          Open Order
+                                        </button>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* small note if sold but not resolved */}
+                              {!batchResolvedOrder && isSoldFromCurrentLocation(batchBarcodeData?.current_location, batchBarcodeData?.history) && (
+                                <div className="text-[10px] text-gray-600 dark:text-gray-400">
+                                  This barcode looks **Sold**, but order reference wasn’t found in the history/metadata returned by the API.
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-center py-10 text-xs text-gray-600 dark:text-gray-400">No data.</div>
+                          )}
                         </div>
                       </div>
                     </div>

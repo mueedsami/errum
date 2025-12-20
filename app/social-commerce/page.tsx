@@ -733,89 +733,79 @@ export default function SocialCommercePage() {
     }
 
     try {
-      console.log('📦 CREATING SOCIAL COMMERCE ORDER');
+    console.log('📦 CREATING SOCIAL COMMERCE ORDER');
 
-      const cityObj = pathaoCities.find((c) => String(c.city_id) === String(pathaoCityId));
-      const zoneObj = pathaoZones.find((z) => String(z.zone_id) === String(pathaoZoneId));
-      const areaObj = pathaoAreas.find((a) => String(a.area_id) === String(pathaoAreaId));
+    const cityObj = pathaoCities.find((c) => String(c.city_id) === String(pathaoCityId));
+    const zoneObj = pathaoZones.find((z) => String(z.zone_id) === String(pathaoZoneId));
+    const areaObj = pathaoAreas.find((a) => String(a.area_id) === String(pathaoAreaId));
 
-      const shipping_address = isInternational
-        ? {
-            name: userName,
-            phone: userPhone,
-            street: deliveryAddress,
-            city: internationalCity,
-            state: state || undefined,
-            country,
-            postal_code: internationalPostalCode || undefined,
-          }
-        : {
-            name: userName,
-            phone: userPhone,
-            street: streetAddress,
-            area: areaObj?.area_name || '',
-            city: cityObj?.city_name || '',
-            pathao_city_id: Number(pathaoCityId),
-            pathao_zone_id: Number(pathaoZoneId),
-            pathao_area_id: Number(pathaoAreaId),
-            postal_code: postalCode || undefined,
-          };
-
-      // Group items by store
-      const itemsByStore = cart.reduce((acc, item) => {
-        if (!acc[item.store_id]) {
-          acc[item.store_id] = [];
-        }
-        acc[item.store_id].push({
-          product_id: item.product_id,
-          batch_id: item.batch_id,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-          discount_amount: item.discount_amount,
-        });
-        return acc;
-      }, {} as Record<number, any[]>);
-
-      const orderData = {
-        order_type: 'social_commerce',
-        stores: Object.entries(itemsByStore).map(([store_id, items]) => ({
-          store_id: parseInt(store_id),
-          items,
-        })),
-        customer: {
+    const shipping_address = isInternational
+      ? {
           name: userName,
-          email: userEmail || undefined,
           phone: userPhone,
-        },
-        shipping_address,
-        shipping_amount: 0,
-        notes: `Social Commerce. ${socialId ? `ID: ${socialId}. ` : ''}${isInternational ? 'International' : 'Domestic'} delivery.`,
-      };
+          street: deliveryAddress,
+          city: internationalCity,
+          state: state || undefined,
+          country,
+          postal_code: internationalPostalCode || undefined,
+        }
+      : {
+          name: userName,
+          phone: userPhone,
+          street: streetAddress,
+          area: areaObj?.area_name || '',
+          city: cityObj?.city_name || '',
+          pathao_city_id: Number(pathaoCityId),
+          pathao_zone_id: Number(pathaoZoneId),
+          pathao_area_id: Number(pathaoAreaId),
+          postal_code: postalCode || undefined,
+        };
 
-      sessionStorage.setItem(
-        'pendingOrder',
-        JSON.stringify({
-          ...orderData,
-          salesBy,
-          date,
-          isInternational,
-          subtotal,
-          defectiveItems: cart
-            .filter((item) => item.isDefective)
-            .map((item) => ({
-              defectId: item.defectId,
-              price: item.unit_price,
-              productName: item.productName,
-            })),
-        })
-      );
+    // ✅ Flatten items - each item already has store_id
+    const orderData = {
+      order_type: 'social_commerce',
+      customer: {
+        name: userName,
+        email: userEmail || undefined,
+        phone: userPhone,
+      },
+      shipping_address,
+      items: cart.map(item => ({
+        product_id: item.product_id,
+        batch_id: item.batch_id,
+        quantity: item.quantity,
+        unit_price: item.unit_price,
+        discount_amount: item.discount_amount,
+        store_id: item.store_id, // ✅ Each item has its store_id
+      })),
+      shipping_amount: 0,
+      notes: `Social Commerce. ${socialId ? `ID: ${socialId}. ` : ''}${isInternational ? 'International' : 'Domestic'} delivery.`,
+    };
 
-      console.log('✅ Order data prepared, redirecting...');
-      window.location.href = '/social-commerce/amount-details';
-    } catch (error) {
-      console.error('❌ Error:', error);
-      alert('Failed to process order');
-    }
+    sessionStorage.setItem(
+      'pendingOrder',
+      JSON.stringify({
+        ...orderData,
+        salesBy,
+        date,
+        isInternational,
+        subtotal,
+        defectiveItems: cart
+          .filter((item) => item.isDefective)
+          .map((item) => ({
+            defectId: item.defectId,
+            price: item.unit_price,
+            productName: item.productName,
+          })),
+      })
+    );
+
+    console.log('✅ Order data prepared, redirecting...');
+    window.location.href = '/social-commerce/amount-details';
+  } catch (error) {
+    console.error('❌ Error:', error);
+    alert('Failed to process order');
+  }
   };
 
   return (

@@ -64,6 +64,11 @@ export default function AmountDetailsPage() {
   // COD payment method
   const [codPaymentMethod, setCodePaymentMethod] = useState('');
 
+  // Store assignment
+  const [stores, setStores] = useState<any[]>([]);
+  const [storeAssignmentType, setStoreAssignmentType] = useState<'auto' | 'specific'>('auto');
+  const [selectedStoreId, setSelectedStoreId] = useState<string>('');
+
   const [toast, setToast] = useState({ show: false, message: '', type: 'success' as 'success' | 'error' });
 
   const calculateItemAmount = (item: any): number => {
@@ -137,7 +142,26 @@ export default function AmountDetailsPage() {
       }
     };
 
+    const fetchStores = async () => {
+      try {
+        if (!axios) return;
+        
+        const response = await axios.get('/stores', {
+          params: { is_active: true, per_page: 1000 }
+        });
+        
+        if (response.data.success) {
+          const storesData = response.data.data?.data || response.data.data || [];
+          setStores(storesData);
+        }
+      } catch (error: any) {
+        console.error('Error fetching stores:', error);
+        displayToast('Error loading stores', 'error');
+      }
+    };
+
     fetchPaymentMethods();
+    fetchStores();
   }, []);
 
   if (!orderData) {
@@ -175,6 +199,12 @@ export default function AmountDetailsPage() {
   };
 
   const handlePlaceOrder = async () => {
+    // Validation for store assignment
+    if (storeAssignmentType === 'specific' && !selectedStoreId) {
+      displayToast('Please select a store or choose auto-assign', 'error');
+      return;
+    }
+
     // Validation for payment options
     if (paymentOption === 'full' || paymentOption === 'partial') {
       if (!selectedPaymentMethod) {
@@ -222,15 +252,37 @@ export default function AmountDetailsPage() {
       console.log('COD:', codAmount);
       console.log('═══════════════════════════════════');
 
-      // Step 1: Create Order
+      // ✅ FIXED: Step 1: Create Order (with optional store selection)
       console.log('📦 Step 1: Creating order...');
+      
+      // Determine store_id based on user selection
+      const orderStoreId = storeAssignmentType === 'specific' && selectedStoreId 
+        ? parseInt(selectedStoreId) 
+        : null;
+      
+      console.log('🏪 Store assignment:', {
+        type: storeAssignmentType,
+        store_id: orderStoreId,
+        note: orderStoreId ? 'Stock will be deducted immediately' : 'Stock deducted at warehouse scanning'
+      });
+      
       const createOrderResponse = await axios.post('/orders', {
         order_type: 'social_commerce',
-        store_id: parseInt(orderData.store_id),
         customer: orderData.customer,
-        items: orderData.items,
+        store_id: orderStoreId, // ✅ NULL for auto-assign, or specific store ID
+        items: orderData.items.map(item => ({
+          product_id: item.product_id,
+          quantity: item.quantity,
+          unit_price: item.unit_price,
+          batch_id: null, // ✅ NULL - batch assigned at warehouse scanning
+          discount_amount: item.discount_amount || 0
+          // ❌ Do NOT send store_id in items array
+        })),
         shipping_amount: transport,
+        discount_amount: 0, // Top-level discount if needed
         notes: orderData.notes || `Social Commerce order. ${
+          orderStoreId ? `Assigned to Store ID: ${orderStoreId}. ` : 'Warehouse will assign store. '
+        }${
           paymentOption === 'full' ? 'Full payment' : 
           paymentOption === 'partial' ? `Advance: ৳${advance.toFixed(2)}, COD: ৳${codAmount.toFixed(2)}` : 
           'No payment - Full COD'
@@ -563,6 +615,100 @@ export default function AmountDetailsPage() {
                 <div className="flex justify-between text-lg font-bold mb-4">
                   <span className="text-gray-900 dark:text-white">Total Amount</span>
                   <span className="text-gray-900 dark:text-white">৳{total.toFixed(2)}</span>
+                </div>
+              </div>
+
+              {/* Store Assignment Section */}
+              <div className="bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-900/20 dark:to-blue-900/20 p-4 rounded-lg border border-indigo-200 dark:border-indigo-800">
+                <label className="block text-sm font-semibold text-gray-900 dark:text-white mb-3">
+                  Store Assignment
+                </label>
+                
+                <div className="space-y-3">
+                  {/* Auto-assign option */}
+                  <label className={`flex items-start p-3 rounded-lg border-2 cursor-pointer transition-all hover:bg-white dark:hover:bg-gray-700/50 ${
+                    storeAssignmentType === 'auto'
+                      ? 'border-indigo-600 bg-white dark:bg-gray-700/50'
+                      : 'border-gray-300 dark:border-gray-600'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="storeAssignment"
+                      value="auto"
+                      checked={storeAssignmentType === 'auto'}
+                      onChange={(e) => {
+                        setStoreAssignmentType('auto');
+                        setSelectedStoreId('');
+                      }}
+                      disabled={isProcessing}
+                      className="mt-1 mr-3"
+                    />
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-gray-900 dark:text-white">
+                          Auto-assign at Warehouse
+                        </span>
+                        <span className="px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs font-medium rounded">
+                          Recommended
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                        Warehouse will assign items to best available stores. Stock deducted when barcodes are scanned.
+                      </p>
+                    </div>
+                  </label>
+
+                  {/* Specific store option */}
+                  <label className={`flex items-start p-3 rounded-lg border-2 cursor-pointer transition-all hover:bg-white dark:hover:bg-gray-700/50 ${
+                    storeAssignmentType === 'specific'
+                      ? 'border-indigo-600 bg-white dark:bg-gray-700/50'
+                      : 'border-gray-300 dark:border-gray-600'
+                  }`}>
+                    <input
+                      type="radio"
+                      name="storeAssignment"
+                      value="specific"
+                      checked={storeAssignmentType === 'specific'}
+                      onChange={(e) => setStoreAssignmentType('specific')}
+                      disabled={isProcessing}
+                      className="mt-1 mr-3"
+                    />
+                    <div className="flex-1">
+                      <span className="text-sm font-medium text-gray-900 dark:text-white">
+                        Assign to Specific Store
+                      </span>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                        Select a store now. Stock will be deducted immediately.
+                      </p>
+                    </div>
+                  </label>
+
+                  {/* Store dropdown (shown when specific is selected) */}
+                  {storeAssignmentType === 'specific' && (
+                    <div className="pl-8 pt-2">
+                      <select
+                        value={selectedStoreId}
+                        onChange={(e) => setSelectedStoreId(e.target.value)}
+                        disabled={isProcessing}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50"
+                      >
+                        <option value="">Select Store</option>
+                        {stores.map((store) => (
+                          <option key={store.id} value={store.id}>
+                            {store.name} {store.address ? `- ${store.address}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      {selectedStoreId && (
+                        <p className="mt-2 text-xs text-orange-600 dark:text-orange-400 flex items-start gap-1">
+                          <span className="text-base">⚠️</span>
+                          <span>
+                            Stock will be deducted immediately from this store. Make sure all items are available.
+                          </span>
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 

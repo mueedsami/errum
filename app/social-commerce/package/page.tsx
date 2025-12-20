@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Package,
   Scan,
@@ -33,13 +33,12 @@ interface ScanHistoryEntry {
   timestamp: string;
 }
 
-// Helper function to parse prices correctly (handles "৳2,000.00", "2,000", etc.)
 const parsePrice = (value: any): number => {
   if (value === null || value === undefined) return 0;
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
 
   if (typeof value === 'string') {
-    const cleaned = value.replace(/[^0-9.-]/g, ''); // removes ৳, commas, spaces
+    const cleaned = value.replace(/[^0-9.-]/g, '');
     const n = parseFloat(cleaned);
     return Number.isFinite(n) ? n : 0;
   }
@@ -67,6 +66,29 @@ const formatBDT = (value: any, decimals: 0 | 2 = 0) => {
   }
 };
 
+// ✅ normalize axios/service responses safely (works if service returns res.data or raw)
+const unwrap = (res: any) => {
+  if (!res) return res;
+  if (typeof res === 'object' && 'success' in res) return res;
+  if (res?.data && typeof res.data === 'object') return res.data;
+  return res;
+};
+
+const extractErrorMessage = (err: any) => {
+  const data = err?.response?.data;
+  if (typeof data?.message === 'string') return data.message;
+
+  // Laravel validation
+  if (data?.errors && typeof data.errors === 'object') {
+    const firstKey = Object.keys(data.errors)[0];
+    const firstMsg = Array.isArray(data.errors[firstKey]) ? data.errors[firstKey][0] : String(data.errors[firstKey]);
+    return firstMsg || 'Validation failed';
+  }
+
+  if (typeof err?.message === 'string') return err.message;
+  return 'Something went wrong';
+};
+
 export default function WarehouseFulfillmentPage() {
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -78,6 +100,11 @@ export default function WarehouseFulfillmentPage() {
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   const [scannedItems, setScannedItems] = useState<Record<number, ScannedItemTracking>>({});
+  const scannedItemsRef = useRef(scannedItems);
+  useEffect(() => {
+    scannedItemsRef.current = scannedItems;
+  }, [scannedItems]);
+
   const [currentBarcode, setCurrentBarcode] = useState('');
   const [scanHistory, setScanHistory] = useState<ScanHistoryEntry[]>([]);
   const [isScanning, setIsScanning] = useState(false);
@@ -94,78 +121,20 @@ export default function WarehouseFulfillmentPage() {
   useEffect(() => {
     fetchPendingOrders();
 
-    // Initialize audio for success sound
     if (typeof window !== 'undefined') {
-      // Add /public/sounds/beep.mp3
       audioRef.current = new Audio('/sounds/beep.mp3');
     }
   }, []);
 
   useEffect(() => {
-    if (selectedOrderId) {
-      fetchOrderDetails(selectedOrderId);
-    }
+    if (selectedOrderId) fetchOrderDetails(selectedOrderId);
   }, [selectedOrderId]);
 
   useEffect(() => {
-    if (isScanning && barcodeInputRef.current) {
-      barcodeInputRef.current.focus();
+    if (isScanning) {
+      setTimeout(() => barcodeInputRef.current?.focus(), 50);
     }
-  }, [isScanning]);
-
-  const fetchPendingOrders = async () => {
-    setIsLoadingOrders(true);
-    try {
-      // Fetch both social_commerce and ecommerce orders
-      const [socialCommerceResponse, ecommerceResponse] = await Promise.all([
-        orderService.getPendingFulfillment({ per_page: 100, order_type: 'social_commerce' }),
-        orderService.getPendingFulfillment({ per_page: 100, order_type: 'ecommerce' }),
-      ]);
-
-      const allOrders = [...(socialCommerceResponse.data || []), ...(ecommerceResponse.data || [])];
-
-      // Sort by date, newest first
-      allOrders.sort((a, b) => new Date(b.order_date).getTime() - new Date(a.order_date).getTime());
-
-      setPendingOrders(allOrders);
-      console.log('📦 Loaded pending orders:', {
-        social_commerce: socialCommerceResponse.data?.length || 0,
-        ecommerce: ecommerceResponse.data?.length || 0,
-        total: allOrders.length,
-      });
-    } catch (error: any) {
-      console.error('Error fetching orders:', error);
-      displayToast('Error loading orders: ' + error.message, 'error');
-    } finally {
-      setIsLoadingOrders(false);
-    }
-  };
-
-  const fetchOrderDetails = async (orderId: number) => {
-    setIsLoadingDetails(true);
-    try {
-      const order = await orderService.getById(orderId);
-      setOrderDetails(order);
-      console.log('✅ Order details loaded:', order);
-
-      // Initialize scanned items tracking
-      const initialScanned: Record<number, ScannedItemTracking> = {};
-      order.items?.forEach((item: any) => {
-        initialScanned[item.id] = {
-          required: item.quantity,
-          scanned: [],
-          barcodes: [],
-        };
-      });
-      setScannedItems(initialScanned);
-      setScanHistory([]);
-    } catch (error: any) {
-      console.error('Error fetching order details:', error);
-      displayToast('Error loading order: ' + error.message, 'error');
-    } finally {
-      setIsLoadingDetails(false);
-    }
-  };
+  }, [isScanning, orderDetails]);
 
   const displayToast = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
     setToastMessage(message);
@@ -177,16 +146,30 @@ export default function WarehouseFulfillmentPage() {
   const playSuccessSound = () => {
     if (audioRef.current) {
       audioRef.current.currentTime = 0;
-      audioRef.current.play().catch((e) => console.log('Audio play failed:', e));
+      audioRef.current.play().catch(() => {});
     }
   };
 
+  // ✅ reliable error beep (no broken base64 wav)
   const playErrorSound = () => {
-    // Different pitch for errors (tiny embedded wav)
-    const audio = new Audio(
-      'data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8ti...'
-    );
-    audio.play().catch(() => console.log('Error sound failed'));
+    try {
+      const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioCtx();
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'square';
+      o.frequency.value = 220;
+      g.gain.value = 0.05;
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.start();
+      setTimeout(() => {
+        o.stop();
+        ctx.close().catch(() => {});
+      }, 120);
+    } catch {
+      // ignore
+    }
   };
 
   const addToScanHistory = (barcode: string, status: 'success' | 'warning' | 'error', message: string) => {
@@ -196,250 +179,68 @@ export default function WarehouseFulfillmentPage() {
       message,
       timestamp: new Date().toLocaleTimeString(),
     };
-    setScanHistory((prev) => [entry, ...prev.slice(0, 49)]); // Keep last 50 scans
+    setScanHistory((prev) => [entry, ...prev.slice(0, 49)]);
   };
 
-  const handleBarcodeInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && currentBarcode.trim()) {
-      handleBarcodeScan(currentBarcode.trim());
-      setCurrentBarcode('');
-    }
-  };
-
-  const handleBarcodeScan = async (barcode: string) => {
-    if (!orderDetails) {
-      displayToast('No order selected', 'error');
-      return;
-    }
-
+  const fetchPendingOrders = async () => {
+    setIsLoadingOrders(true);
     try {
-      console.log('🔍 Scanning barcode:', barcode);
+      const [socialCommerceRes, ecommerceRes] = await Promise.all([
+        orderService.getPendingFulfillment({ per_page: 100, order_type: 'social_commerce' }),
+        orderService.getPendingFulfillment({ per_page: 100, order_type: 'ecommerce' }),
+      ]);
 
-      // Validate barcode format
-      if (barcode.length < 5) {
-        displayToast('Invalid barcode format', 'error');
-        addToScanHistory(barcode, 'error', 'Invalid format');
-        playErrorSound();
-        return;
-      }
+      const socialCommerce = unwrap(socialCommerceRes)?.data ?? unwrap(socialCommerceRes) ?? [];
+      const ecommerce = unwrap(ecommerceRes)?.data ?? unwrap(ecommerceRes) ?? [];
 
-      // Check if barcode already scanned in this order
-      const alreadyScanned = Object.values(scannedItems).some((item) => item.barcodes.includes(barcode));
-      if (alreadyScanned) {
-        displayToast('⚠️ Barcode already scanned for this order', 'warning');
-        addToScanHistory(barcode, 'warning', 'Duplicate scan');
-        playErrorSound();
-        return;
-      }
+      const allOrders = [...(socialCommerce || []), ...(ecommerce || [])];
 
-      // Scan barcode to get product info
-      const scanResult = await barcodeService.scanBarcode(barcode);
-
-      if (!scanResult.success || !scanResult.data || !scanResult.data.product) {
-        displayToast('❌ Barcode not found in system', 'error');
-        addToScanHistory(barcode, 'error', 'Barcode not found');
-        playErrorSound();
-        return;
-      }
-
-      const scannedProduct = scanResult.data.product;
-      const scannedBatch = scanResult.data.current_batch;
-      const isAvailable = scanResult.data.is_available;
-
-      console.log('✅ Barcode valid:', {
-        product: scannedProduct.name,
-        batch: scannedBatch?.batch_number,
-        available: isAvailable,
-      });
-
-      // Check if product is available (not sold/defective)
-      if (!isAvailable) {
-        displayToast('❌ This barcode is not available (already sold or inactive)', 'error');
-        addToScanHistory(barcode, 'error', `${scannedProduct.name} - Not available`);
-        playErrorSound();
-        return;
-      }
-
-      // Find matching order item
-      // Normalize ids (handles product_id vs product.id, string vs number)
-const getProductId = (item: any) =>
-  Number(item?.product_id ?? item?.productId ?? item?.product?.id ?? 0) || 0;
-
-const getBatchId = (item: any) =>
-  Number(item?.batch_id ?? item?.batchId ?? item?.batch?.id ?? 0) || 0;
-
-const scannedProductId = Number(scannedProduct?.id ?? 0) || 0;
-const scannedBatchId = Number(scannedBatch?.id ?? 0) || 0;
-
-// Find candidates by product first
-const candidates = (orderDetails.items || []).filter((item: any) => {
-  return getProductId(item) === scannedProductId;
-});
-
-if (candidates.length === 0) {
-  displayToast(`❌ "${scannedProduct.name}" not in this order`, 'error');
-  addToScanHistory(barcode, 'error', `${scannedProduct.name} - Not in order`);
-  playErrorSound();
-  return;
-}
-
-// If order item has batch assigned, enforce it. If not assigned, allow any batch.
-const candidateWithBatchRules = candidates.filter((item: any) => {
-  const orderItemBatchId = getBatchId(item);
-
-  // If order item has NO batch, accept any scanned batch
-  if (!orderItemBatchId) return true;
-
-  // If scanned batch missing, reject (order expects a batch)
-  if (!scannedBatchId) return false;
-
-  // Otherwise enforce match
-  return orderItemBatchId === scannedBatchId;
-});
-
-// Choose an item that still needs scanning (important when same product appears multiple times)
-const matchingItem = candidateWithBatchRules.find((item: any) => {
-  const track = scannedItems[item.id];
-  const required = Number(item.quantity || 0);
-  const already = track?.scanned.length || 0;
-  return already < required;
-});
-
-if (!matchingItem) {
-  displayToast(`⚠️ "${scannedProduct.name}" is already fully scanned (or batch mismatch)`, 'warning');
-  addToScanHistory(barcode, 'warning', `${scannedProduct.name} - Already complete / batch mismatch`);
-  playErrorSound();
-  return;
-}
-
-
-      // Check if item already fully scanned
-      const currentScanned = scannedItems[matchingItem.id];
-      if (currentScanned.scanned.length >= currentScanned.required) {
-        displayToast(`⚠️ Item already complete (${currentScanned.required}/${currentScanned.required})`, 'warning');
-        addToScanHistory(barcode, 'warning', `${scannedProduct.name} - Already complete`);
-        playErrorSound();
-        return;
-      }
-
-      // Add barcode to scanned list
-      const newScannedCount = currentScanned.scanned.length + 1;
-      setScannedItems((prev) => ({
-        ...prev,
-        [matchingItem.id]: {
-          ...prev[matchingItem.id],
-          scanned: [...prev[matchingItem.id].scanned, scannedProduct.name],
-          barcodes: [...prev[matchingItem.id].barcodes, barcode],
-        },
-      }));
-
-      displayToast(`✅ ${scannedProduct.name} (${newScannedCount}/${currentScanned.required})`, 'success');
-      addToScanHistory(barcode, 'success', `${scannedProduct.name} - ${newScannedCount}/${currentScanned.required}`);
-      playSuccessSound();
-
-      // Auto-focus input for next scan
-      setTimeout(() => {
-        barcodeInputRef.current?.focus();
-      }, 100);
+      allOrders.sort((a: any, b: any) => new Date(b.order_date).getTime() - new Date(a.order_date).getTime());
+      setPendingOrders(allOrders);
     } catch (error: any) {
-      console.error('❌ Scan error:', error);
-      displayToast('Scan error: ' + error.message, 'error');
-      addToScanHistory(barcode, 'error', error.message);
-      playErrorSound();
-    }
-  };
-
-  const handleFulfillOrder = async () => {
-    if (!orderDetails) return;
-
-    // Check if all items are fully scanned
-    const allItemsScanned = orderDetails.items?.every((item: any) => {
-      const scanned = scannedItems[item.id];
-      return scanned && scanned.scanned.length === scanned.required;
-    });
-
-    if (!allItemsScanned) {
-      displayToast('⚠️ Please scan all required items before fulfilling', 'warning');
-
-      // Show which items are missing (debug)
-      const missingItems = orderDetails.items?.filter((item: any) => {
-        const scanned = scannedItems[item.id];
-        return !scanned || scanned.scanned.length < scanned.required;
-      });
-
-      console.log('❌ Missing items:', missingItems);
-      return;
-    }
-
-    setIsProcessing(true);
-
-    try {
-      // Prepare fulfillment payload
-      const fulfillments = orderDetails.items.map((item: any) => ({
-        order_item_id: item.id,
-        barcodes: scannedItems[item.id].barcodes,
-      }));
-
-      console.log('📦 Fulfilling order:', orderDetails.order_number);
-      console.log('Fulfillments:', fulfillments);
-
-      // Call fulfill API
-      const fulfillResult = await orderService.fulfill(orderDetails.id, { fulfillments });
-
-      console.log('✅ Order fulfilled:', fulfillResult);
-      displayToast('✅ Order fulfilled successfully!', 'success');
-
-      // Wait 1 second then auto-complete the order
-      setTimeout(async () => {
-        try {
-          console.log('🚀 Completing order...');
-          await orderService.complete(orderDetails.id);
-          console.log('✅ Order completed and inventory reduced');
-          displayToast('✅ Order completed! Inventory updated.', 'success');
-
-          // Reset and go back to order list after 2 seconds
-          setTimeout(() => {
-            setSelectedOrderId(null);
-            setOrderDetails(null);
-            setScannedItems({});
-            setScanHistory([]);
-            fetchPendingOrders();
-          }, 2000);
-        } catch (completeError: any) {
-          console.error('❌ Complete error:', completeError);
-          displayToast('⚠️ Fulfilled but completion failed: ' + completeError.message, 'error');
-
-          // Still go back after showing error
-          setTimeout(() => {
-            setSelectedOrderId(null);
-            fetchPendingOrders();
-          }, 3000);
-        }
-      }, 1000);
-    } catch (error: any) {
-      console.error('❌ Fulfill error:', error);
-      displayToast('❌ Fulfillment failed: ' + error.message, 'error');
+      displayToast('Error loading orders: ' + extractErrorMessage(error), 'error');
     } finally {
-      setIsProcessing(false);
+      setIsLoadingOrders(false);
+    }
+  };
+
+  const fetchOrderDetails = async (orderId: number) => {
+    setIsLoadingDetails(true);
+    try {
+      const res = unwrap(await orderService.getById(orderId));
+      const order = res?.data ?? res; // supports both shapes
+
+      setOrderDetails(order);
+
+      const initial: Record<number, ScannedItemTracking> = {};
+      (order?.items || []).forEach((item: any) => {
+        initial[item.id] = {
+          required: Number(item.quantity || 0),
+          scanned: [],
+          barcodes: [],
+        };
+      });
+
+      setScannedItems(initial);
+      setScanHistory([]);
+    } catch (error: any) {
+      displayToast('Error loading order: ' + extractErrorMessage(error), 'error');
+    } finally {
+      setIsLoadingDetails(false);
     }
   };
 
   const getOrderProgress = () => {
     if (!orderDetails) return { scanned: 0, total: 0, percentage: 0 };
-
     let scanned = 0;
     let total = 0;
 
-    orderDetails.items?.forEach((item: any) => {
+    (orderDetails.items || []).forEach((item: any) => {
       total += Number(item.quantity || 0);
       scanned += scannedItems[item.id]?.scanned.length || 0;
     });
 
-    return {
-      scanned,
-      total,
-      percentage: total > 0 ? (scanned / total) * 100 : 0,
-    };
+    return { scanned, total, percentage: total > 0 ? (scanned / total) * 100 : 0 };
   };
 
   const getOrderTypeBadge = (orderType: string) => {
@@ -451,7 +252,6 @@ if (!matchingItem) {
         </span>
       );
     }
-
     if (orderType === 'ecommerce') {
       return (
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
@@ -460,31 +260,256 @@ if (!matchingItem) {
         </span>
       );
     }
-
     return null;
   };
 
-  const filteredOrders = pendingOrders.filter(
-    (order) =>
-      order.order_number?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      order.customer?.name?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // ✅ backend-aligned field normalization
+  const getProductId = (item: any) => Number(item?.product_id ?? item?.product?.id ?? item?.productId ?? 0) || 0;
+
+  // IMPORTANT: backend uses product_batch_id
+  const getBatchId = (item: any) =>
+    Number(
+      item?.product_batch_id ??
+        item?.productBatchId ??
+        item?.batch_id ??
+        item?.batchId ??
+        item?.batch?.id ??
+        0
+    ) || 0;
+
+  const handleBarcodeScan = async (barcode: string) => {
+    if (!orderDetails) {
+      displayToast('No order selected', 'error');
+      return;
+    }
+
+    const clean = barcode.trim();
+    if (!clean) return;
+
+    try {
+      if (clean.length < 5) {
+        displayToast('Invalid barcode format', 'error');
+        addToScanHistory(clean, 'error', 'Invalid format');
+        playErrorSound();
+        return;
+      }
+
+      // ✅ duplicate check using latest state
+      const latest = scannedItemsRef.current;
+      const alreadyScanned = Object.values(latest).some((it) => it.barcodes.includes(clean));
+      if (alreadyScanned) {
+        displayToast('⚠️ Barcode already scanned for this order', 'warning');
+        addToScanHistory(clean, 'warning', 'Duplicate scan');
+        playErrorSound();
+        return;
+      }
+
+      const scanRes = unwrap(await barcodeService.scanBarcode(clean));
+      const data = scanRes?.data ?? scanRes;
+
+      if (!scanRes?.success || !data?.product) {
+        displayToast('❌ Barcode not found in system', 'error');
+        addToScanHistory(clean, 'error', scanRes?.message || 'Barcode not found');
+        playErrorSound();
+        return;
+      }
+
+      const scannedProduct = data.product;
+      const scannedBatch = data.current_batch;
+      const isAvailable = !!data.is_available;
+
+      if (!isAvailable) {
+        displayToast('❌ This barcode is not available (already sold/defective/inactive)', 'error');
+        addToScanHistory(clean, 'error', `${scannedProduct.name} - Not available`);
+        playErrorSound();
+        return;
+      }
+
+      const scannedProductId = Number(scannedProduct?.id ?? 0) || 0;
+      const scannedBatchId = Number(scannedBatch?.id ?? 0) || 0;
+
+      const items = orderDetails.items || [];
+      const candidates = items.filter((item: any) => getProductId(item) === scannedProductId);
+
+      if (candidates.length === 0) {
+        displayToast(`❌ "${scannedProduct.name}" not in this order`, 'error');
+        addToScanHistory(clean, 'error', `${scannedProduct.name} - Not in order`);
+        playErrorSound();
+        return;
+      }
+
+      // ✅ enforce batch same as backend (product_batch_id)
+      const batchOk = candidates.filter((item: any) => {
+        const orderItemBatchId = getBatchId(item);
+
+        // If order expects a batch but scanned batch missing => reject
+        if (orderItemBatchId && !scannedBatchId) return false;
+
+        // If order expects batch => must match
+        if (orderItemBatchId) return orderItemBatchId === scannedBatchId;
+
+        // If order has NO batch assigned => fulfillment will fail later in backend.
+        // Better to block early with a clear message.
+        return false;
+      });
+
+      if (batchOk.length === 0) {
+        displayToast(`❌ Batch mismatch (or order item has no batch assigned).`, 'error');
+        addToScanHistory(clean, 'error', `${scannedProduct.name} - Batch mismatch / no batch in order item`);
+        playErrorSound();
+        return;
+      }
+
+      // pick an item that still needs scanning
+      const latest2 = scannedItemsRef.current;
+      const matchingItem = batchOk.find((item: any) => {
+        const required = Number(item.quantity || 0);
+        const already = latest2[item.id]?.scanned.length || 0;
+        return already < required;
+      });
+
+      if (!matchingItem) {
+        displayToast(`⚠️ "${scannedProduct.name}" already fully scanned`, 'warning');
+        addToScanHistory(clean, 'warning', `${scannedProduct.name} - Already complete`);
+        playErrorSound();
+        return;
+      }
+
+      const required = Number(matchingItem.quantity || 0);
+      const current = latest2[matchingItem.id] || { required, scanned: [], barcodes: [] };
+
+      if (current.scanned.length >= required) {
+        displayToast(`⚠️ Item already complete (${required}/${required})`, 'warning');
+        addToScanHistory(clean, 'warning', `${scannedProduct.name} - Already complete`);
+        playErrorSound();
+        return;
+      }
+
+      const newCount = current.scanned.length + 1;
+
+      setScannedItems((prev) => ({
+        ...prev,
+        [matchingItem.id]: {
+          required,
+          scanned: [...(prev[matchingItem.id]?.scanned || []), scannedProduct.name],
+          barcodes: [...(prev[matchingItem.id]?.barcodes || []), clean],
+        },
+      }));
+
+      displayToast(`✅ ${scannedProduct.name} (${newCount}/${required})`, 'success');
+      addToScanHistory(clean, 'success', `${scannedProduct.name} - ${newCount}/${required}`);
+      playSuccessSound();
+
+      setTimeout(() => barcodeInputRef.current?.focus(), 50);
+    } catch (error: any) {
+      const msg = extractErrorMessage(error);
+      displayToast('Scan error: ' + msg, 'error');
+      addToScanHistory(barcode, 'error', msg);
+      playErrorSound();
+    }
+  };
+
+  const handleFulfillOrder = async () => {
+    if (!orderDetails) return;
+
+    // ✅ prechecks that match backend failure reasons
+    const storeId = Number(orderDetails?.store_id ?? orderDetails?.store?.id ?? 0) || 0;
+    if (!storeId) {
+      displayToast('❌ This order has no store assigned. Assign store first.', 'error');
+      return;
+    }
+
+    const items = orderDetails.items || [];
+
+    const missingBatch = items.filter((it: any) => !getBatchId(it));
+    if (missingBatch.length > 0) {
+      displayToast('❌ Some items have no batch assigned (product_batch_id). Fix order items first.', 'error');
+      console.log('Items missing product_batch_id:', missingBatch);
+      return;
+    }
+
+    const allItemsScanned = items.every((item: any) => {
+      const scanned = scannedItemsRef.current[item.id];
+      const required = Number(item.quantity || 0);
+      return scanned && scanned.barcodes.length === required;
+    });
+
+    if (!allItemsScanned) {
+      displayToast('⚠️ Please scan all required items before fulfilling', 'warning');
+      const missingItems = items.filter((item: any) => {
+        const scanned = scannedItemsRef.current[item.id];
+        const required = Number(item.quantity || 0);
+        return !scanned || scanned.barcodes.length < required;
+      });
+      console.log('❌ Missing items:', missingItems);
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const fulfillments = items.map((item: any) => ({
+        order_item_id: item.id,
+        barcodes: scannedItemsRef.current[item.id].barcodes,
+      }));
+
+      const fulfillRes = unwrap(await orderService.fulfill(orderDetails.id, { fulfillments }));
+      if (fulfillRes?.success === false) throw new Error(fulfillRes?.message || 'Fulfillment failed');
+
+      displayToast('✅ Order fulfilled successfully!', 'success');
+
+      // auto complete (same behavior as your original)
+      setTimeout(async () => {
+        try {
+          const completeRes = unwrap(await orderService.complete(orderDetails.id));
+          if (completeRes?.success === false) throw new Error(completeRes?.message || 'Completion failed');
+
+          displayToast('✅ Order completed! Inventory updated.', 'success');
+
+          setTimeout(() => {
+            setSelectedOrderId(null);
+            setOrderDetails(null);
+            setScannedItems({});
+            setScanHistory([]);
+            fetchPendingOrders();
+          }, 1500);
+        } catch (completeError: any) {
+          displayToast('⚠️ Fulfilled but completion failed: ' + extractErrorMessage(completeError), 'error');
+          setTimeout(() => {
+            setSelectedOrderId(null);
+            fetchPendingOrders();
+          }, 2500);
+        }
+      }, 800);
+    } catch (error: any) {
+      displayToast('❌ Fulfillment failed: ' + extractErrorMessage(error), 'error');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const filteredOrders = useMemo(() => {
+    return pendingOrders.filter(
+      (order) =>
+        order.order_number?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        order.customer?.name?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [pendingOrders, searchQuery]);
 
   const progress = getOrderProgress();
 
+  // =========================
   // ORDER LIST VIEW
+  // =========================
   if (!selectedOrderId) {
     return (
       <div className={darkMode ? 'dark' : ''}>
         <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
           <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
-
           <div className="flex-1 flex flex-col overflow-hidden">
             <Header darkMode={darkMode} setDarkMode={setDarkMode} toggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
 
             <main className="flex-1 overflow-auto p-4 md:p-6">
               <div className="max-w-7xl mx-auto">
-                {/* Header */}
                 <div className="flex items-center justify-between mb-6">
                   <div>
                     <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">📦 Warehouse Fulfillment</h1>
@@ -502,7 +527,6 @@ if (!matchingItem) {
                   </button>
                 </div>
 
-                {/* Search */}
                 <div className="mb-6">
                   <div className="relative">
                     <Search className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
@@ -516,7 +540,6 @@ if (!matchingItem) {
                   </div>
                 </div>
 
-                {/* Orders List */}
                 {isLoadingOrders ? (
                   <div className="text-center py-12">
                     <Loader className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
@@ -550,15 +573,13 @@ if (!matchingItem) {
                               {order.customer?.name} • {order.items?.length || 0} item(s)
                             </p>
                             <p className="text-xs text-gray-500 mt-1">
-                              {new Date(order.order_date).toLocaleDateString()} - {order.store?.name}
+                              {order.order_date ? new Date(order.order_date).toLocaleDateString() : ''} {order.store?.name ? `- ${order.store?.name}` : ''}
                             </p>
                           </div>
                           <div className="text-right">
                             <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
                               Pending Fulfillment
                             </span>
-
-                            {/* ✅ FIXED PRICE RENDERING */}
                             <p className="text-lg font-bold mt-2 text-gray-900 dark:text-white">
                               {formatBDT(order.total_amount, 0)}
                             </p>
@@ -572,24 +593,23 @@ if (!matchingItem) {
             </main>
           </div>
         </div>
-
         {showToast && <Toast message={toastMessage} type={toastType} onClose={() => setShowToast(false)} />}
       </div>
     );
   }
 
+  // =========================
   // FULFILLMENT VIEW
+  // =========================
   return (
     <div className={darkMode ? 'dark' : ''}>
       <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
         <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
-
         <div className="flex-1 flex flex-col overflow-hidden">
           <Header darkMode={darkMode} setDarkMode={setDarkMode} toggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
 
           <main className="flex-1 overflow-auto p-4 md:p-6">
             <div className="max-w-7xl mx-auto">
-              {/* Header */}
               <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
                 <div className="flex items-center gap-4">
                   <button
@@ -618,8 +638,9 @@ if (!matchingItem) {
                     </p>
                   </div>
                 </div>
+
                 <button
-                  onClick={() => setIsScanning(!isScanning)}
+                  onClick={() => setIsScanning((v) => !v)}
                   className={`px-6 py-3 rounded-lg font-medium transition-all flex items-center gap-2 ${
                     isScanning ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'
                   }`}
@@ -629,7 +650,6 @@ if (!matchingItem) {
                 </button>
               </div>
 
-              {/* Progress Bar */}
               <div className="mb-6 p-6 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -651,7 +671,7 @@ if (!matchingItem) {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Left Column - Order Items */}
+                {/* Left */}
                 <div>
                   <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Order Items</h2>
                   <div className="space-y-3">
@@ -660,15 +680,15 @@ if (!matchingItem) {
                         <Loader className="h-6 w-6 animate-spin text-blue-600 mx-auto" />
                       </div>
                     ) : (
-                      orderDetails?.items?.map((item: any) => {
-                        const scanned = scannedItems[item.id];
-                        const isComplete = scanned?.scanned.length === scanned?.required;
-                        const scannedCount = scanned?.scanned.length || 0;
+                      (orderDetails?.items || []).map((item: any) => {
+                        const tracked = scannedItems[item.id];
+                        const required = Number(item.quantity || 0);
+                        const scannedCount = tracked?.scanned.length || 0;
+                        const isComplete = scannedCount === required;
 
-                        // ✅ Pricing calculations (safe + consistent)
                         const unit = parsePrice(item.unit_price);
                         const discount = parsePrice(item.discount_amount);
-                        const qty = Number(item.quantity || 0);
+                        const qty = required;
                         const lineTotal =
                           item.total_amount !== undefined && item.total_amount !== null
                             ? parsePrice(item.total_amount)
@@ -689,27 +709,22 @@ if (!matchingItem) {
                               <div className="flex-1">
                                 <h3 className="font-medium text-gray-900 dark:text-white">{item.product_name}</h3>
                                 <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">SKU: {item.product_sku}</p>
-                                {item.batch_number && <p className="text-xs text-gray-500 dark:text-gray-500">Batch: {item.batch_number}</p>}
 
-                                {/* ✅ Fixed / Added pricing UI */}
+                                {/* show batch from backend-compatible field */}
+                                <p className="text-xs text-gray-500 dark:text-gray-500">
+                                  Batch ID: {getBatchId(item) || '—'}
+                                </p>
+
                                 <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                                   <div className="text-gray-600 dark:text-gray-400">
-                                    Unit:{' '}
-                                    <span className="font-semibold text-gray-900 dark:text-white">
-                                      {formatBDT(unit, 0)}
-                                    </span>
+                                    Unit: <span className="font-semibold text-gray-900 dark:text-white">{formatBDT(unit, 0)}</span>
                                   </div>
                                   <div className="text-gray-600 dark:text-gray-400">
                                     Discount:{' '}
-                                    <span className="font-semibold text-gray-900 dark:text-white">
-                                      {formatBDT(discount, 0)}
-                                    </span>
+                                    <span className="font-semibold text-gray-900 dark:text-white">{formatBDT(discount, 0)}</span>
                                   </div>
                                   <div className="text-gray-600 dark:text-gray-400 sm:text-right">
-                                    Line:{' '}
-                                    <span className="font-semibold text-gray-900 dark:text-white">
-                                      {formatBDT(lineTotal, 0)}
-                                    </span>
+                                    Line: <span className="font-semibold text-gray-900 dark:text-white">{formatBDT(lineTotal, 0)}</span>
                                   </div>
                                 </div>
 
@@ -723,18 +738,16 @@ if (!matchingItem) {
                                         : 'text-gray-600 dark:text-gray-400'
                                     }`}
                                   >
-                                    {scannedCount} / {scanned?.required || 0} scanned
+                                    {scannedCount} / {required} scanned
                                   </div>
                                   {scannedCount > 0 && !isComplete && (
                                     <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                                      <div
-                                        className="h-2 bg-blue-500 transition-all"
-                                        style={{ width: `${(scannedCount / (scanned?.required || 1)) * 100}%` }}
-                                      />
+                                      <div className="h-2 bg-blue-500 transition-all" style={{ width: `${(scannedCount / Math.max(required, 1)) * 100}%` }} />
                                     </div>
                                   )}
                                 </div>
                               </div>
+
                               <div className="ml-4">
                                 {isComplete ? (
                                   <CheckCircle className="h-8 w-8 text-green-600" />
@@ -779,11 +792,10 @@ if (!matchingItem) {
                   </button>
                 </div>
 
-                {/* Right Column - Scanning Interface */}
+                {/* Right */}
                 <div>
                   <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Barcode Scanner</h2>
 
-                  {/* Barcode Input */}
                   <div className="p-6 rounded-lg mb-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
                     <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Scan or Enter Barcode</label>
                     <input
@@ -791,7 +803,12 @@ if (!matchingItem) {
                       type="text"
                       value={currentBarcode}
                       onChange={(e) => setCurrentBarcode(e.target.value)}
-                      onKeyPress={handleBarcodeInput}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && currentBarcode.trim()) {
+                          handleBarcodeScan(currentBarcode.trim());
+                          setCurrentBarcode('');
+                        }
+                      }}
                       disabled={!isScanning}
                       placeholder={isScanning ? 'Scan barcode or type manually...' : 'Start scanning first'}
                       className={`w-full px-4 py-3 rounded-lg border-2 text-lg font-mono transition-all ${
@@ -813,7 +830,6 @@ if (!matchingItem) {
                     </div>
                   </div>
 
-                  {/* Quick Actions */}
                   <div className="grid grid-cols-2 gap-3 mb-4">
                     <button
                       onClick={() => {
@@ -827,17 +843,11 @@ if (!matchingItem) {
                     </button>
                     <button
                       onClick={() => {
-                        setScannedItems((prev) => {
-                          const reset: Record<number, ScannedItemTracking> = {};
-                          orderDetails?.items?.forEach((item: any) => {
-                            reset[item.id] = {
-                              required: item.quantity,
-                              scanned: [],
-                              barcodes: [],
-                            };
-                          });
-                          return reset;
+                        const reset: Record<number, ScannedItemTracking> = {};
+                        (orderDetails?.items || []).forEach((item: any) => {
+                          reset[item.id] = { required: Number(item.quantity || 0), scanned: [], barcodes: [] };
                         });
+                        setScannedItems(reset);
                         setScanHistory([]);
                         displayToast('All scans reset', 'info');
                       }}
@@ -848,7 +858,6 @@ if (!matchingItem) {
                     </button>
                   </div>
 
-                  {/* Scan History */}
                   <div className="p-4 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Scan History</h3>
@@ -856,6 +865,7 @@ if (!matchingItem) {
                         {scanHistory.length} scan{scanHistory.length !== 1 ? 's' : ''}
                       </span>
                     </div>
+
                     <div className="space-y-2 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
                       {scanHistory.length === 0 ? (
                         <div className="text-center py-8">
@@ -907,61 +917,65 @@ if (!matchingItem) {
                     </div>
                   </div>
 
-                  {/* Statistics */}
                   <div className="mt-4 grid grid-cols-3 gap-3">
                     <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
                       <div className="flex items-center gap-2 mb-1">
                         <CheckCircle className="h-4 w-4 text-green-600" />
                         <span className="text-xs font-medium text-green-700 dark:text-green-400">Success</span>
                       </div>
-                      <p className="text-xl font-bold text-green-700 dark:text-green-400">{scanHistory.filter((s) => s.status === 'success').length}</p>
+                      <p className="text-xl font-bold text-green-700 dark:text-green-400">
+                        {scanHistory.filter((s) => s.status === 'success').length}
+                      </p>
                     </div>
                     <div className="p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
                       <div className="flex items-center gap-2 mb-1">
                         <AlertTriangle className="h-4 w-4 text-yellow-600" />
                         <span className="text-xs font-medium text-yellow-700 dark:text-yellow-400">Warning</span>
                       </div>
-                      <p className="text-xl font-bold text-yellow-700 dark:text-yellow-400">{scanHistory.filter((s) => s.status === 'warning').length}</p>
+                      <p className="text-xl font-bold text-yellow-700 dark:text-yellow-400">
+                        {scanHistory.filter((s) => s.status === 'warning').length}
+                      </p>
                     </div>
                     <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
                       <div className="flex items-center gap-2 mb-1">
                         <XCircle className="h-4 w-4 text-red-600" />
                         <span className="text-xs font-medium text-red-700 dark:text-red-400">Error</span>
                       </div>
-                      <p className="text-xl font-bold text-red-700 dark:text-red-400">{scanHistory.filter((s) => s.status === 'error').length}</p>
+                      <p className="text-xl font-bold text-red-700 dark:text-red-400">
+                        {scanHistory.filter((s) => s.status === 'error').length}
+                      </p>
                     </div>
                   </div>
                 </div>
               </div>
+
+              <style jsx>{`
+                .custom-scrollbar::-webkit-scrollbar {
+                  width: 6px;
+                }
+                .custom-scrollbar::-webkit-scrollbar-track {
+                  background: transparent;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb {
+                  background: #cbd5e0;
+                  border-radius: 3px;
+                }
+                .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+                  background: #4a5568;
+                }
+                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                  background: #a0aec0;
+                }
+                .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                  background: #718096;
+                }
+              `}</style>
             </div>
           </main>
         </div>
       </div>
 
-      {/* Toast Notification */}
       {showToast && <Toast message={toastMessage} type={toastType} onClose={() => setShowToast(false)} />}
-
-      <style jsx>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #cbd5e0;
-          border-radius: 3px;
-        }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: #4a5568;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #a0aec0;
-        }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-          background: #718096;
-        }
-      `}</style>
     </div>
   );
 }

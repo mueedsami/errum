@@ -8,6 +8,8 @@ import customerService, { Customer, CustomerOrder } from '@/services/customerSer
 import orderService from '@/services/orderService';
 import batchService, { Batch } from '@/services/batchService';
 import barcodeTrackingService from '@/services/barcodeTrackingService';
+import barcodeOrderMapper from '@/services/barcodeOrderMapper';
+import { connectQZ, getDefaultPrinter } from '@/lib/qz-tray';
 
 type LookupTab = 'customer' | 'order' | 'barcode' | 'batch';
 
@@ -23,6 +25,13 @@ type BarcodeHistoryItem = {
   reference_id?: number | string | null;
   performed_by?: string | null;
   notes?: string | null;
+
+  // Some backends may return these too (we handle safely)
+  order_id?: number | string | null;
+  order_number?: string | null;
+  customer?: any;
+  metadata?: any;
+  meta?: any;
 };
 
 type BarcodeHistoryData = {
@@ -101,6 +110,10 @@ export default function LookupPage() {
   const [barcodeInput, setBarcodeInput] = useState('');
   const [barcodeLoading, setBarcodeLoading] = useState(false);
   const [barcodeData, setBarcodeData] = useState<BarcodeHistoryData | null>(null);
+
+  // Cache to resolve order/customer from barcode history
+  const [orderMetaCache, setOrderMetaCache] = useState<Record<number, { order_number?: string; customer?: { name?: string; phone?: string } }>>({});
+  const [orderMetaLoading, setOrderMetaLoading] = useState(false);
 
   // ======================
   // BATCH LOOKUP (new)
@@ -181,6 +194,192 @@ export default function LookupPage() {
 
   const toggleOrderDetails = (orderId: number) => {
     setExpandedOrderId(expandedOrderId === orderId ? null : orderId);
+  };
+
+  // ---------- Order + Barcode linking helpers ----------
+  const isOrderRef = (refType?: string | null) => (refType || '').toLowerCase().includes('order');
+
+  const extractOrderIdFromHistory = (h: any): number | null => {
+    const meta = h?.metadata || h?.meta || {};
+    const raw =
+      meta.order_id ??
+      h.order_id ??
+      (isOrderRef(h.reference_type) ? h.reference_id : null);
+
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  };
+
+  const isSoldLike = (h: any) => {
+    const t = String(h?.movement_type || '').toLowerCase();
+    return (
+      t.includes('sold') ||
+      t.includes('sale') ||
+      t.includes('sell') ||
+      t.includes('fulfilled') ||
+      t.includes('dispatch') ||
+      t.includes('delivered')
+    );
+  };
+
+  // ---------- Normalize backend Order -> CustomerOrder shape for this page ----------
+  const normalizeOrderToCustomerOrder = (o: any): CustomerOrder => {
+    const items = Array.isArray(o?.items) ? o.items : [];
+    return {
+      id: o.id,
+      order_number: o.order_number,
+      order_date: o.order_date || o.created_at || new Date().toISOString(),
+      order_type: o.order_type || o.orderType || 'unknown',
+      order_type_label: o.order_type_label || o.orderTypeLabel || o.order_type || 'Unknown',
+      total_amount: String(o.total_amount ?? '0'),
+      paid_amount: String(o.paid_amount ?? '0'),
+      outstanding_amount: String(o.outstanding_amount ?? '0'),
+      payment_status: String(o.payment_status ?? 'pending'),
+      status: String(o.status ?? 'pending'),
+      store: o.store || { id: 0, name: '—' },
+      items: items.map((it: any) => {
+        const barcodes: string[] = Array.isArray(it.barcodes)
+          ? it.barcodes
+          : it.barcode
+          ? [it.barcode]
+          : [];
+        return {
+          id: it.id,
+          product_name: it.product_name,
+          product_sku: it.product_sku,
+          quantity: Number(it.quantity ?? 0),
+          unit_price: String(it.unit_price ?? '0'),
+          discount_amount: String(it.discount_amount ?? '0'),
+          total_amount: String(it.total_amount ?? '0'),
+          // extra fields (TS will allow via "any" when read)
+          ...(barcodes.length ? { barcodes } : {}),
+        } as any;
+      }),
+      shipping_address: o.shipping_address,
+      notes: o.notes,
+    };
+  };
+
+  // -----------------------
+  // QZ single barcode print helper (reprint)
+  // -----------------------
+  const printSingleBarcodeLabel = async (params: { barcode: string; productName?: string; price?: string | number }) => {
+    try {
+      setError('');
+      await connectQZ();
+
+      const qz = (window as any)?.qz;
+      if (!qz) throw new Error('QZ Tray not available');
+
+      const printer = await getDefaultPrinter();
+      if (!printer) throw new Error('No default printer found. Set a default printer and try again.');
+
+      const config = qz.configs.create(printer);
+
+      const safeId = params.barcode.replace(/[^a-zA-Z0-9]/g, '');
+      const productName = (params.productName || 'Product').substring(0, 25);
+
+      const priceNum =
+        typeof params.price === 'number' ? params.price : params.price != null ? parseFloat(String(params.price)) : NaN;
+      const showPrice = Number.isFinite(priceNum);
+      const priceText = showPrice ? `৳${Number(priceNum).toLocaleString('en-BD')}` : '';
+
+      const data: any[] = [
+        {
+          type: 'html',
+          format: 'plain',
+          data: `
+            <html>
+              <head>
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
+                <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  @page { size: 40mm 28mm; margin: 0; }
+                  body {
+                    width: 40mm; height: 28mm; margin: 0; padding: 0.5mm 1mm;
+                    font-family: Arial, sans-serif; display: flex; flex-direction: column;
+                    justify-content: space-between; align-items: center;
+                  }
+                  .barcode-container {
+                    width: 100%; text-align: center; display:flex; flex-direction:column;
+                    align-items:center; justify-content:center;
+                  }
+                  .product-name {
+                    font-weight: bold; font-size: 7pt; line-height: 1; margin-bottom: 0.5mm;
+                    max-width: 38mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                  }
+                  .price { font-size: 9pt; font-weight: bold; color: #000; margin-bottom: 0.5mm; line-height: 1; }
+                  svg { max-width: 38mm; height: auto; display: block; }
+                </style>
+              </head>
+              <body>
+                <div class="barcode-container">
+                  <div class="product-name">${productName}</div>
+                  ${showPrice ? `<div class="price">${priceText}</div>` : ``}
+                  <svg id="barcode-${safeId}"></svg>
+                </div>
+                <script>
+                  JsBarcode("#barcode-${safeId}", "${params.barcode}", {
+                    format: "CODE128",
+                    width: 1.3,
+                    height: 30,
+                    displayValue: true,
+                    fontSize: 9,
+                    margin: 0,
+                    marginTop: 1,
+                    marginBottom: 1,
+                    textMargin: 1
+                  });
+                </script>
+              </body>
+            </html>
+          `,
+        },
+      ];
+
+      await qz.print(config, data);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to print barcode');
+    }
+  };
+
+  // -----------------------
+  // Open order by ID (ensures barcodes are fetched via backend mapping)
+  // -----------------------
+  const openOrderById = async (orderId: number) => {
+    setLoading(true);
+    setError('');
+    setSingleOrder(null);
+    setCustomer(null);
+    setOrders([]);
+
+    try {
+      // This checks backend: GET /orders/:id and (optionally) GET /orders/:id/items/:itemId/barcodes
+      const orderWithBarcodes: any = await barcodeOrderMapper.getOrderWithBarcodes(orderId);
+      const orderData = normalizeOrderToCustomerOrder(orderWithBarcodes);
+
+      setOrderNumber(orderWithBarcodes.order_number || `#${orderId}`);
+      setSingleOrder(orderData);
+
+      if (orderWithBarcodes.customer) {
+        const customerData: Customer = {
+          id: orderWithBarcodes.customer.id,
+          customer_code: orderWithBarcodes.customer.customer_code,
+          name: orderWithBarcodes.customer.name,
+          phone: orderWithBarcodes.customer.phone,
+          email: orderWithBarcodes.customer.email,
+          customer_type: 'retail',
+          status: 'active',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        setCustomer(customerData);
+      }
+    } catch (err: any) {
+      setError(err.message || 'An error occurred while loading order data');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // -----------------------
@@ -277,7 +476,6 @@ export default function LookupPage() {
         per_page: 10,
       });
 
-      // prefer batch_number startsWith if possible
       const t = term.trim().toLowerCase();
       const filtered = res.filter((b) => (b.batch_number || '').toLowerCase().includes(t));
 
@@ -338,6 +536,75 @@ export default function LookupPage() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // -----------------------
+  // Enrich barcode history with order/customer data (backend check via /orders/:id)
+  // -----------------------
+  React.useEffect(() => {
+    const run = async () => {
+      if (!barcodeData?.history?.length) return;
+
+      const ids = Array.from(
+        new Set(
+          barcodeData.history
+            .map(extractOrderIdFromHistory)
+            .filter((x: any) => typeof x === 'number' && x)
+        )
+      ) as number[];
+
+      const missing = ids.filter((id) => !orderMetaCache[id]);
+      if (missing.length === 0) return;
+
+      setOrderMetaLoading(true);
+      try {
+        const results = await Promise.all(
+          missing.map(async (id) => {
+            // If backend already returned order_number/customer in history metadata, prefer it
+            const fromHistory = (barcodeData.history || []).find((h: any) => Number(extractOrderIdFromHistory(h)) === id);
+            const historyOrderNumber =
+              fromHistory?.order_number ||
+              fromHistory?.metadata?.order_number ||
+              fromHistory?.meta?.order_number;
+
+            const historyCustomer =
+              fromHistory?.customer ||
+              fromHistory?.metadata?.customer ||
+              fromHistory?.meta?.customer;
+
+            try {
+              const o: any = await orderService.getById(id);
+              return [
+                id,
+                {
+                  order_number: historyOrderNumber || o?.order_number || `#${id}`,
+                  customer: historyCustomer || o?.customer,
+                },
+              ] as const;
+            } catch {
+              return [
+                id,
+                {
+                  order_number: historyOrderNumber || `#${id}`,
+                  customer: historyCustomer || undefined,
+                },
+              ] as const;
+            }
+          })
+        );
+
+        setOrderMetaCache((prev) => {
+          const next = { ...prev };
+          for (const [id, meta] of results) next[id] = meta as any;
+          return next;
+        });
+      } finally {
+        setOrderMetaLoading(false);
+      }
+    };
+
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barcodeData]);
 
   // -----------------------
   // Customer handlers
@@ -425,36 +692,8 @@ export default function LookupPage() {
     setShowOrderSuggestions(false);
     setOrderSuggestions([]);
 
-    setLoading(true);
-    setError('');
-    setSingleOrder(null);
-    setCustomer(null);
-    setOrders([]);
-
-    try {
-      setSingleOrder(selected);
-
-      const fullOrder: any = await orderService.getById(selected.id);
-
-      if (fullOrder.customer) {
-        const customerData: Customer = {
-          id: fullOrder.customer.id,
-          customer_code: fullOrder.customer.customer_code,
-          name: fullOrder.customer.name,
-          phone: fullOrder.customer.phone,
-          email: fullOrder.customer.email,
-          customer_type: 'retail',
-          status: 'active',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        setCustomer(customerData);
-      }
-    } catch (err: any) {
-      setError(err.message || 'An error occurred while loading order data');
-    } finally {
-      setLoading(false);
-    }
+    // Important: fetch with barcodes (backend check via barcodeOrderMapper)
+    await openOrderById(selected.id);
   };
 
   const handleSearchOrder = async () => {
@@ -494,39 +733,8 @@ export default function LookupPage() {
 
       if (!found) found = ordersResponse.data[0];
 
-      const orderData: CustomerOrder = {
-        id: found.id,
-        order_number: found.order_number,
-        order_date: found.order_date,
-        order_type: found.order_type,
-        order_type_label: found.order_type_label || found.order_type,
-        total_amount: found.total_amount,
-        paid_amount: found.paid_amount,
-        outstanding_amount: found.outstanding_amount,
-        payment_status: found.payment_status,
-        status: found.status,
-        store: found.store,
-        items: found.items || [],
-        shipping_address: found.shipping_address,
-        notes: found.notes,
-      };
-
-      setSingleOrder(orderData);
-
-      if (found.customer) {
-        const customerData: Customer = {
-          id: found.customer.id,
-          customer_code: found.customer.customer_code,
-          name: found.customer.name,
-          phone: found.customer.phone,
-          email: found.customer.email,
-          customer_type: 'retail',
-          status: 'active',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        };
-        setCustomer(customerData);
-      }
+      // Fetch full order with barcodes
+      await openOrderById(found.id);
     } catch (err: any) {
       setError(err.response?.data?.message || err.message || 'An error occurred while searching for the order');
     } finally {
@@ -577,7 +785,6 @@ export default function LookupPage() {
   const handleSearchBatch = async (forcedBatchId?: number) => {
     const batchId = forcedBatchId || selectedBatchId;
 
-    // If no selected ID, try parsing numeric ID from input
     let finalBatchId: number | null = batchId ?? null;
     if (!finalBatchId) {
       const maybe = Number(batchQuery.trim());
@@ -866,6 +1073,18 @@ export default function LookupPage() {
                                         </tbody>
                                       </table>
                                     </div>
+                                    <div className="mt-2">
+                                      <button
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          setActiveTab('order');
+                                          await openOrderById(order.id);
+                                        }}
+                                        className="text-[10px] px-3 py-1.5 rounded bg-black dark:bg-white text-white dark:text-black hover:opacity-90"
+                                      >
+                                        Open in Order Lookup (Barcodes)
+                                      </button>
+                                    </div>
                                   </div>
 
                                   <div className="grid grid-cols-2 gap-2">
@@ -910,7 +1129,7 @@ export default function LookupPage() {
               )}
 
               {/* ======================
-                  ORDER PANEL (existing)
+                  ORDER PANEL (updated: show barcodes + reprint)
                   ====================== */}
               {activeTab === 'order' && (
                 <>
@@ -984,7 +1203,7 @@ export default function LookupPage() {
                     <div className="border border-gray-200 dark:border-gray-800 rounded-md overflow-hidden">
                       <div className="bg-gray-50 dark:bg-gray-900 px-3 py-2 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
                         <h2 className="text-xs font-semibold text-black dark:text-white uppercase tracking-wide">
-                          Order Details
+                          Order Details (with Barcodes)
                         </h2>
                         <span className="text-[9px] px-2 py-0.5 bg-black dark:bg-white text-white dark:text-black rounded font-medium">
                           1
@@ -1017,22 +1236,66 @@ export default function LookupPage() {
                               <tr>
                                 <th className="px-2 py-1.5 text-left text-[9px] font-semibold text-gray-700 dark:text-gray-300 uppercase">Product</th>
                                 <th className="px-2 py-1.5 text-right text-[9px] font-semibold text-gray-700 dark:text-gray-300 uppercase">Qty</th>
+                                <th className="px-2 py-1.5 text-left text-[9px] font-semibold text-gray-700 dark:text-gray-300 uppercase">Barcodes</th>
                                 <th className="px-2 py-1.5 text-right text-[9px] font-semibold text-gray-700 dark:text-gray-300 uppercase">Total</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                              {singleOrder.items.map((item) => (
-                                <tr key={item.id}>
-                                  <td className="px-2 py-1.5 font-medium text-black dark:text-white">
-                                    {item.product_name}
-                                    <div className="text-[9px] text-gray-500">{item.product_sku}</div>
-                                  </td>
-                                  <td className="px-2 py-1.5 text-right text-black dark:text-white">{item.quantity}</td>
-                                  <td className="px-2 py-1.5 text-right font-semibold text-black dark:text-white">
-                                    {formatCurrency(item.total_amount)}
-                                  </td>
-                                </tr>
-                              ))}
+                              {singleOrder.items.map((item: any) => {
+                                const barcodes: string[] = Array.isArray(item?.barcodes)
+                                  ? item.barcodes
+                                  : item?.barcode
+                                  ? [item.barcode]
+                                  : [];
+
+                                return (
+                                  <tr key={item.id}>
+                                    <td className="px-2 py-1.5 font-medium text-black dark:text-white">
+                                      {item.product_name}
+                                      <div className="text-[9px] text-gray-500">{item.product_sku}</div>
+                                    </td>
+                                    <td className="px-2 py-1.5 text-right text-black dark:text-white">{item.quantity}</td>
+
+                                    <td className="px-2 py-1.5">
+                                      {barcodes.length > 0 ? (
+                                        <div className="flex flex-col gap-1">
+                                          {barcodes.slice(0, 12).map((code: string) => (
+                                            <div key={code} className="flex items-center gap-2">
+                                              <span className="text-[10px] font-semibold text-black dark:text-white">
+                                                {code}
+                                              </span>
+                                              <button
+                                                onClick={() =>
+                                                  printSingleBarcodeLabel({
+                                                    barcode: code,
+                                                    productName: item.product_name,
+                                                    price: item.unit_price,
+                                                  })
+                                                }
+                                                className="text-[10px] px-2 py-0.5 rounded bg-black dark:bg-white text-white dark:text-black hover:opacity-90"
+                                                title="Reprint this barcode"
+                                              >
+                                                Reprint
+                                              </button>
+                                            </div>
+                                          ))}
+                                          {barcodes.length > 12 && (
+                                            <span className="text-[10px] text-gray-500">
+                                              +{barcodes.length - 12} more…
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <span className="text-[10px] text-gray-500 dark:text-gray-400">No barcodes</span>
+                                      )}
+                                    </td>
+
+                                    <td className="px-2 py-1.5 text-right font-semibold text-black dark:text-white">
+                                      {formatCurrency(item.total_amount)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                             </tbody>
                           </table>
                         </div>
@@ -1050,7 +1313,7 @@ export default function LookupPage() {
               )}
 
               {/* ======================
-                  BARCODE PANEL (new)
+                  BARCODE PANEL (updated: show order# + customer for sold/order refs)
                   ====================== */}
               {activeTab === 'barcode' && (
                 <>
@@ -1129,9 +1392,14 @@ export default function LookupPage() {
                           <h2 className="text-xs font-semibold text-black dark:text-white uppercase tracking-wide">
                             Barcode Movement History
                           </h2>
-                          <span className="text-[9px] px-2 py-0.5 bg-black dark:bg-white text-white dark:text-black rounded font-medium">
-                            {barcodeData.history?.length || 0}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            {orderMetaLoading && (
+                              <span className="text-[10px] text-gray-500 dark:text-gray-400">loading order/customer…</span>
+                            )}
+                            <span className="text-[9px] px-2 py-0.5 bg-black dark:bg-white text-white dark:text-black rounded font-medium">
+                              {barcodeData.history?.length || 0}
+                            </span>
+                          </div>
                         </div>
 
                         <div className="overflow-x-auto">
@@ -1143,31 +1411,73 @@ export default function LookupPage() {
                                 <th className="px-2 py-2 text-left text-[9px] font-semibold text-gray-700 dark:text-gray-300 uppercase">From</th>
                                 <th className="px-2 py-2 text-left text-[9px] font-semibold text-gray-700 dark:text-gray-300 uppercase">To</th>
                                 <th className="px-2 py-2 text-left text-[9px] font-semibold text-gray-700 dark:text-gray-300 uppercase">Status</th>
+                                <th className="px-2 py-2 text-left text-[9px] font-semibold text-gray-700 dark:text-gray-300 uppercase">Order #</th>
+                                <th className="px-2 py-2 text-left text-[9px] font-semibold text-gray-700 dark:text-gray-300 uppercase">Customer</th>
                                 <th className="px-2 py-2 text-left text-[9px] font-semibold text-gray-700 dark:text-gray-300 uppercase">By</th>
                                 <th className="px-2 py-2 text-left text-[9px] font-semibold text-gray-700 dark:text-gray-300 uppercase">Ref</th>
                               </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                              {(barcodeData.history || []).map((h) => (
-                                <tr key={h.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/40">
-                                  <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{formatDate(h.date)}</td>
-                                  <td className="px-2 py-2 font-semibold text-black dark:text-white">
-                                    {h.movement_type || '—'}
-                                  </td>
-                                  <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{h.from_store || '—'}</td>
-                                  <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{h.to_store || '—'}</td>
-                                  <td className="px-2 py-2 text-gray-700 dark:text-gray-300">
-                                    {(h.status_before || '—') + ' → ' + (h.status_after || '—')}
-                                  </td>
-                                  <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{h.performed_by || '—'}</td>
-                                  <td className="px-2 py-2 text-gray-700 dark:text-gray-300">
-                                    {h.reference_type ? `${h.reference_type}#${h.reference_id ?? ''}` : '—'}
-                                  </td>
-                                </tr>
-                              ))}
+                              {(barcodeData.history || []).map((h: any) => {
+                                const orderId = extractOrderIdFromHistory(h);
+                                const meta = orderId ? orderMetaCache[orderId] : null;
+
+                                const show = Boolean(orderId) && (isSoldLike(h) || isOrderRef(h.reference_type));
+
+                                return (
+                                  <tr key={h.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/40">
+                                    <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{formatDate(h.date)}</td>
+                                    <td className="px-2 py-2 font-semibold text-black dark:text-white">
+                                      {h.movement_type || '—'}
+                                    </td>
+                                    <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{h.from_store || '—'}</td>
+                                    <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{h.to_store || '—'}</td>
+                                    <td className="px-2 py-2 text-gray-700 dark:text-gray-300">
+                                      {(h.status_before || '—') + ' → ' + (h.status_after || '—')}
+                                    </td>
+
+                                    {/* Order # */}
+                                    <td className="px-2 py-2">
+                                      {show && orderId ? (
+                                        <button
+                                          onClick={async () => {
+                                            setActiveTab('order');
+                                            await openOrderById(orderId);
+                                          }}
+                                          className="text-[10px] font-semibold text-black dark:text-white hover:underline"
+                                          title="Open order lookup"
+                                        >
+                                          {meta?.order_number || `#${orderId}`}
+                                        </button>
+                                      ) : (
+                                        <span className="text-[10px] text-gray-500 dark:text-gray-400">—</span>
+                                      )}
+                                    </td>
+
+                                    {/* Customer */}
+                                    <td className="px-2 py-2">
+                                      {show && meta?.customer ? (
+                                        <span className="text-[10px] text-black dark:text-white">
+                                          <span className="font-semibold">{meta.customer.name || 'Customer'}</span>
+                                          {meta.customer.phone ? (
+                                            <span className="text-gray-500 dark:text-gray-400"> • {meta.customer.phone}</span>
+                                          ) : null}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[10px] text-gray-500 dark:text-gray-400">—</span>
+                                      )}
+                                    </td>
+
+                                    <td className="px-2 py-2 text-gray-700 dark:text-gray-300">{h.performed_by || '—'}</td>
+                                    <td className="px-2 py-2 text-gray-700 dark:text-gray-300">
+                                      {h.reference_type ? `${h.reference_type}#${h.reference_id ?? ''}` : '—'}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                               {!barcodeData.history?.length && (
                                 <tr>
-                                  <td colSpan={7} className="px-3 py-6 text-center text-xs text-gray-500 dark:text-gray-400">
+                                  <td colSpan={9} className="px-3 py-6 text-center text-xs text-gray-500 dark:text-gray-400">
                                     No movement history found for this barcode.
                                   </td>
                                 </tr>

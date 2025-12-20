@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Package,
   Scan,
@@ -16,9 +16,8 @@ import {
 } from 'lucide-react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
-import orderService from '@/services/orderService';
-import barcodeService from '@/services/barcodeService';
 import Toast from '@/components/Toast';
+import axios from '@/lib/axios';
 
 interface ScannedItemTracking {
   required: number;
@@ -33,6 +32,7 @@ interface ScanHistoryEntry {
   timestamp: string;
 }
 
+// Helper function to parse prices correctly (handles "৳2,000.00", "2,000", etc.)
 const parsePrice = (value: any): number => {
   if (value === null || value === undefined) return 0;
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -66,23 +66,15 @@ const formatBDT = (value: any, decimals: 0 | 2 = 0) => {
   }
 };
 
-// ✅ normalize axios/service responses safely (works if service returns res.data or raw)
-const unwrap = (res: any) => {
-  if (!res) return res;
-  if (typeof res === 'object' && 'success' in res) return res;
-  if (res?.data && typeof res.data === 'object') return res.data;
-  return res;
-};
-
 const extractErrorMessage = (err: any) => {
   const data = err?.response?.data;
   if (typeof data?.message === 'string') return data.message;
 
-  // Laravel validation
   if (data?.errors && typeof data.errors === 'object') {
-    const firstKey = Object.keys(data.errors)[0];
-    const firstMsg = Array.isArray(data.errors[firstKey]) ? data.errors[firstKey][0] : String(data.errors[firstKey]);
-    return firstMsg || 'Validation failed';
+    const k = Object.keys(data.errors)[0];
+    const v = data.errors[k];
+    if (Array.isArray(v) && v[0]) return v[0];
+    if (typeof v === 'string') return v;
   }
 
   if (typeof err?.message === 'string') return err.message;
@@ -119,22 +111,23 @@ export default function WarehouseFulfillmentPage() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    fetchPendingOrders();
-
+    fetchAssignedOrders();
     if (typeof window !== 'undefined') {
       audioRef.current = new Audio('/sounds/beep.mp3');
     }
   }, []);
 
   useEffect(() => {
-    if (selectedOrderId) fetchOrderDetails(selectedOrderId);
+    if (selectedOrderId) {
+      fetchOrderDetails(selectedOrderId);
+    }
   }, [selectedOrderId]);
 
   useEffect(() => {
-    if (isScanning) {
+    if (isScanning && barcodeInputRef.current) {
       setTimeout(() => barcodeInputRef.current?.focus(), 50);
     }
-  }, [isScanning, orderDetails]);
+  }, [isScanning]);
 
   const displayToast = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
     setToastMessage(message);
@@ -150,7 +143,7 @@ export default function WarehouseFulfillmentPage() {
     }
   };
 
-  // ✅ reliable error beep (no broken base64 wav)
+  // simple error beep using WebAudio (no broken base64)
   const playErrorSound = () => {
     try {
       const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -182,23 +175,21 @@ export default function WarehouseFulfillmentPage() {
     setScanHistory((prev) => [entry, ...prev.slice(0, 49)]);
   };
 
-  const fetchPendingOrders = async () => {
+  // ====== OPTION C API CALLS (BACKEND VERIFIED) ======
+  const fetchAssignedOrders = async () => {
     setIsLoadingOrders(true);
     try {
-      const [socialCommerceRes, ecommerceRes] = await Promise.all([
-        orderService.getPendingFulfillment({ per_page: 100, order_type: 'social_commerce' }),
-        orderService.getPendingFulfillment({ per_page: 100, order_type: 'ecommerce' }),
-      ]);
+      const res = await axios.get('/store/fulfillment/orders/assigned', {
+        params: { per_page: 100, status: 'assigned_to_store,picking' },
+      });
 
-      const socialCommerce = unwrap(socialCommerceRes)?.data ?? unwrap(socialCommerceRes) ?? [];
-      const ecommerce = unwrap(ecommerceRes)?.data ?? unwrap(ecommerceRes) ?? [];
+      const orders = res?.data?.data?.orders || [];
+      // backend returns oldest first, but your UI expects newest first; keep your behavior:
+      orders.sort((a: any, b: any) => new Date(b.order_date || b.created_at).getTime() - new Date(a.order_date || a.created_at).getTime());
 
-      const allOrders = [...(socialCommerce || []), ...(ecommerce || [])];
-
-      allOrders.sort((a: any, b: any) => new Date(b.order_date).getTime() - new Date(a.order_date).getTime());
-      setPendingOrders(allOrders);
+      setPendingOrders(orders);
     } catch (error: any) {
-      displayToast('Error loading orders: ' + extractErrorMessage(error), 'error');
+      displayToast('Error loading assigned orders: ' + extractErrorMessage(error), 'error');
     } finally {
       setIsLoadingOrders(false);
     }
@@ -207,17 +198,23 @@ export default function WarehouseFulfillmentPage() {
   const fetchOrderDetails = async (orderId: number) => {
     setIsLoadingDetails(true);
     try {
-      const res = unwrap(await orderService.getById(orderId));
-      const order = res?.data ?? res; // supports both shapes
+      const res = await axios.get(`/store/fulfillment/orders/${orderId}`);
+      const order = res?.data?.data?.order;
+      if (!order) throw new Error('Order not found');
 
       setOrderDetails(order);
 
+      // Init tracking: In store-fulfillment flow, each order item is scanned ONCE (product_barcode_id set).
       const initial: Record<number, ScannedItemTracking> = {};
-      (order?.items || []).forEach((item: any) => {
+      (order.items || []).forEach((item: any) => {
+        const alreadyScanned = !!item.product_barcode_id;
+        const scannedBarcode = item?.scanned_barcode?.barcode || item?.barcode?.barcode || null;
+        const productName = item?.product?.name || item?.product_name || 'Item';
+
         initial[item.id] = {
-          required: Number(item.quantity || 0),
-          scanned: [],
-          barcodes: [],
+          required: 1,
+          scanned: alreadyScanned ? [productName] : [],
+          barcodes: alreadyScanned && scannedBarcode ? [scannedBarcode] : [],
         };
       });
 
@@ -232,15 +229,20 @@ export default function WarehouseFulfillmentPage() {
 
   const getOrderProgress = () => {
     if (!orderDetails) return { scanned: 0, total: 0, percentage: 0 };
-    let scanned = 0;
-    let total = 0;
 
-    (orderDetails.items || []).forEach((item: any) => {
-      total += Number(item.quantity || 0);
-      scanned += scannedItems[item.id]?.scanned.length || 0;
-    });
+    const items = orderDetails.items || [];
+    const total = items.length;
 
-    return { scanned, total, percentage: total > 0 ? (scanned / total) * 100 : 0 };
+    const scanned = items.reduce((acc: number, item: any) => {
+      const has = (scannedItems[item.id]?.barcodes?.length || 0) > 0 || !!item.product_barcode_id;
+      return acc + (has ? 1 : 0);
+    }, 0);
+
+    return {
+      scanned,
+      total,
+      percentage: total > 0 ? (scanned / total) * 100 : 0,
+    };
   };
 
   const getOrderTypeBadge = (orderType: string) => {
@@ -252,6 +254,7 @@ export default function WarehouseFulfillmentPage() {
         </span>
       );
     }
+
     if (orderType === 'ecommerce') {
       return (
         <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
@@ -260,23 +263,11 @@ export default function WarehouseFulfillmentPage() {
         </span>
       );
     }
+
     return null;
   };
 
-  // ✅ backend-aligned field normalization
-  const getProductId = (item: any) => Number(item?.product_id ?? item?.product?.id ?? item?.productId ?? 0) || 0;
-
-  // IMPORTANT: backend uses product_batch_id
-  const getBatchId = (item: any) =>
-    Number(
-      item?.product_batch_id ??
-        item?.productBatchId ??
-        item?.batch_id ??
-        item?.batchId ??
-        item?.batch?.id ??
-        0
-    ) || 0;
-
+  // ====== SCAN (Option C): try barcode against unscanned items until backend accepts ======
   const handleBarcodeScan = async (barcode: string) => {
     if (!orderDetails) {
       displayToast('No order selected', 'error');
@@ -287,6 +278,7 @@ export default function WarehouseFulfillmentPage() {
     if (!clean) return;
 
     try {
+      // quick format check
       if (clean.length < 5) {
         displayToast('Invalid barcode format', 'error');
         addToScanHistory(clean, 'error', 'Invalid format');
@@ -294,9 +286,8 @@ export default function WarehouseFulfillmentPage() {
         return;
       }
 
-      // ✅ duplicate check using latest state
-      const latest = scannedItemsRef.current;
-      const alreadyScanned = Object.values(latest).some((it) => it.barcodes.includes(clean));
+      // local duplicate check
+      const alreadyScanned = Object.values(scannedItemsRef.current).some((item) => item.barcodes.includes(clean));
       if (alreadyScanned) {
         displayToast('⚠️ Barcode already scanned for this order', 'warning');
         addToScanHistory(clean, 'warning', 'Duplicate scan');
@@ -304,103 +295,101 @@ export default function WarehouseFulfillmentPage() {
         return;
       }
 
-      const scanRes = unwrap(await barcodeService.scanBarcode(clean));
-      const data = scanRes?.data ?? scanRes;
-
-      if (!scanRes?.success || !data?.product) {
-        displayToast('❌ Barcode not found in system', 'error');
-        addToScanHistory(clean, 'error', scanRes?.message || 'Barcode not found');
-        playErrorSound();
-        return;
-      }
-
-      const scannedProduct = data.product;
-      const scannedBatch = data.current_batch;
-      const isAvailable = !!data.is_available;
-
-      if (!isAvailable) {
-        displayToast('❌ This barcode is not available (already sold/defective/inactive)', 'error');
-        addToScanHistory(clean, 'error', `${scannedProduct.name} - Not available`);
-        playErrorSound();
-        return;
-      }
-
-      const scannedProductId = Number(scannedProduct?.id ?? 0) || 0;
-      const scannedBatchId = Number(scannedBatch?.id ?? 0) || 0;
-
       const items = orderDetails.items || [];
-      const candidates = items.filter((item: any) => getProductId(item) === scannedProductId);
+      const unscannedItems = items.filter((it: any) => !it.product_barcode_id && (scannedItemsRef.current[it.id]?.barcodes?.length || 0) === 0);
 
-      if (candidates.length === 0) {
-        displayToast(`❌ "${scannedProduct.name}" not in this order`, 'error');
-        addToScanHistory(clean, 'error', `${scannedProduct.name} - Not in order`);
+      if (unscannedItems.length === 0) {
+        displayToast('⚠️ All items are already scanned', 'warning');
+        addToScanHistory(clean, 'warning', 'Order already complete');
         playErrorSound();
         return;
       }
 
-      // ✅ enforce batch same as backend (product_batch_id)
-      const batchOk = candidates.filter((item: any) => {
-        const orderItemBatchId = getBatchId(item);
+      // Try each unscanned item until one matches the barcode product (backend decides)
+      let lastMismatchMsg: string | null = null;
 
-        // If order expects a batch but scanned batch missing => reject
-        if (orderItemBatchId && !scannedBatchId) return false;
+      for (const item of unscannedItems) {
+        try {
+          const res = await axios.post(`/store/fulfillment/orders/${orderDetails.id}/scan-barcode`, {
+            barcode: clean,
+            order_item_id: item.id,
+          });
 
-        // If order expects batch => must match
-        if (orderItemBatchId) return orderItemBatchId === scannedBatchId;
+          // success
+          const data = res?.data?.data;
+          const orderItem = data?.order_item;
+          const scannedBarcode = data?.scanned_barcode;
+          const productName =
+            orderItem?.product?.name ||
+            orderItem?.product_name ||
+            item?.product?.name ||
+            item?.product_name ||
+            'Item';
 
-        // If order has NO batch assigned => fulfillment will fail later in backend.
-        // Better to block early with a clear message.
-        return false;
-      });
+          // update scanned UI
+          setScannedItems((prev) => ({
+            ...prev,
+            [item.id]: {
+              required: 1,
+              scanned: [productName],
+              barcodes: [clean],
+            },
+          }));
 
-      if (batchOk.length === 0) {
-        displayToast(`❌ Batch mismatch (or order item has no batch assigned).`, 'error');
-        addToScanHistory(clean, 'error', `${scannedProduct.name} - Batch mismatch / no batch in order item`);
-        playErrorSound();
-        return;
+          // also update orderDetails item so UI remains consistent even after refresh logic
+          setOrderDetails((prev: any) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              status: data?.order_status || prev.status,
+              items: (prev.items || []).map((it: any) =>
+                it.id === item.id
+                  ? {
+                      ...it,
+                      product_barcode_id: orderItem?.product_barcode_id || scannedBarcode?.id || true,
+                      product_batch_id: orderItem?.product_batch_id || scannedBarcode?.batch_id || it.product_batch_id,
+                      scanned_barcode: scannedBarcode || it.scanned_barcode,
+                    }
+                  : it
+              ),
+            };
+          });
+
+          displayToast(`✅ ${productName} scanned`, 'success');
+          addToScanHistory(clean, 'success', `${productName} - scanned`);
+          playSuccessSound();
+
+          setTimeout(() => barcodeInputRef.current?.focus(), 80);
+          return;
+        } catch (innerErr: any) {
+          const msg = extractErrorMessage(innerErr);
+
+          // If barcode isn't in this store / isn't in_shop => stop immediately (no point trying other items)
+          if (innerErr?.response?.status === 404) {
+            displayToast('❌ ' + msg, 'error');
+            addToScanHistory(clean, 'error', msg);
+            playErrorSound();
+            return;
+          }
+
+          // If product mismatch, try next item
+          if (innerErr?.response?.status === 400 && msg.toLowerCase().includes('does not match')) {
+            lastMismatchMsg = msg;
+            continue;
+          }
+
+          // Other errors (validation, already scanned etc) -> stop and show
+          displayToast('❌ ' + msg, 'error');
+          addToScanHistory(clean, 'error', msg);
+          playErrorSound();
+          return;
+        }
       }
 
-      // pick an item that still needs scanning
-      const latest2 = scannedItemsRef.current;
-      const matchingItem = batchOk.find((item: any) => {
-        const required = Number(item.quantity || 0);
-        const already = latest2[item.id]?.scanned.length || 0;
-        return already < required;
-      });
-
-      if (!matchingItem) {
-        displayToast(`⚠️ "${scannedProduct.name}" already fully scanned`, 'warning');
-        addToScanHistory(clean, 'warning', `${scannedProduct.name} - Already complete`);
-        playErrorSound();
-        return;
-      }
-
-      const required = Number(matchingItem.quantity || 0);
-      const current = latest2[matchingItem.id] || { required, scanned: [], barcodes: [] };
-
-      if (current.scanned.length >= required) {
-        displayToast(`⚠️ Item already complete (${required}/${required})`, 'warning');
-        addToScanHistory(clean, 'warning', `${scannedProduct.name} - Already complete`);
-        playErrorSound();
-        return;
-      }
-
-      const newCount = current.scanned.length + 1;
-
-      setScannedItems((prev) => ({
-        ...prev,
-        [matchingItem.id]: {
-          required,
-          scanned: [...(prev[matchingItem.id]?.scanned || []), scannedProduct.name],
-          barcodes: [...(prev[matchingItem.id]?.barcodes || []), clean],
-        },
-      }));
-
-      displayToast(`✅ ${scannedProduct.name} (${newCount}/${required})`, 'success');
-      addToScanHistory(clean, 'success', `${scannedProduct.name} - ${newCount}/${required}`);
-      playSuccessSound();
-
-      setTimeout(() => barcodeInputRef.current?.focus(), 50);
+      // If we reached here, it mismatched all items
+      displayToast('❌ This barcode does not match any remaining order item', 'error');
+      addToScanHistory(clean, 'error', lastMismatchMsg || 'No matching order item');
+      playErrorSound();
     } catch (error: any) {
       const msg = extractErrorMessage(error);
       displayToast('Scan error: ' + msg, 'error');
@@ -409,79 +398,31 @@ export default function WarehouseFulfillmentPage() {
     }
   };
 
+  // ====== FINISH (Option C): mark ready-for-shipment ======
   const handleFulfillOrder = async () => {
     if (!orderDetails) return;
 
-    // ✅ prechecks that match backend failure reasons
-    const storeId = Number(orderDetails?.store_id ?? orderDetails?.store?.id ?? 0) || 0;
-    if (!storeId) {
-      displayToast('❌ This order has no store assigned. Assign store first.', 'error');
-      return;
-    }
-
-    const items = orderDetails.items || [];
-
-    const missingBatch = items.filter((it: any) => !getBatchId(it));
-    if (missingBatch.length > 0) {
-      displayToast('❌ Some items have no batch assigned (product_batch_id). Fix order items first.', 'error');
-      console.log('Items missing product_batch_id:', missingBatch);
-      return;
-    }
-
-    const allItemsScanned = items.every((item: any) => {
-      const scanned = scannedItemsRef.current[item.id];
-      const required = Number(item.quantity || 0);
-      return scanned && scanned.barcodes.length === required;
-    });
-
-    if (!allItemsScanned) {
-      displayToast('⚠️ Please scan all required items before fulfilling', 'warning');
-      const missingItems = items.filter((item: any) => {
-        const scanned = scannedItemsRef.current[item.id];
-        const required = Number(item.quantity || 0);
-        return !scanned || scanned.barcodes.length < required;
-      });
-      console.log('❌ Missing items:', missingItems);
+    const progress = getOrderProgress();
+    if (progress.percentage !== 100) {
+      displayToast('⚠️ Please scan all items before finishing', 'warning');
       return;
     }
 
     setIsProcessing(true);
     try {
-      const fulfillments = items.map((item: any) => ({
-        order_item_id: item.id,
-        barcodes: scannedItemsRef.current[item.id].barcodes,
-      }));
+      await axios.post(`/store/fulfillment/orders/${orderDetails.id}/ready-for-shipment`);
 
-      const fulfillRes = unwrap(await orderService.fulfill(orderDetails.id, { fulfillments }));
-      if (fulfillRes?.success === false) throw new Error(fulfillRes?.message || 'Fulfillment failed');
+      displayToast('✅ Order marked as READY FOR SHIPMENT', 'success');
 
-      displayToast('✅ Order fulfilled successfully!', 'success');
-
-      // auto complete (same behavior as your original)
-      setTimeout(async () => {
-        try {
-          const completeRes = unwrap(await orderService.complete(orderDetails.id));
-          if (completeRes?.success === false) throw new Error(completeRes?.message || 'Completion failed');
-
-          displayToast('✅ Order completed! Inventory updated.', 'success');
-
-          setTimeout(() => {
-            setSelectedOrderId(null);
-            setOrderDetails(null);
-            setScannedItems({});
-            setScanHistory([]);
-            fetchPendingOrders();
-          }, 1500);
-        } catch (completeError: any) {
-          displayToast('⚠️ Fulfilled but completion failed: ' + extractErrorMessage(completeError), 'error');
-          setTimeout(() => {
-            setSelectedOrderId(null);
-            fetchPendingOrders();
-          }, 2500);
-        }
-      }, 800);
+      setTimeout(() => {
+        setSelectedOrderId(null);
+        setOrderDetails(null);
+        setScannedItems({});
+        setScanHistory([]);
+        fetchAssignedOrders();
+      }, 1200);
     } catch (error: any) {
-      displayToast('❌ Fulfillment failed: ' + extractErrorMessage(error), 'error');
+      displayToast('❌ Failed: ' + extractErrorMessage(error), 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -497,28 +438,28 @@ export default function WarehouseFulfillmentPage() {
 
   const progress = getOrderProgress();
 
-  // =========================
   // ORDER LIST VIEW
-  // =========================
   if (!selectedOrderId) {
     return (
       <div className={darkMode ? 'dark' : ''}>
         <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
           <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
+
           <div className="flex-1 flex flex-col overflow-hidden">
             <Header darkMode={darkMode} setDarkMode={setDarkMode} toggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
 
             <main className="flex-1 overflow-auto p-4 md:p-6">
               <div className="max-w-7xl mx-auto">
+                {/* Header */}
                 <div className="flex items-center justify-between mb-6">
                   <div>
-                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">📦 Warehouse Fulfillment</h1>
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">📦 Store Fulfillment</h1>
                     <p className="mt-2 text-gray-600 dark:text-gray-400">
-                      Scan barcodes to fulfill pending social commerce & e-commerce orders
+                      Scan barcodes to fulfill assigned orders (Option C backend flow)
                     </p>
                   </div>
                   <button
-                    onClick={fetchPendingOrders}
+                    onClick={fetchAssignedOrders}
                     disabled={isLoadingOrders}
                     className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50"
                   >
@@ -527,6 +468,7 @@ export default function WarehouseFulfillmentPage() {
                   </button>
                 </div>
 
+                {/* Search */}
                 <div className="mb-6">
                   <div className="relative">
                     <Search className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
@@ -540,6 +482,7 @@ export default function WarehouseFulfillmentPage() {
                   </div>
                 </div>
 
+                {/* Orders List */}
                 {isLoadingOrders ? (
                   <div className="text-center py-12">
                     <Loader className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
@@ -549,10 +492,10 @@ export default function WarehouseFulfillmentPage() {
                   <div className="text-center py-12 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800">
                     <Package className="mx-auto h-12 w-12 mb-4 text-gray-400" />
                     <p className="text-lg font-medium text-gray-600 dark:text-gray-400">
-                      {searchQuery ? 'No matching orders' : 'No pending fulfillment orders'}
+                      {searchQuery ? 'No matching orders' : 'No assigned orders to fulfill'}
                     </p>
                     {!searchQuery && (
-                      <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">All orders have been fulfilled or completed</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-500 mt-2">No orders in assigned_to_store / picking</p>
                     )}
                   </div>
                 ) : (
@@ -573,12 +516,12 @@ export default function WarehouseFulfillmentPage() {
                               {order.customer?.name} • {order.items?.length || 0} item(s)
                             </p>
                             <p className="text-xs text-gray-500 mt-1">
-                              {order.order_date ? new Date(order.order_date).toLocaleDateString() : ''} {order.store?.name ? `- ${order.store?.name}` : ''}
+                              {new Date(order.created_at || order.order_date).toLocaleDateString()} - {order.store?.name}
                             </p>
                           </div>
                           <div className="text-right">
                             <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400">
-                              Pending Fulfillment
+                              {order.status || 'Assigned'}
                             </span>
                             <p className="text-lg font-bold mt-2 text-gray-900 dark:text-white">
                               {formatBDT(order.total_amount, 0)}
@@ -593,23 +536,24 @@ export default function WarehouseFulfillmentPage() {
             </main>
           </div>
         </div>
+
         {showToast && <Toast message={toastMessage} type={toastType} onClose={() => setShowToast(false)} />}
       </div>
     );
   }
 
-  // =========================
   // FULFILLMENT VIEW
-  // =========================
   return (
     <div className={darkMode ? 'dark' : ''}>
       <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
         <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
+
         <div className="flex-1 flex flex-col overflow-hidden">
           <Header darkMode={darkMode} setDarkMode={setDarkMode} toggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
 
           <main className="flex-1 overflow-auto p-4 md:p-6">
             <div className="max-w-7xl mx-auto">
+              {/* Header */}
               <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
                 <div className="flex items-center gap-4">
                   <button
@@ -635,12 +579,13 @@ export default function WarehouseFulfillmentPage() {
                       {orderDetails?.total_amount != null && (
                         <span className="ml-2 text-gray-500 dark:text-gray-500">• Total: {formatBDT(orderDetails.total_amount, 0)}</span>
                       )}
+                      {orderDetails?.status && <span className="ml-2 text-gray-500 dark:text-gray-500">• Status: {orderDetails.status}</span>}
                     </p>
                   </div>
                 </div>
 
                 <button
-                  onClick={() => setIsScanning((v) => !v)}
+                  onClick={() => setIsScanning(!isScanning)}
                   className={`px-6 py-3 rounded-lg font-medium transition-all flex items-center gap-2 ${
                     isScanning ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'
                   }`}
@@ -650,6 +595,7 @@ export default function WarehouseFulfillmentPage() {
                 </button>
               </div>
 
+              {/* Progress Bar */}
               <div className="mb-6 p-6 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -665,13 +611,13 @@ export default function WarehouseFulfillmentPage() {
                 </div>
                 {progress.percentage === 100 && (
                   <p className="text-sm text-green-600 dark:text-green-400 mt-2 font-medium">
-                    ✅ All items scanned! Ready to fulfill order.
+                    ✅ All items scanned! Ready to mark order as ready-for-shipment.
                   </p>
                 )}
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Left */}
+                {/* Left Column - Order Items */}
                 <div>
                   <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Order Items</h2>
                   <div className="space-y-3">
@@ -680,19 +626,18 @@ export default function WarehouseFulfillmentPage() {
                         <Loader className="h-6 w-6 animate-spin text-blue-600 mx-auto" />
                       </div>
                     ) : (
-                      (orderDetails?.items || []).map((item: any) => {
-                        const tracked = scannedItems[item.id];
-                        const required = Number(item.quantity || 0);
-                        const scannedCount = tracked?.scanned.length || 0;
-                        const isComplete = scannedCount === required;
+                      orderDetails?.items?.map((item: any) => {
+                        const scanned = scannedItems[item.id];
+                        const scannedCount = scanned?.barcodes?.length || 0;
+                        const isComplete = scannedCount >= 1 || !!item.product_barcode_id;
 
                         const unit = parsePrice(item.unit_price);
                         const discount = parsePrice(item.discount_amount);
-                        const qty = required;
+                        const qty = Number(item.quantity || 0);
                         const lineTotal =
                           item.total_amount !== undefined && item.total_amount !== null
                             ? parsePrice(item.total_amount)
-                            : Math.max(unit * qty - discount, 0);
+                            : Math.max(unit * Math.max(qty, 1) - discount, 0);
 
                         return (
                           <div
@@ -700,61 +645,45 @@ export default function WarehouseFulfillmentPage() {
                             className={`p-4 rounded-lg border-2 transition-all ${
                               isComplete
                                 ? 'bg-green-50 dark:bg-green-900/20 border-green-500'
-                                : scannedCount > 0
-                                ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500'
                                 : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700'
                             }`}
                           >
                             <div className="flex items-start justify-between">
                               <div className="flex-1">
-                                <h3 className="font-medium text-gray-900 dark:text-white">{item.product_name}</h3>
-                                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">SKU: {item.product_sku}</p>
-
-                                {/* show batch from backend-compatible field */}
-                                <p className="text-xs text-gray-500 dark:text-gray-500">
-                                  Batch ID: {getBatchId(item) || '—'}
-                                </p>
+                                <h3 className="font-medium text-gray-900 dark:text-white">{item.product?.name || item.product_name}</h3>
+                                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">SKU: {item.product?.sku || item.product_sku}</p>
 
                                 <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
                                   <div className="text-gray-600 dark:text-gray-400">
-                                    Unit: <span className="font-semibold text-gray-900 dark:text-white">{formatBDT(unit, 0)}</span>
+                                    Unit:{' '}
+                                    <span className="font-semibold text-gray-900 dark:text-white">
+                                      {formatBDT(unit, 0)}
+                                    </span>
                                   </div>
                                   <div className="text-gray-600 dark:text-gray-400">
                                     Discount:{' '}
-                                    <span className="font-semibold text-gray-900 dark:text-white">{formatBDT(discount, 0)}</span>
+                                    <span className="font-semibold text-gray-900 dark:text-white">
+                                      {formatBDT(discount, 0)}
+                                    </span>
                                   </div>
                                   <div className="text-gray-600 dark:text-gray-400 sm:text-right">
-                                    Line: <span className="font-semibold text-gray-900 dark:text-white">{formatBDT(lineTotal, 0)}</span>
+                                    Line:{' '}
+                                    <span className="font-semibold text-gray-900 dark:text-white">
+                                      {formatBDT(lineTotal, 0)}
+                                    </span>
                                   </div>
                                 </div>
 
                                 <div className="mt-2 flex items-center gap-2">
-                                  <div
-                                    className={`text-sm font-semibold ${
-                                      isComplete
-                                        ? 'text-green-600 dark:text-green-400'
-                                        : scannedCount > 0
-                                        ? 'text-blue-600 dark:text-blue-400'
-                                        : 'text-gray-600 dark:text-gray-400'
-                                    }`}
-                                  >
-                                    {scannedCount} / {required} scanned
+                                  <div className={`text-sm font-semibold ${isComplete ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-400'}`}>
+                                    {isComplete ? '1 / 1 scanned' : '0 / 1 scanned'}
                                   </div>
-                                  {scannedCount > 0 && !isComplete && (
-                                    <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                                      <div className="h-2 bg-blue-500 transition-all" style={{ width: `${(scannedCount / Math.max(required, 1)) * 100}%` }} />
-                                    </div>
-                                  )}
                                 </div>
                               </div>
 
                               <div className="ml-4">
                                 {isComplete ? (
                                   <CheckCircle className="h-8 w-8 text-green-600" />
-                                ) : scannedCount > 0 ? (
-                                  <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
-                                    <span className="text-sm font-bold text-blue-600 dark:text-blue-400">{scannedCount}</span>
-                                  </div>
                                 ) : (
                                   <AlertTriangle className="h-8 w-8 text-yellow-600" />
                                 )}
@@ -776,12 +705,12 @@ export default function WarehouseFulfillmentPage() {
                     {isProcessing ? (
                       <>
                         <Loader className="h-5 w-5 animate-spin" />
-                        Processing Order...
+                        Processing...
                       </>
                     ) : progress.percentage === 100 ? (
                       <>
                         <CheckCircle className="h-5 w-5" />
-                        Complete Fulfillment & Update Inventory
+                        Mark Ready For Shipment
                       </>
                     ) : (
                       <>
@@ -792,10 +721,11 @@ export default function WarehouseFulfillmentPage() {
                   </button>
                 </div>
 
-                {/* Right */}
+                {/* Right Column - Scanning Interface */}
                 <div>
                   <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Barcode Scanner</h2>
 
+                  {/* Barcode Input */}
                   <div className="p-6 rounded-lg mb-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
                     <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Scan or Enter Barcode</label>
                     <input
@@ -819,7 +749,7 @@ export default function WarehouseFulfillmentPage() {
                     />
                     <div className="flex items-center justify-between mt-2">
                       <p className="text-xs text-gray-600 dark:text-gray-400">
-                        {isScanning ? '📱 Scan barcode or type manually and press Enter' : '⏸️ Click "Start Scanning" to begin'}
+                        {isScanning ? '📱 Scan barcode and press Enter' : '⏸️ Click "Start Scanning" to begin'}
                       </p>
                       {isScanning && (
                         <div className="flex items-center gap-2">
@@ -830,6 +760,7 @@ export default function WarehouseFulfillmentPage() {
                     </div>
                   </div>
 
+                  {/* Quick Actions */}
                   <div className="grid grid-cols-2 gap-3 mb-4">
                     <button
                       onClick={() => {
@@ -843,21 +774,17 @@ export default function WarehouseFulfillmentPage() {
                     </button>
                     <button
                       onClick={() => {
-                        const reset: Record<number, ScannedItemTracking> = {};
-                        (orderDetails?.items || []).forEach((item: any) => {
-                          reset[item.id] = { required: Number(item.quantity || 0), scanned: [], barcodes: [] };
-                        });
-                        setScannedItems(reset);
-                        setScanHistory([]);
-                        displayToast('All scans reset', 'info');
+                        // re-fetch order details from backend to reset accurately
+                        if (orderDetails?.id) fetchOrderDetails(orderDetails.id);
+                        displayToast('Refreshed order scan state', 'info');
                       }}
-                      disabled={progress.scanned === 0}
-                      className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg text-sm font-medium transition-colors"
                     >
-                      Reset All Scans
+                      Reset From Server
                     </button>
                   </div>
 
+                  {/* Scan History */}
                   <div className="p-4 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Scan History</h3>
@@ -865,7 +792,6 @@ export default function WarehouseFulfillmentPage() {
                         {scanHistory.length} scan{scanHistory.length !== 1 ? 's' : ''}
                       </span>
                     </div>
-
                     <div className="space-y-2 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
                       {scanHistory.length === 0 ? (
                         <div className="text-center py-8">
@@ -917,59 +843,29 @@ export default function WarehouseFulfillmentPage() {
                     </div>
                   </div>
 
-                  <div className="mt-4 grid grid-cols-3 gap-3">
-                    <div className="p-3 rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
-                      <div className="flex items-center gap-2 mb-1">
-                        <CheckCircle className="h-4 w-4 text-green-600" />
-                        <span className="text-xs font-medium text-green-700 dark:text-green-400">Success</span>
-                      </div>
-                      <p className="text-xl font-bold text-green-700 dark:text-green-400">
-                        {scanHistory.filter((s) => s.status === 'success').length}
-                      </p>
-                    </div>
-                    <div className="p-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800">
-                      <div className="flex items-center gap-2 mb-1">
-                        <AlertTriangle className="h-4 w-4 text-yellow-600" />
-                        <span className="text-xs font-medium text-yellow-700 dark:text-yellow-400">Warning</span>
-                      </div>
-                      <p className="text-xl font-bold text-yellow-700 dark:text-yellow-400">
-                        {scanHistory.filter((s) => s.status === 'warning').length}
-                      </p>
-                    </div>
-                    <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-                      <div className="flex items-center gap-2 mb-1">
-                        <XCircle className="h-4 w-4 text-red-600" />
-                        <span className="text-xs font-medium text-red-700 dark:text-red-400">Error</span>
-                      </div>
-                      <p className="text-xl font-bold text-red-700 dark:text-red-400">
-                        {scanHistory.filter((s) => s.status === 'error').length}
-                      </p>
-                    </div>
-                  </div>
+                  <style jsx>{`
+                    .custom-scrollbar::-webkit-scrollbar {
+                      width: 6px;
+                    }
+                    .custom-scrollbar::-webkit-scrollbar-track {
+                      background: transparent;
+                    }
+                    .custom-scrollbar::-webkit-scrollbar-thumb {
+                      background: #cbd5e0;
+                      border-radius: 3px;
+                    }
+                    .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+                      background: #4a5568;
+                    }
+                    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                      background: #a0aec0;
+                    }
+                    .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+                      background: #718096;
+                    }
+                  `}</style>
                 </div>
               </div>
-
-              <style jsx>{`
-                .custom-scrollbar::-webkit-scrollbar {
-                  width: 6px;
-                }
-                .custom-scrollbar::-webkit-scrollbar-track {
-                  background: transparent;
-                }
-                .custom-scrollbar::-webkit-scrollbar-thumb {
-                  background: #cbd5e0;
-                  border-radius: 3px;
-                }
-                .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-                  background: #4a5568;
-                }
-                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-                  background: #a0aec0;
-                }
-                .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-                  background: #718096;
-                }
-              `}</style>
             </div>
           </main>
         </div>

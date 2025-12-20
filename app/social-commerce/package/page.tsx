@@ -261,16 +261,57 @@ export default function WarehouseFulfillmentPage() {
       }
 
       // Find matching order item
-      const matchingItem = orderDetails.items?.find(
-        (item: any) => item.product_id === scannedProduct.id && item.batch_id === scannedBatch?.id
-      );
+      // Normalize ids (handles product_id vs product.id, string vs number)
+const getProductId = (item: any) =>
+  Number(item?.product_id ?? item?.productId ?? item?.product?.id ?? 0) || 0;
 
-      if (!matchingItem) {
-        displayToast(`❌ "${scannedProduct.name}" not in this order or wrong batch`, 'error');
-        addToScanHistory(barcode, 'error', `${scannedProduct.name} - Not in order`);
-        playErrorSound();
-        return;
-      }
+const getBatchId = (item: any) =>
+  Number(item?.batch_id ?? item?.batchId ?? item?.batch?.id ?? 0) || 0;
+
+const scannedProductId = Number(scannedProduct?.id ?? 0) || 0;
+const scannedBatchId = Number(scannedBatch?.id ?? 0) || 0;
+
+// Find candidates by product first
+const candidates = (orderDetails.items || []).filter((item: any) => {
+  return getProductId(item) === scannedProductId;
+});
+
+if (candidates.length === 0) {
+  displayToast(`❌ "${scannedProduct.name}" not in this order`, 'error');
+  addToScanHistory(barcode, 'error', `${scannedProduct.name} - Not in order`);
+  playErrorSound();
+  return;
+}
+
+// If order item has batch assigned, enforce it. If not assigned, allow any batch.
+const candidateWithBatchRules = candidates.filter((item: any) => {
+  const orderItemBatchId = getBatchId(item);
+
+  // If order item has NO batch, accept any scanned batch
+  if (!orderItemBatchId) return true;
+
+  // If scanned batch missing, reject (order expects a batch)
+  if (!scannedBatchId) return false;
+
+  // Otherwise enforce match
+  return orderItemBatchId === scannedBatchId;
+});
+
+// Choose an item that still needs scanning (important when same product appears multiple times)
+const matchingItem = candidateWithBatchRules.find((item: any) => {
+  const track = scannedItems[item.id];
+  const required = Number(item.quantity || 0);
+  const already = track?.scanned.length || 0;
+  return already < required;
+});
+
+if (!matchingItem) {
+  displayToast(`⚠️ "${scannedProduct.name}" is already fully scanned (or batch mismatch)`, 'warning');
+  addToScanHistory(barcode, 'warning', `${scannedProduct.name} - Already complete / batch mismatch`);
+  playErrorSound();
+  return;
+}
+
 
       // Check if item already fully scanned
       const currentScanned = scannedItems[matchingItem.id];

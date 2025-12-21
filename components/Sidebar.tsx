@@ -89,7 +89,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         { label: 'Pack Orders', href: '/social-commerce/package' },
        ]
     },
-    {icon: Package, label: 'Preorders', href: '/pre-order' },
+    {icon: Package, label: 'Preorders', href: '/preorders' },
     {icon: Package, label: 'Orders', href: '/orders' },
     { icon: ClipboardList, label: 'Purchase History', href: '/purchase-history' },
     { icon: Search, label: 'Lookup', href: '/lookup' },

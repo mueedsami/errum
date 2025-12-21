@@ -749,8 +749,7 @@ export default function POSPage() {
           try {
             const status = await checkQZStatus();
             if (!status.connected) {
-              showToast('QZ Tray offline - receipt not printed', 'error');
-              return;
+              showToast('QZ Tray offline - opening receipt preview (Print → Save as PDF)', 'error');
             }
 
             const fullOrder = await orderService.getById(order.id);
@@ -835,8 +834,7 @@ export default function POSPage() {
     try {
       const status = await checkQZStatus();
       if (!status.connected) {
-        showToast('QZ Tray is not connected', 'error');
-        return;
+        showToast('QZ Tray offline - opening receipt preview (Print → Save as PDF)', 'error');
       }
       const fullOrder = await orderService.getById(lastCompletedOrderId);
       await printReceipt(fullOrder);

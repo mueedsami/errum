@@ -32,7 +32,7 @@ import productReturnService, { type CreateReturnRequest } from '@/services/produ
 import refundService, { type CreateRefundRequest } from '@/services/refundService';
 
 import shipmentService from '@/services/shipmentService';
-import { checkQZStatus, printReceipt, getPrinters, savePreferredPrinter } from '@/lib/qz-tray';
+import { checkQZStatus, printReceipt, printBulkReceipts, getPrinters, savePreferredPrinter } from '@/lib/qz-tray';
 
 interface Order {
   id: number;
@@ -1027,21 +1027,22 @@ export default function OrdersDashboard() {
       return;
     }
 
+    // Try to refresh printer status, but don't block printing if QZ is offline.
     try {
       await checkPrinterStatus();
       await new Promise((resolve) => setTimeout(resolve, 350));
-    } catch {
-      alert('Failed to connect to QZ Tray. Please ensure QZ Tray is running and try again.');
-      return;
+    } catch (e) {
+      console.warn('QZ Tray status check failed - will use browser preview fallback.', e);
     }
 
-    const status = await checkQZStatus();
-    if (!status.connected) {
-      alert('QZ Tray is not connected. Please start QZ Tray and try again.');
-      return;
+    let status: { connected: boolean } = { connected: false };
+    try {
+      status = await checkQZStatus();
+    } catch (e) {
+      console.warn('checkQZStatus failed - assuming offline.', e);
     }
 
-    if (!selectedPrinter) {
+    if (status.connected && !selectedPrinter) {
       setShowPrinterSelect(true);
       alert('Please select a printer first.');
       return;
@@ -1050,20 +1051,51 @@ export default function OrdersDashboard() {
     if (!confirm(`Print receipts for ${selectedOrders.size} order(s)?`)) return;
 
     setIsPrintingBulk(true);
-    setBulkPrintProgress({ show: true, current: 0, total: selectedOrders.size, success: 0, failed: 0 });
+    setBulkPrintProgress({
+      show: true,
+      current: 0,
+      total: selectedOrders.size,
+      success: 0,
+      failed: 0,
+      details: [],
+    });
 
     try {
       const selectedOrdersList = orders.filter((o) => selectedOrders.has(o.id));
 
-      let successCount = 0;
-      let failedCount = 0;
-
+      // Always fetch full orders so receipt layout has complete data
+      const fullOrders: any[] = [];
       for (let i = 0; i < selectedOrdersList.length; i++) {
-        const order = selectedOrdersList[i];
+        const o = selectedOrdersList[i];
         setBulkPrintProgress((prev) => ({ ...prev, current: i + 1 }));
 
         try {
-          const fullOrder = await orderService.getById(order.id);
+          const fullOrder = await orderService.getById(o.id);
+          fullOrders.push(fullOrder);
+        } catch (e) {
+          console.error('Failed to fetch order for receipt:', o.id, e);
+          setBulkPrintProgress((prev) => ({ ...prev, failed: prev.failed + 1 }));
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+
+      // If QZ is offline, open ONE bulk preview window (Print → Save as PDF).
+      if (!status.connected) {
+        await printBulkReceipts(fullOrders);
+        alert('Opened receipt preview. Use Print → Save as PDF.');
+        return;
+      }
+
+      // QZ online: print one-by-one (so we can track success/fail counts)
+      let successCount = 0;
+      let failedCount = 0;
+
+      for (let i = 0; i < fullOrders.length; i++) {
+        const fullOrder = fullOrders[i];
+        setBulkPrintProgress((prev) => ({ ...prev, current: i + 1 }));
+
+        try {
           await printReceipt(fullOrder as any, selectedPrinter);
           successCount++;
           setBulkPrintProgress((prev) => ({ ...prev, success: successCount }));
@@ -1075,18 +1107,16 @@ export default function OrdersDashboard() {
         await new Promise((resolve) => setTimeout(resolve, 650));
       }
 
-      alert(`Bulk print completed!\nSuccess: ${successCount}\nFailed: ${failedCount}`);
-      setSelectedOrders(new Set());
-    } catch (error) {
-      console.error('Bulk print error:', error);
-      alert('Failed to complete bulk print operation.');
+      alert(
+        `Bulk print completed!\nSuccess: ${successCount}\nFailed: ${failedCount}`
+      );
     } finally {
       setIsPrintingBulk(false);
       setTimeout(() => {
-        setBulkPrintProgress({ show: false, current: 0, total: 0, success: 0, failed: 0 });
-      }, 2000);
+        setBulkPrintProgress((prev) => ({ ...prev, show: false }));
+      }, 1200);
     }
-  };
+  };;
 
   // ✅ Single: Send one order to Pathao
   const handleSingleSendToPathao = async (order: Order) => {
@@ -1158,30 +1188,41 @@ export default function OrdersDashboard() {
     setActiveMenu(null);
 
     try {
-      await checkPrinterStatus();
-
-      const status = await checkQZStatus();
-      if (!status.connected) {
-        alert('QZ Tray is not connected. Please start QZ Tray and try again.');
-        return;
+      // Try to refresh printers, but don't block preview fallback.
+      try {
+        await checkPrinterStatus();
+      } catch (e) {
+        console.warn('Printer status check failed - will use browser preview fallback.', e);
       }
 
-      if (!selectedPrinter) {
+      let status: { connected: boolean } = { connected: false };
+      try {
+        status = await checkQZStatus();
+      } catch (e) {
+        console.warn('checkQZStatus failed - assuming offline.', e);
+      }
+
+      if (status.connected && !selectedPrinter) {
         setShowPrinterSelect(true);
         alert('Please select a printer first.');
         return;
       }
 
+      if (!status.connected) {
+        alert('QZ Tray is offline. Opening receipt preview (Print → Save as PDF).');
+      }
+
       const fullOrder = await orderService.getById(order.id);
-      await printReceipt(fullOrder as any, selectedPrinter);
-      alert('✅ Receipt printed successfully!');
+      await printReceipt(fullOrder as any, status.connected ? selectedPrinter : undefined);
+
+      alert('✅ Receipt ready (printed or opened in preview)!');
     } catch (error: any) {
       console.error('Single print error:', error);
       alert(`Failed to print receipt: ${error?.message || 'Unknown error'}`);
     } finally {
       setSingleActionLoading(null);
     }
-  };
+  };;
 
   // 🔁 Product picker helpers
   const fetchBatchesForStore = async (storeId: number) => {

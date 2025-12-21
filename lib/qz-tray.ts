@@ -1,5 +1,6 @@
 // lib/qz-tray.ts
 import { normalizeOrderForReceipt, type ReceiptOrder } from '@/lib/receipt';
+import { openReceiptPreview, openBulkReceiptPreview } from '@/lib/receiptHtml';
 let qzConnected = false;
 
 export async function connectQZ(): Promise<boolean> {
@@ -381,6 +382,7 @@ function generateOrderReceipt(order: any): string[] {
 }
 
 export async function printReceipt(order: any, printerName?: string): Promise<boolean> {
+  // If QZ Tray isn't available, fall back to browser receipt preview (Print → Save as PDF).
   try {
     await connectQZ();
 
@@ -401,12 +403,23 @@ export async function printReceipt(order: any, printerName?: string): Promise<bo
     
     return true;
   } catch (error) {
-    console.error('❌ Failed to print receipt:', error);
-    throw error;
+    console.warn('ℹ️ QZ print unavailable, opening receipt preview (browser print / Save as PDF).', error);
+    try {
+      openReceiptPreview(order);
+      return true;
+    } catch (e) {
+      console.error('❌ Failed to open receipt preview:', e);
+      return false;
+    }
   }
 }
 
-export async function printBulkReceipts(orders: any[], printerName?: string): Promise<{ successCount: number; failCount: number }> {
+export async function printBulkReceipts(
+  orders: any[],
+  printerName?: string
+): Promise<{ successCount: number; failCount: number }> {
+  // If QZ Tray isn't available, fall back to a single browser preview window
+  // so the user can Print → Save as PDF.
   try {
     await connectQZ();
 
@@ -414,13 +427,13 @@ export async function printBulkReceipts(orders: any[], printerName?: string): Pr
       throw new Error('QZ Tray not available');
     }
 
-    const printer = printerName || await getPreferredPrinter();
+    const printer = printerName || (await getPreferredPrinter());
     if (!printer) {
       throw new Error('No printer selected');
     }
 
     const config = window.qz.configs.create(printer);
-    
+
     let successCount = 0;
     let failCount = 0;
 
@@ -429,23 +442,29 @@ export async function printBulkReceipts(orders: any[], printerName?: string): Pr
         const receiptData = generateReceiptData(order);
         await window.qz.print(config, receiptData);
         successCount++;
-        
-        // Small delay between prints
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise((resolve) => setTimeout(resolve, 500));
       } catch (error) {
-        console.error(`❌ Failed to print order #${order.id}:`, error);
+        console.error(`❌ Failed to print order #${order?.id || ''}:`, error);
         failCount++;
       }
     }
 
-    console.log(`✅ Bulk print completed: ${successCount} success, ${failCount} failed`);
-    
     return { successCount, failCount };
   } catch (error) {
-    console.error('❌ Failed to print bulk receipts:', error);
-    throw error;
+    console.warn(
+      'ℹ️ QZ bulk print unavailable, opening bulk receipt preview (browser print / Save as PDF).',
+      error
+    );
+    try {
+      openBulkReceiptPreview(orders);
+      return { successCount: 0, failCount: 0 };
+    } catch (e) {
+      console.error('❌ Failed to open bulk receipt preview:', e);
+      return { successCount: 0, failCount: orders.length };
+    }
   }
 }
+
 
 // Check QZ Tray status
 export async function checkQZStatus(): Promise<{

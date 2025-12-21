@@ -256,8 +256,7 @@ export default function PurchaseHistoryPage() {
     try {
       const status = await checkQZStatus();
       if (!status.connected) {
-        alert('QZ Tray is not connected. Please start QZ Tray and try again.');
-        return;
+        alert('QZ Tray is offline. Opening receipt preview (Print → Save as PDF).');
       }
 
       const fullOrder = await orderService.getById(order.id);

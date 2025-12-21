@@ -77,6 +77,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         { label: 'Manage Stock', href: '/inventory/manage_stock' },
         { label: 'View Inventory', href: '/inventory/view' },
         { label: 'Price Adjustment', href: '/inventory/batch-price-update' },
+        { label: 'Reports', href: '/inventory/reports' },
       ],
     },
     { icon: ShoppingCart, label: 'Store Assingment', href: '/store-assingment' },

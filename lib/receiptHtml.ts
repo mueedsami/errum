@@ -13,10 +13,11 @@ function escapeHtml(s: string) {
     .replace(/'/g, '&#039;');
 }
 
-function money(n: any, currency = '৳') {
+function money(n: any, currency?: string) {
+  const symbol = currency && String(currency).trim() ? String(currency).trim() : '৳';
   const x = Number(n || 0);
   const formatted = x.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  return `${currency}${formatted}`;
+  return `${symbol}${formatted}`;
 }
 
 function receiptBody(r: ReceiptOrder) {
@@ -26,14 +27,14 @@ function receiptBody(r: ReceiptOrder) {
       return `<tr>
         <td style="width:58%">${escapeHtml(name)}</td>
         <td style="text-align:right; width:10%">${escapeHtml(String(it.qty))}</td>
-        <td style="text-align:right; width:16%">${escapeHtml(money(it.unitPrice, r.currencySymbol))}</td>
-        <td style="text-align:right; width:16%">${escapeHtml(money(it.lineTotal, r.currencySymbol))}</td>
+        <td style="text-align:right; width:16%">${escapeHtml(money(it.unitPrice))}</td>
+        <td style="text-align:right; width:16%">${escapeHtml(money(it.lineTotal))}</td>
       </tr>`;
     })
     .join('');
 
-  const orderNo = r.orderNumber || r.orderId || '—';
-  const createdAt = r.createdAt ? new Date(r.createdAt).toLocaleString() : new Date().toLocaleString();
+  const orderNo = r.orderNo || String(r.id || '—');
+  const createdAt = r.dateTime || new Date().toLocaleString();
 
   return `
     <h1>${escapeHtml((r.storeName || 'ERRUM').toUpperCase())}</h1>
@@ -42,7 +43,7 @@ function receiptBody(r: ReceiptOrder) {
       <div><b>Date:</b> ${escapeHtml(createdAt)}</div>
       ${r.customerName ? `<div><b>Customer:</b> ${escapeHtml(r.customerName)}</div>` : ''}
       ${r.customerPhone ? `<div><b>Phone:</b> ${escapeHtml(r.customerPhone)}</div>` : ''}
-      ${r.paymentMethod ? `<div><b>Payment:</b> ${escapeHtml(r.paymentMethod)}</div>` : ''}
+      ${r.salesBy ? `<div><b>Sales By:</b> ${escapeHtml(r.salesBy)}</div>` : ''}
     </div>
 
     <div class="line"></div>
@@ -65,26 +66,28 @@ function receiptBody(r: ReceiptOrder) {
       <tbody>
         <tr>
           <td>Subtotal</td>
-          <td class="right">${escapeHtml(money(r.totals?.subtotal ?? 0, r.currencySymbol))}</td>
+          <td class="right">${escapeHtml(money(r.totals?.subtotal ?? 0))}</td>
         </tr>
-        ${(r.totals?.discount ?? 0) > 0 ? `<tr><td>Discount</td><td class="right">-${escapeHtml(money(r.totals?.discount ?? 0, r.currencySymbol))}</td></tr>` : ''}
-        ${(r.totals?.shipping ?? 0) > 0 ? `<tr><td>Shipping</td><td class="right">${escapeHtml(money(r.totals?.shipping ?? 0, r.currencySymbol))}</td></tr>` : ''}
+        ${(r.totals?.discount ?? 0) > 0 ? `<tr><td>Discount</td><td class="right">-${escapeHtml(money(r.totals?.discount ?? 0))}</td></tr>` : ''}
+        ${(r.totals?.tax ?? 0) > 0 ? `<tr><td>Tax/VAT</td><td class="right">${escapeHtml(money(r.totals?.tax ?? 0))}</td></tr>` : ''}
+        ${(r.totals?.shipping ?? 0) > 0 ? `<tr><td>Shipping</td><td class="right">${escapeHtml(money(r.totals?.shipping ?? 0))}</td></tr>` : ''}
         <tr class="total">
           <td><b>Grand Total</b></td>
-          <td class="right"><b>${escapeHtml(money(r.totals?.total ?? 0, r.currencySymbol))}</b></td>
+          <td class="right"><b>${escapeHtml(money(r.totals?.total ?? 0))}</b></td>
         </tr>
-        ${(r.totals?.paid ?? 0) > 0 ? `<tr><td>Paid</td><td class="right">${escapeHtml(money(r.totals?.paid ?? 0, r.currencySymbol))}</td></tr>` : ''}
-        ${(r.totals?.due ?? 0) > 0 ? `<tr><td>Due</td><td class="right">${escapeHtml(money(r.totals?.due ?? 0, r.currencySymbol))}</td></tr>` : ''}
+        ${(r.totals?.paid ?? 0) > 0 ? `<tr><td>Paid</td><td class="right">${escapeHtml(money(r.totals?.paid ?? 0))}</td></tr>` : ''}
+        ${(r.totals?.due ?? 0) > 0 ? `<tr><td>Due</td><td class="right">${escapeHtml(money(r.totals?.due ?? 0))}</td></tr>` : ''}
       </tbody>
     </table>
 
     ${r.notes ? `<div class="note">${escapeHtml(r.notes)}</div>` : ''}
 
-    <div class="footer">${escapeHtml(r.footerText || 'Thank you!')}</div>
+    <div class="footer">${escapeHtml('Thank you!')}</div>
   `;
 }
 
-function wrapHtml(title: string, inner: string) {
+function wrapHtml(title: string, inner: string, opts?: { embed?: boolean }) {
+  const embed = !!opts?.embed;
   return `<!doctype html>
 <html>
 <head>
@@ -111,28 +114,30 @@ function wrapHtml(title: string, inner: string) {
   </style>
 </head>
 <body>
+  ${embed ? '' : `
   <div class="btnbar">
     <button onclick="window.print()">Print / Save PDF</button>
     <button onclick="window.close()">Close</button>
   </div>
+  `}
   ${inner}
 </body>
 </html>`;
 }
 
-export function receiptHtml(order: any): string {
+export function receiptHtml(order: any, opts?: { embed?: boolean }): string {
   const r = normalizeOrderForReceipt(order);
-  const title = `Receipt ${r.orderNumber || r.orderId || ''}`.trim();
-  return wrapHtml(title, `<div class="page">${receiptBody(r)}</div>`);
+  const title = `Receipt ${r.orderNo || r.id || ''}`.trim();
+  return wrapHtml(title, `<div class="page">${receiptBody(r)}</div>`, opts);
 }
 
-export function receiptBulkHtml(orders: any[]): string {
+export function receiptBulkHtml(orders: any[], opts?: { embed?: boolean }): string {
   const pages = (orders || []).map((o) => {
     const r = normalizeOrderForReceipt(o);
-    const title = `Receipt ${r.orderNumber || r.orderId || ''}`.trim();
+    const title = `Receipt ${r.orderNo || r.id || ''}`.trim();
     return `<div class="page" data-title="${escapeHtml(title)}">${receiptBody(r)}</div>`;
   }).join('');
-  return wrapHtml('Bulk Receipts', pages || '<p>No orders selected</p>');
+  return wrapHtml('Bulk Receipts', pages || '<p>No orders selected</p>', opts);
 }
 
 export function openReceiptPreview(order: any): void {

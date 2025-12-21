@@ -205,6 +205,9 @@ export default function OrdersDashboard() {
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('');
 
+  // ✅ NEW: Order type filter (All / Social / E-Com)
+  const [orderTypeFilter, setOrderTypeFilter] = useState('All Types');
+
   // ✅ Separate filters
   const [orderStatusFilter, setOrderStatusFilter] = useState('All Order Status');
   const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Status');
@@ -247,7 +250,8 @@ export default function OrdersDashboard() {
     total: number;
     success: number;
     failed: number;
-  }>({ show: false, current: 0, total: 0, success: 0, failed: 0 });
+    details?: Array<{ orderId?: number; orderNumber?: string; status?: 'success' | 'failed'; message?: string }>;
+  }>({ show: false, current: 0, total: 0, success: 0, failed: 0, details: [] });
 
   const [pathaoProgress, setPathaoProgress] = useState<{
     show: boolean;
@@ -420,18 +424,26 @@ export default function OrdersDashboard() {
     };
   };
 
-  // ✅ ONLY Social Commerce orders
+  // ✅ Social Commerce + E-Commerce orders
   const loadOrders = async () => {
     setIsLoading(true);
     try {
-      const social = await orderService.getAll({
-        order_type: 'social_commerce',
-        sort_by: 'created_at',
-        sort_order: 'desc',
-        per_page: 1000,
-      });
+      const [social, ecommerce] = await Promise.all([
+        orderService.getAll({
+          order_type: 'social_commerce',
+          sort_by: 'created_at',
+          sort_order: 'desc',
+          per_page: 1000,
+        }),
+        orderService.getAll({
+          order_type: 'ecommerce',
+          sort_by: 'created_at',
+          sort_order: 'desc',
+          per_page: 1000,
+        }),
+      ]);
 
-      const allOrders = [...(social.data || [])];
+      const allOrders = [...(social.data || []), ...(ecommerce.data || [])];
 
       allOrders.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
@@ -468,8 +480,7 @@ export default function OrdersDashboard() {
         const printerList = await getPrinters();
         setPrinters(printerList);
 
-        const savedPrinter =
-          localStorage.getItem('preferredPrinter') || localStorage.getItem('defaultPrinter');
+        const savedPrinter = localStorage.getItem('preferredPrinter') || localStorage.getItem('defaultPrinter');
         if (savedPrinter && printerList.includes(savedPrinter)) {
           setSelectedPrinter(savedPrinter);
         } else if (printerList.length > 0) {
@@ -526,6 +537,12 @@ export default function OrdersDashboard() {
       });
     }
 
+    // ✅ NEW: order type filter
+    if (orderTypeFilter !== 'All Types') {
+      const target = normalize(orderTypeFilter);
+      filtered = filtered.filter((o) => normalize(o.orderType) === target);
+    }
+
     if (orderStatusFilter !== 'All Order Status') {
       const target = normalize(orderStatusFilter);
       filtered = filtered.filter((o) => normalize(o.status) === target);
@@ -537,7 +554,7 @@ export default function OrdersDashboard() {
     }
 
     setFilteredOrders(filtered);
-  }, [search, dateFilter, orderStatusFilter, paymentStatusFilter, orders]);
+  }, [search, dateFilter, orderTypeFilter, orderStatusFilter, paymentStatusFilter, orders]);
 
   const handleViewDetails = async (order: Order) => {
     setIsLoadingDetails(true);
@@ -784,7 +801,7 @@ export default function OrdersDashboard() {
       const newOrderTotal = exchangeData.replacementProducts.reduce((sum, p) => sum + p.unit_price * p.quantity, 0);
 
       const newOrderData = {
-        order_type: selectedOrderForAction.order_type as 'social_commerce',
+        order_type: selectedOrderForAction.order_type as 'social_commerce' | 'ecommerce',
         store_id: exchangeData.exchangeAtStoreId,
         customer_id: selectedOrderForAction.customer?.id,
         items: exchangeData.replacementProducts.map((p) => ({
@@ -841,7 +858,6 @@ export default function OrdersDashboard() {
   };
 
   const getOrderTypeBadge = (orderType: string) => {
-    // since we show only socials, this is fine as-is
     if (orderType === 'social_commerce') {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400">
@@ -1107,16 +1123,14 @@ export default function OrdersDashboard() {
         await new Promise((resolve) => setTimeout(resolve, 650));
       }
 
-      alert(
-        `Bulk print completed!\nSuccess: ${successCount}\nFailed: ${failedCount}`
-      );
+      alert(`Bulk print completed!\nSuccess: ${successCount}\nFailed: ${failedCount}`);
     } finally {
       setIsPrintingBulk(false);
       setTimeout(() => {
         setBulkPrintProgress((prev) => ({ ...prev, show: false }));
       }, 1200);
     }
-  };;
+  };
 
   // ✅ Single: Send one order to Pathao
   const handleSingleSendToPathao = async (order: Order) => {
@@ -1222,7 +1236,7 @@ export default function OrdersDashboard() {
     } finally {
       setSingleActionLoading(null);
     }
-  };;
+  };
 
   // 🔁 Product picker helpers
   const fetchBatchesForStore = async (storeId: number) => {
@@ -1509,7 +1523,7 @@ export default function OrdersDashboard() {
                       <ShoppingBag className="w-4 h-4 text-white dark:text-black" />
                     </div>
                     <div>
-                      <h1 className="text-lg font-bold text-black dark:text-white leading-none">Social Orders</h1>
+                      <h1 className="text-lg font-bold text-black dark:text-white leading-none">Orders</h1>
                       <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-none mt-0.5">
                         {filteredOrders.length} of {orders.length} orders
                       </p>
@@ -1614,6 +1628,17 @@ export default function OrdersDashboard() {
                   className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
                 />
 
+                {/* ✅ NEW: Order type filter */}
+                <select
+                  value={orderTypeFilter}
+                  onChange={(e) => setOrderTypeFilter(e.target.value)}
+                  className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
+                >
+                  <option value="All Types">All Types</option>
+                  <option value="social_commerce">Social Commerce</option>
+                  <option value="ecommerce">E-Commerce</option>
+                </select>
+
                 <select
                   value={orderStatusFilter}
                   onChange={(e) => setOrderStatusFilter(e.target.value)}
@@ -1642,7 +1667,7 @@ export default function OrdersDashboard() {
               </div>
 
               <p className="text-xs text-gray-500 dark:text-gray-500">
-                Showing {filteredOrders.length} of {orders.length} social orders
+                Showing {filteredOrders.length} of {orders.length} orders
               </p>
             </div>
 
@@ -2142,7 +2167,9 @@ export default function OrdersDashboard() {
                     {selectedOrder.discount > 0 && (
                       <div className="flex items-center justify-between">
                         <p className="text-sm text-gray-700 dark:text-gray-300">Discount</p>
-                        <p className="text-sm font-medium text-red-600 dark:text-red-400">-৳{selectedOrder.discount.toFixed(2)}</p>
+                        <p className="text-sm font-medium text-red-600 dark:text-red-400">
+                          -৳{selectedOrder.discount.toFixed(2)}
+                        </p>
                       </div>
                     )}
                     {selectedOrder.shipping > 0 && (
@@ -2157,12 +2184,16 @@ export default function OrdersDashboard() {
                     </div>
                     <div className="flex items-center justify-between">
                       <p className="text-sm text-gray-700 dark:text-gray-300">Paid</p>
-                      <p className="text-sm font-medium text-green-600 dark:text-green-400">৳{selectedOrder.amounts.paid.toFixed(2)}</p>
+                      <p className="text-sm font-medium text-green-600 dark:text-green-400">
+                        ৳{selectedOrder.amounts.paid.toFixed(2)}
+                      </p>
                     </div>
                     {selectedOrder.amounts.due > 0 && (
                       <div className="flex items-center justify-between">
                         <p className="text-sm font-bold text-gray-700 dark:text-gray-300">Due</p>
-                        <p className="text-sm font-bold text-red-600 dark:text-red-400">৳{selectedOrder.amounts.due.toFixed(2)}</p>
+                        <p className="text-sm font-bold text-red-600 dark:text-red-400">
+                          ৳{selectedOrder.amounts.due.toFixed(2)}
+                        </p>
                       </div>
                     )}
                   </div>
@@ -2181,9 +2212,6 @@ export default function OrdersDashboard() {
           </div>
         </div>
       )}
-
-      {/* Edit Modal + Product Picker + Return/Exchange modals are unchanged from before */}
-      {/* (kept intentionally; only the listing is restricted to social orders) */}
 
       {/* Edit Order Modal */}
       {showEditModal && (

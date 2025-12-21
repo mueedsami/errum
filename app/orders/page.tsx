@@ -32,7 +32,7 @@ import productReturnService, { type CreateReturnRequest } from '@/services/produ
 import refundService, { type CreateRefundRequest } from '@/services/refundService';
 
 import shipmentService from '@/services/shipmentService';
-import { checkQZStatus, printBulkReceipts, getPrinters } from '@/lib/qz-tray';
+import { checkQZStatus, printReceipt, getPrinters, savePreferredPrinter } from '@/lib/qz-tray';
 
 interface Order {
   id: number;
@@ -468,7 +468,8 @@ export default function OrdersDashboard() {
         const printerList = await getPrinters();
         setPrinters(printerList);
 
-        const savedPrinter = localStorage.getItem('defaultPrinter');
+        const savedPrinter =
+          localStorage.getItem('preferredPrinter') || localStorage.getItem('defaultPrinter');
         if (savedPrinter && printerList.includes(savedPrinter)) {
           setSelectedPrinter(savedPrinter);
         } else if (printerList.length > 0) {
@@ -483,7 +484,7 @@ export default function OrdersDashboard() {
 
   const handlePrinterSelect = (printer: string) => {
     setSelectedPrinter(printer);
-    localStorage.setItem('defaultPrinter', printer);
+    savePreferredPrinter(printer);
     setShowPrinterSelect(false);
   };
 
@@ -1062,7 +1063,8 @@ export default function OrdersDashboard() {
         setBulkPrintProgress((prev) => ({ ...prev, current: i + 1 }));
 
         try {
-          await printBulkReceipts([order as any], selectedPrinter);
+          const fullOrder = await orderService.getById(order.id);
+          await printReceipt(fullOrder as any, selectedPrinter);
           successCount++;
           setBulkPrintProgress((prev) => ({ ...prev, success: successCount }));
         } catch {
@@ -1170,7 +1172,8 @@ export default function OrdersDashboard() {
         return;
       }
 
-      await printBulkReceipts([order as any], selectedPrinter);
+      const fullOrder = await orderService.getById(order.id);
+      await printReceipt(fullOrder as any, selectedPrinter);
       alert('✅ Receipt printed successfully!');
     } catch (error: any) {
       console.error('Single print error:', error);

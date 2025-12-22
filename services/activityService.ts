@@ -48,6 +48,9 @@ export type ActivityLogsParams = {
   // date range: YYYY-MM-DD
   start_date?: string;
   end_date?: string;
+  // preferred backend param names
+  date_from?: string;
+  date_to?: string;
 
   // backend filters
   log_name?: string;
@@ -56,6 +59,16 @@ export type ActivityLogsParams = {
   causer_id?: number | string;
   subject_type?: string; // full class name, e.g. App\\Models\\Order
   subject_id?: number | string;
+
+  // Newer UI params (will be normalized before request)
+  model?: string;
+  modelId?: number | string;
+  action?: string;
+  userId?: number | string;
+  dateFrom?: string;
+  dateTo?: string;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 };
 
 type Paginator<T> = {
@@ -138,7 +151,25 @@ const activityService = {
    * Global/paginated activity logs.
    * Backend: GET /activity-logs
    */
-  async getAll(params: (ActivityLogsParams & { type?: string; search?: string; employee_id?: any }) = {}) {
+  async getAll(
+    params: (ActivityLogsParams & {
+      // newer UI aliases
+      model?: string;
+      modelId?: number;
+      action?: string;
+      userId?: number | string;
+      dateFrom?: string;
+      dateTo?: string;
+      perPage?: number;
+      sortBy?: string;
+      sortOrder?: string;
+
+      // older UI aliases
+      type?: string;
+      search?: string;
+      employee_id?: any;
+    }) = {}
+  ) {
     const {
       // backward-compat inputs (older UI used these)
       type,
@@ -149,18 +180,40 @@ const activityService = {
 
     const mapped: any = { ...rest };
 
+    // -----------------------------
+    // Newer UI param mapping
+    // -----------------------------
+    // model/action/userId are the UI filter names
+    if (!mapped.subject_type && params?.model && params.model !== 'all') mapped.subject_type = params.model;
+    if (!mapped.subject_id && params?.modelId) mapped.subject_id = params.modelId;
+    if (!mapped.event && params?.action && params.action !== 'all') mapped.event = params.action;
+    if (!mapped.causer_id && params?.userId && params.userId !== 'all') mapped.causer_id = params.userId;
+
+    // date range (UI uses dateFrom/dateTo; backend uses date_from/date_to)
+    if (!mapped.date_from && (params as any)?.dateFrom) mapped.date_from = (params as any).dateFrom;
+    if (!mapped.date_to && (params as any)?.dateTo) mapped.date_to = (params as any).dateTo;
+    if (!mapped.date_from && mapped.start_date) mapped.date_from = mapped.start_date;
+    if (!mapped.date_to && mapped.end_date) mapped.date_to = mapped.end_date;
+
+    // per-page / sorting aliases
+    if (!mapped.per_page && (params as any)?.perPage) mapped.per_page = (params as any).perPage;
+    if (!mapped.sort_by && (params as any)?.sortBy) mapped.sort_by = (params as any).sortBy;
+    if (!mapped.sort_order && (params as any)?.sortOrder) mapped.sort_order = (params as any).sortOrder;
+
     if (!mapped.subject_type && type) {
       mapped.subject_type = MODULE_TO_SUBJECT_TYPE[String(type).toLowerCase()] || type;
     }
 
-    // older UI used `search` as a description substring
-    if (!mapped.description && search) mapped.description = search;
+    // Search: backend supports a global `search` filter.
+    if (!mapped.search && search) mapped.search = search;
 
     // older UI used `employee_id` for causer filter
     if (!mapped.causer_id && employee_id) mapped.causer_id = employee_id;
 
     const res = await axios.get('/activity-logs', { params: mapped });
-    const paginator = res.data as Paginator<any>;
+    const payload = res.data;
+    // Backend returns: { success: true, data: <paginator> }
+    const paginator = (payload?.data ?? payload) as Paginator<any>;
     return {
       ...paginator,
       data: Array.isArray(paginator?.data) ? paginator.data.map(toEntry) : [],
@@ -169,10 +222,12 @@ const activityService = {
 
   /**
    * Entity-specific logs (non-paginated)
-   * Backend: GET /activity-logs/model/{ModelBaseName}/{id}
+   * Backend: GET /activity-logs/model/{ModelBaseName}/logs/{id}
    */
   async getModelLogs(model: string, id: number | string) {
-    const res = await axios.get(`/activity-logs/model/${encodeURIComponent(model)}/${encodeURIComponent(String(id))}`);
+    const res = await axios.get(
+      `/activity-logs/model/${encodeURIComponent(model)}/logs/${encodeURIComponent(String(id))}`
+    );
     const payload = res.data;
     const rows = payload?.data ?? payload;
     return {
@@ -182,19 +237,48 @@ const activityService = {
     };
   },
 
-  async getStats(params: Pick<ActivityLogsParams, 'start_date' | 'end_date'> = {}) {
-    const res = await axios.get('/activity-logs/stats', { params });
-    return res.data;
+  async getStats(params: Pick<ActivityLogsParams, 'start_date' | 'end_date' | 'date_from' | 'date_to'> = {}) {
+    // Backend: GET /activity-logs/statistics (date_from/date_to)
+    const mapped: any = { ...params };
+    if (mapped.start_date && !mapped.date_from) mapped.date_from = mapped.start_date;
+    if (mapped.end_date && !mapped.date_to) mapped.date_to = mapped.end_date;
+    delete mapped.start_date;
+    delete mapped.end_date;
+
+    const res = await axios.get('/activity-logs/statistics', { params: mapped });
+    // Backend returns { success: true, data: { total, by_model, by_event, by_user } }
+    return res.data?.data ?? res.data;
   },
 
   async getAvailableModels() {
     const res = await axios.get('/activity-logs/models');
-    return res.data; // {success, data:[{value,label,full_name}]}
+    // Backend returns { success: true, data: string[] }
+    return res.data?.data ?? res.data ?? [];
   },
 
   async getAvailableUsers() {
     const res = await axios.get('/activity-logs/users');
-    return res.data; // {success, data:[{id,name,email}]}
+    // Backend returns { success: true, data: Array<{id,name,email}> }
+    return res.data?.data ?? res.data ?? [];
+  },
+
+  // ---- Aliases used by the Activity Logs pages/components ----
+  async getLogs(params: any = {}) {
+    return this.getAll(params);
+  },
+
+  async getModels() {
+    return this.getAvailableModels();
+  },
+
+  async getUsers() {
+    return this.getAvailableUsers();
+  },
+
+  async getActions() {
+    const stats: any = await this.getStats();
+    const byEvent = (stats && (stats.by_event || stats.byEvent)) || {};
+    return Object.keys(byEvent).sort();
   },
 
   async exportCsv(params: ActivityLogsParams = {}) {

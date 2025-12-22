@@ -28,6 +28,7 @@ import batchService from '@/services/batchService';
 
 import ReturnProductModal from '@/components/sales/ReturnProductModal';
 import ExchangeProductModal from '@/components/sales/ExchangeProductModal';
+import ActivityLogPanel from '@/components/activity/ActivityLogPanel';
 import productReturnService, { type CreateReturnRequest } from '@/services/productReturnService';
 import refundService, { type CreateRefundRequest } from '@/services/refundService';
 
@@ -2207,6 +2208,15 @@ export default function OrdersDashboard() {
                     </p>
                   </div>
                 )}
+
+                <ActivityLogPanel
+                  title="Order Activity"
+                  module="orders"
+                  modelName="Order"
+                  entityId={selectedOrder.id}
+                  search={selectedOrder.orderNumber}
+                  limit={12}
+                />
               </div>
             ) : null}
           </div>

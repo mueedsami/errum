@@ -15,6 +15,7 @@ import {
   AlertTriangle,
   Truck,
   Search,
+  History,
 } from 'lucide-react';
 import { useState } from 'react';
 // ──────────────────────────────
@@ -92,6 +93,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     },
     {icon: Package, label: 'Preorders', href: '/preorders' },
     {icon: Package, label: 'Orders', href: '/orders' },
+    {icon: History, label: 'Activity Logs', href: '/activity-logs' },
     { icon: ClipboardList, label: 'Purchase History', href: '/purchase-history' },
     { icon: Search, label: 'Lookup', href: '/lookup' },
     { icon: AlertTriangle, label: 'Extra Panel', href: '/extra' },

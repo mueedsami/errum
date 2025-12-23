@@ -71,9 +71,6 @@ export type ActivityLogsParams = {
   sortOrder?: 'asc' | 'desc';
 };
 
-// Backwards-compatible alias used by existing components.
-export type ActivityLogParams = ActivityLogsParams;
-
 type Paginator<T> = {
   current_page: number;
   data: T[];
@@ -90,47 +87,38 @@ type Paginator<T> = {
 };
 
 // Convenience mapping for older UI code that passes a short `type` like "orders".
-// Backend expects base model names (e.g. "Order"), NOT full class names.
 const MODULE_TO_SUBJECT_TYPE: Record<string, string> = {
-  orders: 'Order',
-  order: 'Order',
-  products: 'Product',
-  product: 'Product',
-  batches: 'ProductBatch',
-  batch: 'ProductBatch',
-  barcodes: 'ProductBarcode',
-  barcode: 'ProductBarcode',
-  shipments: 'Shipment',
-  shipment: 'Shipment',
-  customers: 'Customer',
-  customer: 'Customer',
-  employees: 'Employee',
-  employee: 'Employee',
-  stores: 'Store',
-  store: 'Store',
+  orders: 'App\\Models\\Order',
+  order: 'App\\Models\\Order',
+  products: 'App\\Models\\Product',
+  product: 'App\\Models\\Product',
+  batches: 'App\\Models\\Batch',
+  batch: 'App\\Models\\Batch',
+  shipments: 'App\\Models\\Shipment',
+  shipment: 'App\\Models\\Shipment',
+  customers: 'App\\Models\\Customer',
+  customer: 'App\\Models\\Customer',
+  stores: 'App\\Models\\Store',
+  store: 'App\\Models\\Store',
 };
 
 const baseModelFromSubjectType = (subjectType?: string | null) => {
   if (!subjectType) return '';
-  // Accept either "Order" or "App\\Models\\Order"
   const parts = String(subjectType).split('\\');
   return parts[parts.length - 1] || String(subjectType);
 };
 
 const toEntry = (item: any): ActivityLogEntry => {
-  // Controller returns `metadata` and `changes`, while spatie uses `properties`.
-  const props = item?.metadata ?? item?.properties ?? null;
+  const props = item?.properties ?? null;
   const causer = item?.causer ?? null;
 
-  // Some installs store request metadata inside metadata/properties.
-  const ip = props?.ip_address ?? props?.ip ?? props?.request_ip ?? item?.metadata?.ip_address ?? null;
-  const ua = props?.user_agent ?? props?.ua ?? props?.request_user_agent ?? item?.metadata?.user_agent ?? null;
-
-  const subjectBase = item?.subject?.type ?? baseModelFromSubjectType(item?.subject_type);
+  // Some installs store request metadata inside properties.
+  const ip = props?.ip_address ?? props?.ip ?? props?.request_ip ?? null;
+  const ua = props?.user_agent ?? props?.ua ?? props?.request_user_agent ?? null;
 
   return {
     id: item?.id,
-    created_at: item?.created_at_formatted ?? item?.created_at,
+    created_at: item?.created_at,
     updated_at: item?.updated_at,
 
     user: causer
@@ -141,7 +129,7 @@ const toEntry = (item: any): ActivityLogEntry => {
         }
       : null,
 
-    type: subjectBase || undefined,
+    type: baseModelFromSubjectType(item?.subject_type),
     action: item?.event ?? undefined,
     description: item?.description ?? undefined,
     metadata: props ?? null,
@@ -150,17 +138,13 @@ const toEntry = (item: any): ActivityLogEntry => {
 
     log_name: item?.log_name ?? null,
     event: item?.event ?? null,
-    subject_type: item?.subject?.full_type ?? item?.subject_type ?? null,
-    subject_id: item?.subject?.id ?? item?.subject_id ?? null,
+    subject_type: item?.subject_type ?? null,
+    subject_id: item?.subject_id ?? null,
     causer_id: item?.causer_id ?? null,
     causer_type: item?.causer_type ?? null,
     display: item?.display ?? undefined,
   };
 };
-
-function isPaginator(x: any): x is Paginator<any> {
-  return x && typeof x === 'object' && Array.isArray(x.data) && typeof x.current_page === 'number';
-}
 
 const activityService = {
   /**
@@ -200,10 +184,7 @@ const activityService = {
     // Newer UI param mapping
     // -----------------------------
     // model/action/userId are the UI filter names
-    if (!mapped.subject_type && params?.model && params.model !== 'all') {
-      // UI may pass either base model ("Order") or full class name.
-      mapped.subject_type = baseModelFromSubjectType(params.model);
-    }
+    if (!mapped.subject_type && params?.model && params.model !== 'all') mapped.subject_type = params.model;
     if (!mapped.subject_id && params?.modelId) mapped.subject_id = params.modelId;
     if (!mapped.event && params?.action && params.action !== 'all') mapped.event = params.action;
     if (!mapped.causer_id && params?.userId && params.userId !== 'all') mapped.causer_id = params.userId;
@@ -214,96 +195,39 @@ const activityService = {
     if (!mapped.date_from && mapped.start_date) mapped.date_from = mapped.start_date;
     if (!mapped.date_to && mapped.end_date) mapped.date_to = mapped.end_date;
 
-    // Clean up UI-only aliases so we don't send noisy params to backend.
-    delete mapped.start_date;
-    delete mapped.end_date;
-    delete mapped.dateFrom;
-    delete mapped.dateTo;
-    delete mapped.perPage;
-    delete mapped.sortBy;
-    delete mapped.sortOrder;
-    delete mapped.model;
-    delete mapped.modelId;
-    delete mapped.action;
-    delete mapped.userId;
-
     // per-page / sorting aliases
     if (!mapped.per_page && (params as any)?.perPage) mapped.per_page = (params as any).perPage;
     if (!mapped.sort_by && (params as any)?.sortBy) mapped.sort_by = (params as any).sortBy;
-    // Backend uses sort_direction (not sort_order)
-    if (!mapped.sort_direction && (params as any)?.sortOrder) mapped.sort_direction = (params as any).sortOrder;
+    if (!mapped.sort_order && (params as any)?.sortOrder) mapped.sort_order = (params as any).sortOrder;
 
     if (!mapped.subject_type && type) {
-      const normalized = String(type).toLowerCase();
-      mapped.subject_type = MODULE_TO_SUBJECT_TYPE[normalized] || baseModelFromSubjectType(type);
+      mapped.subject_type = MODULE_TO_SUBJECT_TYPE[String(type).toLowerCase()] || type;
     }
 
     // Search: backend supports a global `search` filter.
     if (!mapped.search && search) mapped.search = search;
 
     // older UI used `employee_id` for causer filter
-    if (!mapped.causer_id && employee_id) {
-      mapped.causer_id = employee_id;
-      if (!mapped.causer_type) mapped.causer_type = 'Employee';
-    }
+    if (!mapped.causer_id && employee_id) mapped.causer_id = employee_id;
 
     const res = await axios.get('/activity-logs', { params: mapped });
     const payload = res.data;
-
-    // Accept either:
-    // 1) { success: true, data: <paginator> }
-    // 2) <paginator>
-    // 3) { data: [...] }
-    const maybe = payload?.data && isPaginator(payload.data) ? payload.data : payload;
-    let paginator: Paginator<any>;
-
-    if (isPaginator(maybe)) {
-      paginator = maybe;
-    } else if (Array.isArray(maybe?.data)) {
-      // Non-paginated wrapper: { data: [...] }
-      paginator = {
-        current_page: 1,
-        data: maybe.data,
-        last_page: 1,
-        per_page: maybe.data.length,
-        total: maybe.data.length,
-        from: maybe.data.length ? 1 : null,
-        to: maybe.data.length || null,
-      };
-    } else if (Array.isArray(maybe)) {
-      paginator = {
-        current_page: 1,
-        data: maybe,
-        last_page: 1,
-        per_page: maybe.length,
-        total: maybe.length,
-        from: maybe.length ? 1 : null,
-        to: maybe.length || null,
-      };
-    } else {
-      paginator = {
-        current_page: 1,
-        data: [],
-        last_page: 1,
-        per_page: mapped.per_page || 50,
-        total: 0,
-        from: null,
-        to: null,
-      };
-    }
-
+    // Backend returns: { success: true, data: <paginator> }
+    const paginator = (payload?.data ?? payload) as Paginator<any>;
     return {
       ...paginator,
-      data: Array.isArray(paginator.data) ? paginator.data.map(toEntry) : [],
+      data: Array.isArray(paginator?.data) ? paginator.data.map(toEntry) : [],
     } as Paginator<ActivityLogEntry>;
   },
 
   /**
    * Entity-specific logs (non-paginated)
-   * Backend: GET /activity-logs/model/{ModelBaseName}/{id}
+   * Backend: GET /activity-logs/model/{ModelBaseName}/logs/{id}
    */
   async getModelLogs(model: string, id: number | string) {
-    const res = await axios.get(`/activity-logs/model/${encodeURIComponent(model)}/${encodeURIComponent(String(id))}`);
+    const res = await axios.get(
+      `/activity-logs/model/${encodeURIComponent(model)}/logs/${encodeURIComponent(String(id))}`
+    );
     const payload = res.data;
     const rows = payload?.data ?? payload;
     return {
@@ -328,18 +252,14 @@ const activityService = {
 
   async getAvailableModels() {
     const res = await axios.get('/activity-logs/models');
-    return {
-      success: Boolean(res.data?.success ?? true),
-      data: res.data?.data ?? [],
-    };
+    // Backend returns { success: true, data: string[] }
+    return res.data?.data ?? res.data ?? [];
   },
 
   async getAvailableUsers() {
     const res = await axios.get('/activity-logs/users');
-    return {
-      success: Boolean(res.data?.success ?? true),
-      data: res.data?.data ?? [],
-    };
+    // Backend returns { success: true, data: Array<{id,name,email}> }
+    return res.data?.data ?? res.data ?? [];
   },
 
   // ---- Aliases used by the Activity Logs pages/components ----
@@ -362,17 +282,8 @@ const activityService = {
   },
 
   async exportCsv(params: ActivityLogsParams = {}) {
-    // Backend: GET /activity-logs/export/csv
-    const res = await axios.get('/activity-logs/export/csv', {
-      params,
-      responseType: 'blob',
-    });
-    return res;
-  },
-
-  async exportExcel(params: ActivityLogsParams = {}) {
-    // Backend: GET /activity-logs/export/excel
-    const res = await axios.get('/activity-logs/export/excel', {
+    // returns a CSV download response from backend
+    const res = await axios.get('/activity-logs/export', {
       params,
       responseType: 'blob',
     });

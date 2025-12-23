@@ -172,7 +172,7 @@ export default function ActivityLogsClient() {
                   <option value="">All modules</option>
                   {/* If models list is available, show them */}
                   {models.map((m) => (
-                    <option key={m.value} value={m.value}>
+                    <option key={m.full_name} value={m.full_name}>
                       {m.label}
                     </option>
                   ))}

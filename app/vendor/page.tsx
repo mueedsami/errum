@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { X, Plus, DollarSign, ShoppingCart, MoreVertical, Eye, Receipt, Loader2, AlertCircle } from 'lucide-react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
@@ -71,6 +71,7 @@ export default function VendorPaymentPage() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [selectedSkuGroup, setSelectedSkuGroup] = useState<string>('');
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [vendorPayments, setVendorPayments] = useState<any[]>([]);
@@ -121,14 +122,6 @@ export default function VendorPaymentPage() {
     ]
   });
 
-  // Variant quick-add (group sizes/colors) in PO creation
-  const [showVariantPicker, setShowVariantPicker] = useState(false);
-  const [variantBaseProduct, setVariantBaseProduct] = useState<Product | null>(null);
-  const [variantOptions, setVariantOptions] = useState<Product[]>([]);
-  const [variantInputs, setVariantInputs] = useState<Record<number, { quantity: string; unit_cost: string }>>({});
-  const [variantBulkCost, setVariantBulkCost] = useState('');
-
-
   // Form states - Payment
   const [paymentForm, setPaymentForm] = useState({
     payment_method_id: '',
@@ -169,122 +162,6 @@ export default function VendorPaymentPage() {
     setTimeout(() => setAlert(null), 3000);
   };
 
-  const getVariantGroupKey = (p: Product): string => {
-    const sku = (p.sku || '').trim().toLowerCase();
-    if (sku) return sku.replace(/[-_\s]?\d+$/i, '');
-    const name = (p.name || '').trim().toLowerCase();
-    return name.replace(/\s+\d+(?:\.\d+)?$/i, '').trim();
-  };
-
-  const extractTrailingSize = (p: Product): number | null => {
-    const name = (p.name || '').trim();
-    const m = name.match(/(\d+(?:\.\d+)?)\s*$/);
-    if (!m) return null;
-    const n = parseFloat(m[1]);
-    return isNaN(n) ? null : n;
-  };
-
-  const getVariantGroupProducts = (p: Product): Product[] => {
-    // If backend already returns variants, use them
-    if (Array.isArray((p as any).variants) && (p as any).variants.length > 0) {
-      const all = [p, ...(p as any).variants].filter(Boolean) as any[];
-      const map = new Map<number, Product>();
-      all.forEach((x) => {
-        if (x?.id) map.set(Number(x.id), x);
-      });
-      return Array.from(map.values());
-    }
-
-    // Fallback: infer variants from the full product list by SKU prefix or name base
-    const key = getVariantGroupKey(p);
-    const grouped = products.filter((x) => getVariantGroupKey(x) === key);
-
-    if (grouped.length <= 1) {
-      const base = (p.name || '').trim().toLowerCase().replace(/\s+\d+(?:\.\d+)?$/i, '').trim();
-      const starts = products.filter((x) => (x.name || '').trim().toLowerCase().startsWith(base));
-      return starts;
-    }
-
-    return grouped;
-  };
-
-  const openVariantPicker = (productId: string) => {
-    const pid = parseInt(productId || '0', 10);
-    if (!pid) return;
-
-    const base = products.find((p) => p.id === pid);
-    if (!base) return;
-
-    const options = getVariantGroupProducts(base)
-      .filter((x) => x?.id)
-      .sort((a, b) => {
-        const sa = extractTrailingSize(a);
-        const sb = extractTrailingSize(b);
-        if (sa === null && sb === null) return (a.name || '').localeCompare(b.name || '');
-        if (sa === null) return 1;
-        if (sb === null) return -1;
-        return sa - sb;
-      });
-
-    const inputs: Record<number, { quantity: string; unit_cost: string }> = {};
-    options.forEach((opt) => {
-      const existing = purchaseForm.items.find((it: any) => String(it.product_id) === String(opt.id));
-      inputs[opt.id] = {
-        quantity: existing?.quantity_ordered || '0',
-        unit_cost: existing?.unit_cost || '',
-      };
-    });
-
-    setVariantBaseProduct(base);
-    setVariantOptions(options);
-    setVariantInputs(inputs);
-    setVariantBulkCost('');
-    setShowVariantPicker(true);
-  };
-
-  const applyVariantPicker = () => {
-    if (!variantOptions.length) return;
-
-    setPurchaseForm((prev: any) => {
-      const items = [...prev.items];
-
-      variantOptions.forEach((opt) => {
-        const input = variantInputs[opt.id] || { quantity: '0', unit_cost: '' };
-        const qty = parseInt(input.quantity || '0', 10) || 0;
-        if (qty <= 0) return;
-
-        const idx = items.findIndex((x) => String(x.product_id) === String(opt.id));
-        if (idx >= 0) {
-          items[idx] = {
-            ...items[idx],
-            quantity_ordered: String(qty),
-            unit_cost: input.unit_cost || items[idx].unit_cost || '',
-          };
-        } else {
-          items.push({
-            product_id: String(opt.id),
-            quantity_ordered: String(qty),
-            unit_cost: input.unit_cost || '',
-            unit_sell_price: '',
-            tax_amount: '',
-            discount_amount: '',
-            notes: '',
-          });
-        }
-      });
-
-      return { ...prev, items };
-    });
-
-    setShowVariantPicker(false);
-    setVariantBaseProduct(null);
-    setVariantOptions([]);
-    setVariantInputs({});
-    setVariantBulkCost('');
-    showAlert('success', 'Variations applied to purchase order');
-  };
-
-
   // Load vendors
   const loadVendors = async () => {
     try {
@@ -301,7 +178,67 @@ export default function VendorPaymentPage() {
   };
 
   // Load stores (warehouses)
-  const loadStores = async () => {
+  
+
+// Group products by SKU to quickly add all variations of a base product
+const skuGroups = useMemo(() => {
+  const map = new Map<string, Product[]>();
+  for (const p of products) {
+    const sku = (p.sku || '').trim();
+    if (!sku) continue;
+    if (!map.has(sku)) map.set(sku, []);
+    map.get(sku)!.push(p);
+  }
+
+  return Array.from(map.entries())
+    .map(([sku, items]) => {
+      const baseName = (items[0]?.name || '').split(' - ')[0].trim() || items[0]?.name || sku;
+      const label = items.length > 1
+        ? `${baseName} (SKU: ${sku}) • ${items.length} variants`
+        : `${baseName} (SKU: ${sku})`;
+      return { sku, label, items };
+    })
+    .filter(g => g.items.length > 1)
+    .sort((a, b) => a.label.localeCompare(b.label));
+}, [products]);
+
+const addSkuGroupToItems = (sku: string) => {
+  const group = skuGroups.find(g => g.sku === sku);
+  if (!group) return;
+
+  setPurchaseForm(prev => {
+    const existing = new Set(prev.items.map(i => i.product_id).filter(Boolean));
+    const nextItems = [...prev.items];
+
+    // If there's exactly one blank row, reuse it for the first variant to avoid empty row at top
+    const canReplaceFirst = nextItems.length === 1 && !nextItems[0].product_id;
+
+    group.items.forEach((p, idx) => {
+      if (existing.has(String(p.id))) return;
+
+      const newItem: PurchaseOrderItem = {
+        product_id: String(p.id),
+        quantity_ordered: '0',
+        unit_cost: '0',
+        unit_sell_price: '',
+        tax_amount: '',
+        discount_amount: '',
+        notes: ''
+      };
+
+      if (canReplaceFirst && idx === 0) {
+        nextItems[0] = newItem;
+      } else {
+        nextItems.push(newItem);
+      }
+      existing.add(String(p.id));
+    });
+
+    return { ...prev, items: nextItems };
+  });
+};
+
+const loadStores = async () => {
     try {
       const response = await storeService.getStores({ 
         is_warehouse: true,
@@ -408,7 +345,33 @@ export default function VendorPaymentPage() {
     try {
       setLoading(true);
 
-      const purchaseData: CreatePurchaseOrderData = {
+      
+
+// Allow rows with 0 quantity (useful when adding a whole SKU group)
+const cleanedItems = purchaseForm.items
+  .map(i => ({
+    ...i,
+    _qty: parseInt((i.quantity_ordered || '0').toString(), 10) || 0,
+    _cost: parseFloat((i.unit_cost || '0').toString()) || 0
+  }))
+  .filter(i => i.product_id && i._qty > 0);
+
+if (cleanedItems.length === 0) {
+  showAlert('error', 'Please add at least one item with quantity greater than 0');
+  setIsAddingPurchase(false);
+  return;
+}
+
+for (const i of cleanedItems) {
+  if (i._cost <= 0) {
+    const name = products.find(p => String(p.id) === String(i.product_id))?.name || 'this item';
+    showAlert('error', `Please enter a valid unit cost for ${name}`);
+    setIsAddingPurchase(false);
+    return;
+  }
+}
+
+const purchaseData: CreatePurchaseOrderData = {
         vendor_id: parseInt(purchaseForm.vendor_id),
         store_id: parseInt(purchaseForm.store_id),
         expected_delivery_date: purchaseForm.expected_delivery_date || undefined,
@@ -417,16 +380,16 @@ export default function VendorPaymentPage() {
         shipping_cost: purchaseForm.shipping_cost ? parseFloat(purchaseForm.shipping_cost) : undefined,
         notes: purchaseForm.notes || undefined,
         terms_and_conditions: purchaseForm.terms_and_conditions || undefined,
-        items: purchaseForm.items.filter(item => item.product_id).map(item => ({
-          product_id: parseInt(item.product_id),
-          quantity_ordered: parseInt(item.quantity_ordered),
-          unit_cost: parseFloat(item.unit_cost),
-          unit_sell_price: item.unit_sell_price ? parseFloat(item.unit_sell_price) : undefined,
-          tax_amount: item.tax_amount ? parseFloat(item.tax_amount) : undefined,
-          discount_amount: item.discount_amount ? parseFloat(item.discount_amount) : undefined,
-          notes: item.notes || undefined
-        }))
-      };
+        
+items: cleanedItems.map(item => ({
+  product_id: parseInt(item.product_id),
+  quantity_ordered: item._qty,
+  unit_cost: item._cost,
+  unit_sell_price: item.unit_sell_price ? parseFloat(item.unit_sell_price) : undefined,
+  tax_amount: item.tax_amount ? parseFloat(item.tax_amount) : undefined,
+  discount_amount: item.discount_amount ? parseFloat(item.discount_amount) : undefined,
+  notes: item.notes || undefined
+}))};
 
       await purchaseOrderService.create(purchaseData);
       
@@ -996,7 +959,41 @@ export default function VendorPaymentPage() {
                 <Plus className="w-3 h-3" />
                 Add Product
               </button>
-            </div>
+            
+
+<div className="mb-3 flex flex-col gap-2">
+  <div className="flex items-end gap-2">
+    <div className="flex-1">
+      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+        Quick add variations (same SKU)
+      </label>
+      <select
+        value={selectedSkuGroup}
+        onChange={(e) => setSelectedSkuGroup(e.target.value)}
+        className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+      >
+        <option value="">Select a base product (SKU group)...</option>
+        {skuGroups.map(g => (
+          <option key={g.sku} value={g.sku}>{g.label}</option>
+        ))}
+      </select>
+    </div>
+    <button
+      type="button"
+      onClick={() => {
+        if (!selectedSkuGroup) return;
+        addSkuGroupToItems(selectedSkuGroup);
+        setSelectedSkuGroup('');
+      }}
+      className="px-3 py-2 text-sm bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 rounded-lg hover:opacity-90"
+    >
+      Add Group
+    </button>
+  </div>
+  <p className="text-xs text-gray-500 dark:text-gray-400">
+    Tip: This adds all variants under the same SKU with quantity 0 — just fill the ones you want.
+  </p>
+</div>
 
             {purchaseForm.items.map((item, index) => (
               <div key={index} className="border border-gray-200 dark:border-gray-600 rounded-lg p-3 mb-3">
@@ -1015,22 +1012,6 @@ export default function VendorPaymentPage() {
                         <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>
                       ))}
                     </select>
-                          {item.product_id && (() => {
-                            const base = products.find((p) => p.id === parseInt(item.product_id, 10));
-                            const count = base ? getVariantGroupProducts(base).length : 0;
-                            if (!base || count <= 1) return null;
-                            return (
-                              <button
-                                type="button"
-                                onClick={() => openVariantPicker(item.product_id)}
-                                className="mt-2 inline-flex items-center gap-1 px-2 py-1 text-xs bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-md"
-                                title="Quick add size/color variations"
-                              >
-                                Variations ({count})
-                              </button>
-                            );
-                          })()}
-
                   </div>
 
                   <div>
@@ -1196,131 +1177,7 @@ export default function VendorPaymentPage() {
       </Modal>
 
       {/* Payment Modal */}
-      
-    {/* Variant Picker Modal */}
-    <Modal
-      isOpen={showVariantPicker}
-      onClose={() => setShowVariantPicker(false)}
-      title={`Add variations${variantBaseProduct?.name ? `: ${variantBaseProduct.name}` : ''}`}
-      size="xl"
-    >
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row gap-3 sm:items-end">
-          <div className="flex-1">
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              Set Unit Cost for all (optional)
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              value={variantBulkCost}
-              onChange={(e) => setVariantBulkCost(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-              placeholder="e.g., 1200"
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              if (!variantBulkCost) return;
-              setVariantInputs((prev) => {
-                const next = { ...prev };
-                variantOptions.forEach((v) => {
-                  next[v.id] = { ...(next[v.id] || { quantity: '0', unit_cost: '' }), unit_cost: variantBulkCost };
-                });
-                return next;
-              });
-            }}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg"
-          >
-            Apply to all
-          </button>
-        </div>
-
-        <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-              <thead className="bg-gray-50 dark:bg-gray-700">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">
-                    Variation
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">
-                    Qty
-                  </th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">
-                    Unit Cost
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-                {variantOptions.map((v) => (
-                  <tr key={v.id}>
-                    <td className="px-4 py-3 text-sm text-gray-800 dark:text-gray-100">
-                      <div className="font-medium">{v.name}</div>
-                      {v.sku && <div className="text-xs text-gray-500 dark:text-gray-400">{v.sku}</div>}
-                    </td>
-                    <td className="px-4 py-3">
-                      <input
-                        type="number"
-                        value={variantInputs[v.id]?.quantity ?? '0'}
-                        onChange={(e) =>
-                          setVariantInputs((prev) => ({
-                            ...prev,
-                            [v.id]: { ...(prev[v.id] || { quantity: '0', unit_cost: '' }), quantity: e.target.value },
-                          }))
-                        }
-                        className="w-28 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={variantInputs[v.id]?.unit_cost ?? ''}
-                        onChange={(e) =>
-                          setVariantInputs((prev) => ({
-                            ...prev,
-                            [v.id]: { ...(prev[v.id] || { quantity: '0', unit_cost: '' }), unit_cost: e.target.value },
-                          }))
-                        }
-                        className="w-36 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                      />
-                    </td>
-                  </tr>
-                ))}
-                {variantOptions.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
-                      No variations found for this product.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="flex justify-end gap-3 pt-2">
-          <button
-            type="button"
-            onClick={() => setShowVariantPicker(false)}
-            className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={applyVariantPicker}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg"
-          >
-            Apply to PO
-          </button>
-        </div>
-      </div>
-    </Modal>
-
-<Modal
+      <Modal
         isOpen={showPayment}
         onClose={() => setShowPayment(false)}
         title="Make Payment"

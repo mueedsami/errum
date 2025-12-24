@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Search, X, Globe, AlertCircle, Package } from 'lucide-react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
+import CustomerTagManager from '@/components/customers/CustomerTagManager';
 import axios from '@/lib/axios';
 import storeService from '@/services/storeService';
 import productImageService from '@/services/productImageService';
@@ -957,18 +958,15 @@ export default function SocialCommercePage() {
                                 <p>
                                   Total Orders: <span className="font-medium">{existingCustomer.total_orders ?? 0}</span>
                                 </p>
-                                {Array.isArray(existingCustomer.tags) && existingCustomer.tags.length > 0 && (
-                                  <div className="flex flex-wrap gap-1 pt-1">
-                                    {existingCustomer.tags.map((tag: string) => (
-                                      <span
-                                        key={tag}
-                                        className="px-2 py-0.5 rounded-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-[10px] font-medium text-gray-700 dark:text-gray-200"
-                                      >
-                                        {tag}
-                                      </span>
-                                    ))}
-                                  </div>
-                                )}
+                                {/* Customer Tags (view + manage) */}
+                                <CustomerTagManager
+                                  customerId={existingCustomer.id}
+                                  initialTags={Array.isArray(existingCustomer.tags) ? existingCustomer.tags : []}
+                                  compact
+                                  onTagsChange={(next) =>
+                                    setExistingCustomer((prev: any) => (prev ? { ...prev, tags: next } : prev))
+                                  }
+                                />
                                 {lastOrderInfo ? (
                                   <div className="mt-1">
                                     <p className="font-semibold">Last Order Summary:</p>

@@ -54,7 +54,12 @@ export interface ActivityLogParams {
   event?: string; // created|updated|deleted
   per_page?: number;
   page?: number;
+  /** Allow endpoint-specific filters (order_id, product_id, dispatch_id, etc.) */
+  [key: string]: any;
 }
+
+// Backward/compat alias used by UI components
+export type BusinessHistoryEntry = ActivityLogEntry;
 
 type Paginated<T> = {
   data: T[];
@@ -113,11 +118,11 @@ async function fetchCategory(
   params: ActivityLogParams
 ): Promise<Paginated<ActivityLogEntry>> {
   const url = endpointForCategory[category];
+  // Pass through endpoint-specific filters (e.g., order_id, product_id, dispatch_id, etc.)
+  const { category: _cat, ...rest } = params as any;
   const res = await axios.get(url, {
     params: {
-      date_from: params.date_from,
-      date_to: params.date_to,
-      event: params.event,
+      ...rest,
       per_page: params.per_page ?? 50,
       page: params.page ?? 1,
     },
@@ -169,6 +174,11 @@ const activityService = {
         combined_count: merged.length,
       },
     };
+  },
+
+  /** Preferred API name used in some UI: getHistory(category, params) */
+  async getHistory(category: BusinessHistoryCategory, params: ActivityLogParams) {
+    return this.getLogs({ ...params, category });
   },
 
   async getStatistics(date_from?: string, date_to?: string): Promise<StatsResponse> {

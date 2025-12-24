@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { History, RefreshCw, ExternalLink } from 'lucide-react';
-import activityService, { ActivityLogEntry, ActivityLogParams } from '@/services/activityService';
+import activityService, { BusinessHistoryEntry, BusinessHistoryCategory } from '@/services/activityService';
 import ActivityLogTable from '@/components/activity/ActivityLogTable';
 import { useRouter } from 'next/navigation';
 
@@ -46,40 +46,75 @@ export default function ActivityLogPanel({
 }: Props) {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
-  const [logs, setLogs] = useState<ActivityLogEntry[]>([]);
+  const [entries, setEntries] = useState<BusinessHistoryEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const params: ActivityLogParams = useMemo(() => {
+  const { category, serverParams } = useMemo(() => {
     const end = new Date();
     const start = new Date();
     start.setDate(start.getDate() - 7);
+    // Map legacy "module" to a business-history category. If it doesn't match, fall back to 'all'.
+    const cat = (['product-dispatches','orders','purchase-orders','store-assignments','products'] as const).includes(module as any)
+      ? (module as BusinessHistoryCategory)
+      : 'all';
+
+    // Try entity-targeted filters when possible
+    const extra: Record<string, any> = {};
+    if (entityId != null && modelName) {
+      const mid = Number(entityId);
+      if (!Number.isNaN(mid)) {
+        if (modelName === 'Order') extra.order_id = mid;
+        if (modelName === 'PurchaseOrder') extra.purchase_order_id = mid;
+        if (modelName === 'Product') extra.product_id = mid;
+        if (modelName === 'ProductDispatch') extra.dispatch_id = mid;
+      }
+    }
+
     return {
-      start_date: isoDate(start),
-      end_date: isoDate(end),
-      type: module,
-      search,
-      employee_id: employeeId,
-      per_page: limit,
-      page: 1,
+      category: cat,
+      serverParams: {
+        date_from: isoDate(start),
+        date_to: isoDate(end),
+        event: undefined,
+        per_page: Math.min(Math.max(10, limit), 100),
+        page: 1,
+        ...extra,
+      } as any,
     };
-  }, [module, search, employeeId, limit]);
+  }, [module, search, employeeId, limit, entityId, modelName]);
 
   const load = async () => {
     setIsLoading(true);
     setError(null);
     try {
-      // If we know the entity, prefer the dedicated endpoint:
-      if (entityId != null && modelName) {
-        const res = await activityService.getModelLogs(modelName, entityId);
-        setLogs((res.data || []).slice(0, limit));
-      } else {
-        const res = await activityService.getLogs({ ...params, per_page: Math.max(10, limit) });
-        setLogs((res.data || []).slice(0, limit));
+      const res = await activityService.getHistory(category, serverParams);
+      let rows = (res.data || []).slice(0, limit);
+
+      // Optional client-side filters
+      if (employeeId) rows = rows.filter(r => r.who?.id === employeeId);
+      if (search) {
+        const q = search.toLowerCase();
+        rows = rows.filter(r => {
+          const hay = [
+            r.what?.description,
+            r.what?.action,
+            r.subject?.type,
+            String(r.subject?.id ?? ''),
+            r.who?.name,
+            r.who?.email,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase();
+          return hay.includes(q);
+        });
       }
+
+      setEntries(rows);
     } catch (e: any) {
       const msg = e?.message || 'Failed to load activity logs.';
       setError(msg);
-      setLogs([]);
+      setEntries([]);
     } finally {
       setIsLoading(false);
     }
@@ -88,7 +123,7 @@ export default function ActivityLogPanel({
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.type, params.search, params.employee_id, entityId, modelName, limit]);
+  }, [category, serverParams.date_from, serverParams.date_to, entityId, modelName, limit, search, employeeId]);
 
   const viewAllUrl = useMemo(() => {
     const q = new URLSearchParams();
@@ -145,7 +180,7 @@ export default function ActivityLogPanel({
             </div>
           </div>
         ) : (
-          <ActivityLogTable logs={logs} isLoading={isLoading} emptyText="No activities found for this context." compact />
+          <ActivityLogTable entries={entries} isLoading={isLoading} />
         )}
       </div>
     </div>

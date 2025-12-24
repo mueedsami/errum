@@ -1,261 +1,282 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Filter, RefreshCw, Search } from 'lucide-react';
+
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
-import { Calendar, History, Loader, Search, RefreshCw } from 'lucide-react';
-import activityService, { ActivityLogEntry, ActivityLogParams } from '@/services/activityService';
 import ActivityLogTable from '@/components/activity/ActivityLogTable';
-import { useSearchParams } from 'next/navigation';
+import activityService, { ActivityLogEntry, BusinessHistoryCategory } from '@/services/activityService';
+import Toast from '@/components/Toast';
 
-type UserOpt = { id: number; name: string };
-type ModelOpt = { value: string; label: string; full_name: string };
+type UserOption = { id: number; name: string; email?: string };
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
+const CATEGORY_OPTIONS: Array<{ value: BusinessHistoryCategory; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'orders', label: 'Orders' },
+  { value: 'product-dispatches', label: 'Product Dispatches' },
+  { value: 'purchase-orders', label: 'Purchase Orders' },
+  { value: 'store-assignments', label: 'Store Assignments' },
+  { value: 'products', label: 'Products' },
+];
+
+const EVENT_OPTIONS = [
+  { value: '', label: 'Any' },
+  { value: 'created', label: 'Created' },
+  { value: 'updated', label: 'Updated' },
+  { value: 'deleted', label: 'Deleted' },
+];
+
+function toYmd(d: Date) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 export default function ActivityLogsClient() {
-  const sp = useSearchParams();
+  const searchParams = useSearchParams();
+
   const [darkMode, setDarkMode] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  const [users, setUsers] = useState<UserOpt[]>([]);
-  const [models, setModels] = useState<ModelOpt[]>([]);
-  const [filtersLoading, setFiltersLoading] = useState(false);
+  // Filters
+  const [category, setCategory] = useState<BusinessHistoryCategory>(
+    (searchParams.get('category') as BusinessHistoryCategory) || 'all'
+  );
+  const [event, setEvent] = useState<string>(searchParams.get('event') || '');
+  const [employeeId, setEmployeeId] = useState<string>(searchParams.get('employee_id') || '');
+  const [q, setQ] = useState<string>(searchParams.get('q') || '');
+  const [dateFrom, setDateFrom] = useState<string>(
+    searchParams.get('date_from') || toYmd(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000))
+  );
+  const [dateTo, setDateTo] = useState<string>(searchParams.get('date_to') || toYmd(new Date()));
+  const [perPage, setPerPage] = useState<number>(50);
 
-  const [logs, setLogs] = useState<ActivityLogEntry[]>([]);
+  // Data
+  const [entries, setEntries] = useState<ActivityLogEntry[]>([]);
+  const [users, setUsers] = useState<UserOption[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // filters
-  const [q, setQ] = useState<string>(sp.get('q') || sp.get('search') || '');
-  // We store module as `subject_type` (full class name), but still allow plain strings.
-  const [module, setModule] = useState<string>(sp.get('module') || '');
-  const [employeeId, setEmployeeId] = useState<string>(sp.get('employee') || sp.get('employeeId') || '');
-  const [event, setEvent] = useState<string>(sp.get('event') || '');
-
-  // Optional: deep-link to a specific model record's logs
-  const [modelName, setModelName] = useState<string>(sp.get('model') || '');
-  const [entityId, setEntityId] = useState<string>(sp.get('id') || sp.get('entityId') || '');
-
-  const [startDate, setStartDate] = useState<string>(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 7);
-    return iso(d);
-  });
-  const [endDate, setEndDate] = useState<string>(() => iso(new Date()));
-
-  const params: ActivityLogParams = useMemo(
-    () => ({
-      start_date: startDate,
-      end_date: endDate,
-      search: q.trim() || undefined,
-      type: module.trim() || undefined,
-      event: event.trim() || undefined,
-      employee_id: employeeId ? Number(employeeId) : undefined,
-      page: 1,
-      per_page: 100,
-    }),
-    [startDate, endDate, q, module, employeeId, event]
+  // Toast
+  const [toast, setToast] = useState<{ show: boolean; message: string; type: 'success' | 'error' | 'warning' }>(
+    { show: false, message: '', type: 'success' }
   );
 
-  const loadFilterOptions = async () => {
-    setFiltersLoading(true);
-    try {
-      const [u, m] = await Promise.all([
-        activityService.getAvailableUsers().catch(() => ({ data: [] })),
-        activityService.getAvailableModels().catch(() => ({ data: [] })),
-      ]);
-
-      const mappedUsers: UserOpt[] = (u.data || [])
-        .map((x: any) => ({ id: Number(x.id), name: String(x.name || `User #${x.id}`) }))
-        .filter((x) => Number.isFinite(x.id));
-      mappedUsers.sort((a, b) => a.name.localeCompare(b.name));
-      setUsers(mappedUsers);
-
-      const mappedModels: ModelOpt[] = (m.data || [])
-        .map((x: any) => ({
-          value: String(x.value || ''),
-          label: String(x.label || x.value || ''),
-          full_name: String(x.full_name || ''),
-        }))
-        .filter((x) => x.full_name);
-      mappedModels.sort((a, b) => a.label.localeCompare(b.label));
-      setModels(mappedModels);
-    } finally {
-      setFiltersLoading(false);
-    }
-  };
+  useEffect(() => {
+    // load user options from statistics (most_active_users)
+    (async () => {
+      try {
+        const stats = await activityService.getStatistics(dateFrom, dateTo);
+        const opts = (stats.most_active_users || []).map((u) => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+        }));
+        setUsers(opts);
+      } catch {
+        // non-blocking
+        setUsers([]);
+      }
+    })();
+  }, [dateFrom, dateTo]);
 
   const loadLogs = async () => {
-    setIsLoading(true);
-    setError(null);
     try {
-      if (modelName && entityId) {
-        const res = await activityService.getModelLogs(modelName, entityId);
-        setLogs(res.data);
-      } else {
-        const res = await activityService.getLogs(params);
-        setLogs(res.data);
-      }
+      setIsLoading(true);
+      setError(null);
+      const res = await activityService.getLogs({
+        category,
+        date_from: dateFrom,
+        date_to: dateTo,
+        event: event || undefined,
+        per_page: perPage,
+      });
+      setEntries(res.data || []);
     } catch (e: any) {
-      setError(e?.message || 'Failed to load activity logs.');
-      setLogs([]);
+      setError(e?.response?.data?.message || e?.message || 'Failed to load history');
+      setEntries([]);
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    loadFilterOptions();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
     loadLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params.start_date, params.end_date, params.search, params.type, params.employee_id, params.event, modelName, entityId]);
+  }, [category, event, dateFrom, dateTo, perPage]);
+
+  const filtered = useMemo(() => {
+    const empIdNum = employeeId ? Number(employeeId) : null;
+    const needle = q.trim().toLowerCase();
+    return (entries || []).filter((e) => {
+      if (empIdNum && Number(e.who?.id) !== empIdNum) return false;
+      if (!needle) return true;
+      const hay = [
+        e.what?.description,
+        e.what?.action,
+        e.subject?.type,
+        e.category,
+        e.who?.name,
+        e.who?.email,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(needle);
+    });
+  }, [entries, employeeId, q]);
 
   return (
     <div className={darkMode ? 'dark' : ''}>
-      <div className="flex h-screen bg-white dark:bg-black">
-        <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <Header darkMode={darkMode} setDarkMode={setDarkMode} toggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
+      <div className="min-h-screen bg-white dark:bg-black">
+        <Header
+          darkMode={darkMode}
+          setDarkMode={setDarkMode}
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+          title="Business History"
+        />
+        <Sidebar darkMode={darkMode} isOpen={sidebarOpen} />
 
-          <main className="flex-1 overflow-auto bg-white dark:bg-black">
-            <div className="border-b border-gray-200 dark:border-gray-800">
-              <div className="px-4 py-2">
-                <div className="max-w-7xl mx-auto flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 bg-black dark:bg-white rounded">
-                      <History className="w-4 h-4 text-white dark:text-black" />
-                    </div>
-                    <div>
-                      <h1 className="text-lg font-bold text-black dark:text-white leading-none">Activity Logs</h1>
-                      <p className="text-[10px] text-gray-600 dark:text-gray-400 leading-none mt-0.5">
-                        {logs.length} entries
-                        {modelName && entityId ? ` • ${modelName} #${entityId}` : module ? ` • ${module}` : ''}
-                      </p>
-                    </div>
+        <main className={`pt-16 ${sidebarOpen ? 'lg:pl-72' : ''}`}>
+          <div className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+            <div className="flex flex-col gap-4">
+              {/* Filters */}
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100 mb-3">
+                  <Filter className="w-4 h-4" />
+                  Filters
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-3">
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Category</label>
+                    <select
+                      className="w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-black text-sm"
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value as BusinessHistoryCategory)}
+                    >
+                      {CATEGORY_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Event</label>
+                    <select
+                      className="w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-black text-sm"
+                      value={event}
+                      onChange={(e) => setEvent(e.target.value)}
+                    >
+                      {EVENT_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Employee</label>
+                    <select
+                      className="w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-black text-sm"
+                      value={employeeId}
+                      onChange={(e) => setEmployeeId(e.target.value)}
+                    >
+                      <option value="">Any</option>
+                      {users.map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name}{u.email ? ` (${u.email})` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">From</label>
+                    <input
+                      type="date"
+                      className="w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-black text-sm"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">To</label>
+                    <input
+                      type="date"
+                      className="w-full h-10 px-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-black text-sm"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Search</label>
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                      <input
+                        className="w-full h-10 pl-9 pr-3 rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-black text-sm"
+                        value={q}
+                        onChange={(e) => setQ(e.target.value)}
+                        placeholder="description, user, subject..."
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 mt-4">
                   <button
                     onClick={loadLogs}
-                    className="inline-flex items-center gap-1 px-2 py-1 border border-gray-300 dark:border-gray-700 rounded text-xs font-medium text-black dark:text-white hover:bg-gray-50 dark:hover:bg-gray-900"
+                    className="inline-flex items-center gap-2 h-10 px-4 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700"
+                    disabled={isLoading}
                   >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+                    <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
                     Refresh
                   </button>
+
+                  <div className="text-xs text-gray-600 dark:text-gray-400">
+                    Showing <span className="font-medium">{filtered.length}</span> activities
+                    {category === 'all' && (
+                      <span className="ml-1">(combined)</span>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Filters */}
-            <div className="max-w-7xl mx-auto px-4 py-3">
-              <div className="grid grid-cols-1 md:grid-cols-6 gap-2">
-                <div className="md:col-span-2 relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    type="text"
-                    placeholder="Search (order no, barcode, note, action...)"
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    className="w-full pl-10 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
+              {/* Table */}
+              <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg">
+                {error ? (
+                  <div className="p-6 text-sm text-red-600 dark:text-red-400">{error}</div>
+                ) : (
+                  <ActivityLogTable
+                    entries={filtered}
+                    isLoading={isLoading}
+                    onCopy={(text) => {
+                      navigator.clipboard.writeText(text);
+                      setToast({ show: true, message: 'Copied to clipboard', type: 'success' });
+                    }}
                   />
-                </div>
-
-                <select
-                  value={module}
-                  onChange={(e) => setModule(e.target.value)}
-                  className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
-                >
-                  <option value="">All modules</option>
-                  {/* If models list is available, show them */}
-                  {models.map((m) => (
-                    <option key={m.value} value={m.value}>
-                      {m.label}
-                    </option>
-                  ))}
-                  {/* Fallback common modules */}
-                  <option value="orders">Orders</option>
-                  <option value="products">Products</option>
-                  <option value="batches">Batches</option>
-                  <option value="inventory">Inventory</option>
-                </select>
-
-                <select
-                  value={event}
-                  onChange={(e) => setEvent(e.target.value)}
-                  className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
-                >
-                  <option value="">All actions</option>
-                  <option value="created">created</option>
-                  <option value="updated">updated</option>
-                  <option value="deleted">deleted</option>
-                </select>
-
-                <select
-                  value={employeeId}
-                  onChange={(e) => setEmployeeId(e.target.value)}
-                  className="px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
-                >
-                  <option value="">All users</option>
-                  {users.map((u) => (
-                    <option key={u.id} value={String(u.id)}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
-
-                <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
-                    <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <input
-                      type="date"
-                      value={startDate}
-                      onChange={(e) => setStartDate(e.target.value)}
-                      className="w-full pl-10 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none"
-                    />
-                  </div>
-                  <div className="relative flex-1">
-                    <input
-                      type="date"
-                      value={endDate}
-                      onChange={(e) => setEndDate(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-2 flex items-center justify-between">
-                <p className="text-xs text-gray-500 dark:text-gray-500">
-                  Tip: You can filter by module (model), action, user and date range. Deep links like <code className="px-1 py-0.5 bg-gray-100 dark:bg-gray-900 rounded">?model=Order&id=123</code> show logs for a specific record.
-                </p>
-                {filtersLoading && (
-                  <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                    <Loader className="w-3.5 h-3.5 animate-spin" />
-                    Loading filters...
-                  </div>
                 )}
               </div>
             </div>
+          </div>
+        </main>
 
-            {/* Table */}
-            <div className="max-w-7xl mx-auto px-4 pb-6">
-              {error ? (
-                <div className="border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/10 rounded-lg p-4 text-sm text-red-700 dark:text-red-300">
-                  {error}
-                  <div className="text-xs text-gray-600 dark:text-gray-400 mt-2">
-                    If your backend doesn't provide a global logs endpoint, this page will fall back to per-employee logs (it may be slower).
-                  </div>
-                </div>
-              ) : null}
-
-              <ActivityLogTable logs={logs} isLoading={isLoading} emptyText="No activities found for this date range." />
-            </div>
-          </main>
-        </div>
+        {toast.show && (
+          <Toast
+            message={toast.message}
+            type={toast.type}
+            onClose={() => setToast((t) => ({ ...t, show: false }))}
+          />
+        )}
       </div>
     </div>
   );

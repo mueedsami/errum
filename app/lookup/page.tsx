@@ -454,8 +454,11 @@ export default function LookupPage() {
           name: orderWithBarcodes.customer.name,
           phone: orderWithBarcodes.customer.phone,
           email: orderWithBarcodes.customer.email,
-          customer_type: 'retail',
+          customer_type: orderWithBarcodes.customer.customer_type || 'unknown',
           status: 'active',
+          tags: orderWithBarcodes.customer.tags,
+          total_orders: orderWithBarcodes.customer.total_orders,
+          total_purchases: orderWithBarcodes.customer.total_purchases,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
@@ -1205,6 +1208,19 @@ export default function LookupPage() {
                           {customer.customer_code && (
                             <p className="text-[10px] text-gray-500 dark:text-gray-500">Code: {customer.customer_code}</p>
                           )}
+                          {Array.isArray((customer as any).tags) &&
+                            (customer as any).tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {(customer as any).tags.map((tag: string) => (
+                                  <span
+                                    key={tag}
+                                    className="px-2 py-0.5 rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-[9px] font-medium text-gray-700 dark:text-gray-200"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
                         </div>
                         <span className="text-[10px] px-2 py-1 rounded bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-300">
                           {orders.length} orders

@@ -357,7 +357,8 @@ export default function SocialCommercePage() {
 
   // 🔍 Helper: check if customer exists + get last order
   const handlePhoneBlur = async () => {
-    const phone = userPhone.trim();
+    const rawPhone = userPhone.trim();
+    const phone = rawPhone.replace(/\D/g, '');
     if (!phone) {
       setExistingCustomer(null);
       setLastOrderInfo(null);
@@ -369,27 +370,59 @@ export default function SocialCommercePage() {
       setIsCheckingCustomer(true);
       setCustomerCheckError(null);
 
-      const response = await axios.get('/customers/by-phone', {
-        params: { phone },
-      });
+      // Prefer new endpoint (Customer Tags API): POST /customers/find-by-phone
+      let customer: any = null;
+      try {
+        const response = await axios.post('/customers/find-by-phone', { phone });
+        const payload = response.data?.data ?? response.data;
+        customer = payload?.customer ?? payload;
+      } catch (e: any) {
+        // Fallback for older builds: GET /customers/by-phone
+        try {
+          const response = await axios.get('/customers/by-phone', { params: { phone } });
+          const payload = response.data?.data ?? response.data;
+          customer = payload?.customer ?? payload;
+        } catch {
+          customer = null;
+        }
+      }
 
-      if (response.data?.success && response.data?.data) {
-        const customer = response.data.data;
+      if (customer?.id) {
         setExistingCustomer(customer);
 
         if (!userName && customer.name) setUserName(customer.name);
         if (!userEmail && customer.email) setUserEmail(customer.email);
 
+        // Best-effort: get last order from customer orders (if endpoint exists)
         try {
-          const lastOrderRes = await axios.get(`/customers/${customer.id}/last-order-summary`);
-          if (lastOrderRes.data?.success) {
-            setLastOrderInfo(lastOrderRes.data.data);
+          const lastOrderRes = await axios.get(`/customers/${customer.id}/orders`, {
+            params: { per_page: 1, sort_by: 'order_date', sort_order: 'desc' },
+          });
+          const payload = lastOrderRes.data?.data ?? lastOrderRes.data;
+          const list = payload?.data ?? payload?.orders ?? payload ?? [];
+          const last = Array.isArray(list) ? list[0] : null;
+          if (last) {
+            setLastOrderInfo({
+              date: last?.order_date || last?.created_at || last?.date,
+              summary_text: last?.summary_text || last?.order_number || `Order #${last?.id ?? ''}`,
+              total_amount: last?.total_amount ?? last?.total,
+            });
           } else {
             setLastOrderInfo(null);
           }
         } catch (err) {
-          console.warn('Failed to load last order summary', err);
-          setLastOrderInfo(null);
+          // Fallback to older summary endpoint if present
+          try {
+            const lastOrderRes = await axios.get(`/customers/${customer.id}/last-order-summary`);
+            if (lastOrderRes.data?.success) {
+              setLastOrderInfo(lastOrderRes.data.data);
+            } else {
+              setLastOrderInfo(null);
+            }
+          } catch {
+            console.warn('Failed to load last order info', err);
+            setLastOrderInfo(null);
+          }
         }
       } else {
         setExistingCustomer(null);
@@ -924,6 +957,18 @@ export default function SocialCommercePage() {
                                 <p>
                                   Total Orders: <span className="font-medium">{existingCustomer.total_orders ?? 0}</span>
                                 </p>
+                                {Array.isArray(existingCustomer.tags) && existingCustomer.tags.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 pt-1">
+                                    {existingCustomer.tags.map((tag: string) => (
+                                      <span
+                                        key={tag}
+                                        className="px-2 py-0.5 rounded-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-[10px] font-medium text-gray-700 dark:text-gray-200"
+                                      >
+                                        {tag}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
                                 {lastOrderInfo ? (
                                   <div className="mt-1">
                                     <p className="font-semibold">Last Order Summary:</p>

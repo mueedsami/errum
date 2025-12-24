@@ -1,131 +1,184 @@
-'use client';
-
 import React, { useMemo, useState } from 'react';
-import { Search, ChevronDown, ChevronUp } from 'lucide-react';
-import type { ActivityLogEntry } from '@/services/activityService';
+import { ChevronDown, ChevronRight, Copy } from 'lucide-react';
 
-type Props = {
-  logs: ActivityLogEntry[];
+import type { BusinessHistoryEntry } from '@/services/activityService';
+
+interface ActivityLogTableProps {
+  entries: BusinessHistoryEntry[];
   isLoading?: boolean;
-  emptyText?: string;
-  compact?: boolean;
-};
-
-function safeStr(v: any) {
-  return String(v ?? '').trim();
+  onCopy?: (text: string) => void;
 }
 
-function formatTs(ts: string) {
+function prettyJson(obj: any) {
   try {
-    const d = new Date(ts);
-    if (Number.isNaN(d.getTime())) return ts;
-    return d.toLocaleString('en-GB');
+    return JSON.stringify(obj, null, 2);
   } catch {
-    return ts;
+    return String(obj);
   }
 }
 
-export default function ActivityLogTable({ logs, isLoading, emptyText, compact }: Props) {
-  const [query, setQuery] = useState('');
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+function Chip({ children }: { children: React.ReactNode }) {
+  return (
+    <span className="inline-flex items-center rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-700 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+      {children}
+    </span>
+  );
+}
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return logs;
-    return logs.filter((l) => {
-      const actor = safeStr(l.user?.name || l.user?.email || l.user?.id);
-      const type = safeStr(l.type);
-      const action = safeStr(l.action);
-      const desc = safeStr(l.description);
-      const meta = safeStr(JSON.stringify(l.metadata || {}));
-      return [actor, type, action, desc, meta].some((x) => x.toLowerCase().includes(q));
+export default function ActivityLogTable({ entries, isLoading, onCopy }: ActivityLogTableProps) {
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+
+  const sorted = useMemo(() => {
+    return [...entries].sort((a, b) => {
+      const ta = new Date(a.when?.timestamp || 0).getTime();
+      const tb = new Date(b.when?.timestamp || 0).getTime();
+      return tb - ta;
     });
-  }, [logs, query]);
+  }, [entries]);
+
+  if (isLoading) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
+        Loading history...
+      </div>
+    );
+  }
+
+  if (!sorted.length) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-white p-6 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
+        No activity found for the selected filters.
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search activities..."
-            className="w-full pl-10 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
-          />
-        </div>
-      </div>
+    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-900">
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+          <thead className="bg-gray-50 dark:bg-gray-800">
+            <tr>
+              <th className="w-10 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300" />
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">Time</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">Who</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">Action</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">Subject</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-300">Details</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+            {sorted.map((entry) => {
+              const isOpen = !!expanded[entry.id];
+              const whoName = entry.who?.name || 'Unknown';
+              const whoEmail = entry.who?.email;
+              const whenText = entry.when?.formatted || entry.when?.timestamp || '';
+              const human = entry.when?.human;
+              const action = entry.what?.action || '';
+              const description = entry.what?.description || '';
+              const subjectType = entry.subject?.type || entry.category;
+              const subjectId = entry.subject?.id;
 
-      <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
-        {isLoading ? (
-          <div className="p-6 text-center text-sm text-gray-500 dark:text-gray-400">Loading activity logs...</div>
-        ) : filtered.length === 0 ? (
-          <div className="p-6 text-center text-sm text-gray-500 dark:text-gray-400">{emptyText || 'No activity logs found.'}</div>
-        ) : (
-          <table className="w-full">
-            <thead className="bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-              <tr>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Time</th>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Actor</th>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Type</th>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Action</th>
-                <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Description</th>
-                <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">Details</th>
-              </tr>
-            </thead>
+              return (
+                <React.Fragment key={`${entry.category}-${entry.id}`}>
+                  <tr className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                    <td className="px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => setExpanded((p) => ({ ...p, [entry.id]: !p[entry.id] }))}
+                        className="inline-flex items-center justify-center rounded-md p-1 text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+                        title={isOpen ? 'Collapse' : 'Expand'}
+                      >
+                        {isOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                      </button>
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <div className="text-sm font-medium text-gray-900 dark:text-white">{whenText}</div>
+                      {human && <div className="text-xs text-gray-500 dark:text-gray-400">{human}</div>}
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <div className="text-sm font-semibold text-gray-900 dark:text-white">{whoName}</div>
+                      {whoEmail && <div className="text-xs text-gray-500 dark:text-gray-400">{whoEmail}</div>}
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Chip>{entry.category}</Chip>
+                        {action && <Chip>{action}</Chip>}
+                      </div>
+                      {description && <div className="mt-2 text-sm text-gray-700 dark:text-gray-200">{description}</div>}
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <div className="text-sm font-medium text-gray-900 dark:text-white">{subjectType}</div>
+                      {typeof subjectId !== 'undefined' && subjectId !== null && (
+                        <div className="text-xs text-gray-500 dark:text-gray-400">#{subjectId}</div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 align-top">
+                      <div className="text-xs text-gray-600 dark:text-gray-300">
+                        {Array.isArray(entry.what?.fields_changed) && entry.what.fields_changed.length > 0
+                          ? `${entry.what.fields_changed.length} field(s)`
+                          : Object.keys(entry.what?.changes || {}).length
+                            ? `${Object.keys(entry.what?.changes || {}).length} change(s)`
+                            : '—'}
+                      </div>
+                    </td>
+                  </tr>
 
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-              {filtered.map((l) => {
-                const key = String(l.id);
-                const isOpen = !!expanded[key];
-                const actor = l.user?.name || l.user?.email || (l.user?.id ? `User#${l.user.id}` : 'System');
-                return (
-                  <React.Fragment key={key}>
-                    <tr className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
-                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">{formatTs(l.created_at)}</td>
-                      <td className="px-4 py-3 text-sm font-medium text-black dark:text-white">{actor}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{l.type || '-'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">{l.action || '-'}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
-                        <span className={compact ? 'line-clamp-1' : ''}>{l.description || '-'}</span>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => setExpanded((p) => ({ ...p, [key]: !p[key] }))}
-                          className="inline-flex items-center gap-1 text-xs font-medium text-black dark:text-white hover:underline"
-                        >
-                          {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                          {isOpen ? 'Hide' : 'Show'}
-                        </button>
-                      </td>
-                    </tr>
+                  {isOpen && (
+                    <tr className="bg-gray-50 dark:bg-gray-800/40">
+                      <td colSpan={6} className="px-6 py-4">
+                        <div className="space-y-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {entry.who?.type && <Chip>{entry.who.type}</Chip>}
+                            {entry.subject?.type && <Chip>{entry.subject.type}</Chip>}
+                            {entry.what?.description && (
+                              <button
+                                type="button"
+                                onClick={() => onCopy?.(entry.what?.description || '')}
+                                className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                              >
+                                <Copy size={14} />
+                                Copy desc
+                              </button>
+                            )}
+                          </div>
 
-                    {isOpen && (
-                      <tr className="bg-gray-50 dark:bg-gray-900">
-                        <td colSpan={6} className="px-4 py-3">
-                          <div className="grid grid-cols-2 gap-3">
-                            <div className="text-xs text-gray-600 dark:text-gray-400">
-                              <div className="font-semibold text-gray-800 dark:text-gray-200 mb-1">Request</div>
-                              <div>IP: {l.ip_address || '-'}</div>
-                              <div className="break-words">UA: {l.user_agent || '-'}</div>
+                          {entry.what?.changes && Object.keys(entry.what.changes).length > 0 && (
+                            <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900">
+                              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                Changes (from → to)
+                              </div>
+                              <div className="space-y-2">
+                                {Object.entries(entry.what.changes).map(([field, change]) => (
+                                  <div key={field} className="text-sm text-gray-800 dark:text-gray-200">
+                                    <span className="font-semibold">{field}</span>:&nbsp;
+                                    <span className="font-mono text-xs">{prettyJson((change as any)?.from)}</span>
+                                    <span className="mx-2 text-gray-400">→</span>
+                                    <span className="font-mono text-xs">{prettyJson((change as any)?.to)}</span>
+                                  </div>
+                                ))}
+                              </div>
                             </div>
-                            <div className="text-xs">
-                              <div className="font-semibold text-gray-800 dark:text-gray-200 mb-1">Metadata</div>
-                              <pre className="text-[11px] bg-white dark:bg-black border border-gray-200 dark:border-gray-800 rounded p-2 overflow-auto max-h-40 text-black dark:text-white">
-{JSON.stringify(l.metadata ?? {}, null, 2)}
+                          )}
+
+                          {entry.subject?.data && (
+                            <div className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-900">
+                              <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                                Subject snapshot
+                              </div>
+                              <pre className="max-h-64 overflow-auto rounded-md bg-gray-50 p-3 text-xs text-gray-800 dark:bg-gray-950 dark:text-gray-100">
+                                {prettyJson(entry.subject.data)}
                               </pre>
                             </div>
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );

@@ -1377,6 +1377,20 @@ export default function POSPage() {
                                 customerLookup.phone}
                             </div>
 
+                            {Array.isArray((customerLookup.customer as any)?.tags) &&
+                              (customerLookup.customer as any).tags.length > 0 && (
+                                <div className="flex flex-wrap gap-1 pt-1">
+                                  {(customerLookup.customer as any).tags.map((tag: string) => (
+                                    <span
+                                      key={tag}
+                                      className="px-2 py-0.5 rounded-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-[10px] font-medium text-gray-700 dark:text-gray-200"
+                                    >
+                                      {tag}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
                             {customerLookup.lastOrder && (
                               <div className="text-xs text-gray-600 dark:text-gray-300 pt-1">
                                 <div>

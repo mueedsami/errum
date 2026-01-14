@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   ChevronDown,
   CheckCircle2,
@@ -11,6 +11,7 @@ import {
   Users,
   Download,
   X,
+  Loader2,
 } from 'lucide-react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
@@ -29,6 +30,10 @@ import paymentMethodService from '@/services/paymentMethodService';
 import BarcodeScanner, { ScannedProduct } from '@/components/pos/BarcodeScanner';
 import CartTable, { CartItem } from '@/components/pos/CartTable';
 import InputModeSelector from '@/components/pos/InputModeSelector';
+import ServiceSelector, { ServiceItem } from '@/components/ServiceSelector';
+
+// ✅ Customer registration / edit modal
+import CustomerFormModal from '@/components/pos/CustomerFormModal';
 
 import { useCustomerLookup } from '@/lib/hooks/useCustomerLookup';
 import { checkQZStatus, printReceipt } from '@/lib/qz-tray';
@@ -63,10 +68,13 @@ interface Toast {
   type: 'success' | 'error';
 }
 
-// ✅ Extended CartItem interface to support defective items
+// ✅ Extended CartItem interface to support defective items and services
 export interface ExtendedCartItem extends CartItem {
   isDefective?: boolean;
   defectId?: string;
+  isService?: boolean; // NEW: Flag to identify service items
+  serviceId?: number; // NEW: Service ID if it's a service
+  serviceCategory?: string; // NEW: Service category
 }
 
 export default function POSPage() {
@@ -78,6 +86,7 @@ export default function POSPage() {
 
   // Printing
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(true);
+  const [posReceiptStyle, setPosReceiptStyle] = useState<'compact' | 'detailed'>('compact');
   const [lastCompletedOrderId, setLastCompletedOrderId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -88,6 +97,16 @@ export default function POSPage() {
       // ignore
     }
   }, []);
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('posReceiptStyle');
+      if (saved === 'compact' || saved === 'detailed') setPosReceiptStyle(saved);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+
 
   useEffect(() => {
     try {
@@ -96,6 +115,15 @@ export default function POSPage() {
       // ignore
     }
   }, [autoPrintReceipt]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('posReceiptStyle', posReceiptStyle);
+    } catch {
+      // ignore
+    }
+  }, [posReceiptStyle]);
+
+
 
   // Input Mode
   const [inputMode, setInputMode] = useState<'barcode' | 'manual'>('barcode');
@@ -117,11 +145,14 @@ export default function POSPage() {
   // Products (for manual entry)
   const [products, setProducts] = useState<Product[]>([]);
   const [product, setProduct] = useState('');
+  const [minPriceFilter, setMinPriceFilter] = useState('');
+  const [maxPriceFilter, setMaxPriceFilter] = useState('');
   const [selectedBatch, setSelectedBatch] = useState<Batch | null>(null);
   const [sellingPrice, setSellingPrice] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [discountPercent, setDiscountPercent] = useState(0);
   const [discountAmount, setDiscountAmount] = useState(0);
+  const [isFetchingBatches, setIsFetchingBatches] = useState(false);
 
   // Customer Info
   const [customerName, setCustomerName] = useState('');
@@ -131,6 +162,20 @@ export default function POSPage() {
   // ✅ Customer lookup (existing customer by phone + last purchase)
   const customerLookup = useCustomerLookup({ debounceMs: 500, minLength: 6 });
   const [autoCustomerId, setAutoCustomerId] = useState<number | null>(null);
+
+  // ✅ Customer create/edit modal
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [customerModalMode, setCustomerModalMode] = useState<'create' | 'edit'>('create');
+
+  const openCreateCustomer = () => {
+    setCustomerModalMode('create');
+    setShowCustomerModal(true);
+  };
+
+  const openEditCustomer = () => {
+    setCustomerModalMode('edit');
+    setShowCustomerModal(true);
+  };
 
   // Keep mobileNo state synced for payload usage (payload still uses mobileNo)
   useEffect(() => {
@@ -156,19 +201,34 @@ export default function POSPage() {
       );
     }
 
-    // If lookup is cleared/not found, stop auto-mode (don’t wipe typed fields)
+    // If lookup is cleared/not found, stop auto-mode (don't wipe typed fields)
     if (!c?.id && autoCustomerId !== null) {
       setAutoCustomerId(null);
     }
   }, [customerLookup.customer, autoCustomerId]);
 
   // Payment
-  const [vatRate, setVatRate] = useState(5);
   const [transportCost, setTransportCost] = useState(0);
   const [cashPaid, setCashPaid] = useState(0);
   const [cardPaid, setCardPaid] = useState(0);
   const [bkashPaid, setBkashPaid] = useState(0);
   const [nagadPaid, setNagadPaid] = useState(0);
+
+  // Installment / EMI (POS + Social Commerce only)
+  const [isInstallment, setIsInstallment] = useState(false);
+  const [installmentCount, setInstallmentCount] = useState(3);
+  const [installmentPaymentMode, setInstallmentPaymentMode] = useState<'cash' | 'card' | 'bkash' | 'nagad'>('cash');
+  const [installmentTransactionReference, setInstallmentTransactionReference] = useState('');
+
+  useEffect(() => {
+    // When switching to installment, ignore the regular split inputs
+    if (isInstallment) {
+      setCashPaid(0);
+      setCardPaid(0);
+      setBkashPaid(0);
+      setNagadPaid(0);
+    }
+  }, [isInstallment]);
 
   const [paymentMethods, setPaymentMethods] = useState<{
     cash?: number;
@@ -430,6 +490,30 @@ export default function POSPage() {
     );
   };
 
+  /**
+   * ✅ NEW: Add service to cart
+   */
+  const addServiceToCart = (service: ServiceItem) => {
+    const newItem: ExtendedCartItem = {
+      id: service.id,
+      productId: 0, // Services don't have product ID
+      productName: service.serviceName,
+      batchId: 0, // Services don't have batch ID
+      batchNumber: 'SERVICE',
+      qty: service.quantity,
+      price: service.price,
+      discount: 0,
+      amount: service.amount,
+      availableQty: 999, // Services have unlimited availability
+      isService: true,
+      serviceId: service.serviceId,
+      serviceCategory: service.category,
+    };
+
+    setCart((prev) => [...prev, newItem]);
+    showToast(`Service "${service.serviceName}" added to cart`, 'success');
+  };
+
   // ============ PRODUCT SELECTION (Manual Mode) ============
 
   const handleProductSelect = (productName: string) => {
@@ -454,13 +538,28 @@ export default function POSPage() {
 
   const subtotal = cart.reduce((sum, item) => sum + item.amount, 0);
   const totalDiscount = cart.reduce((sum, item) => sum + item.discount, 0);
-  const vat = (subtotal * vatRate) / 100;
-  const total = subtotal + vat + transportCost;
-  const totalPaid = cashPaid + cardPaid + bkashPaid + nagadPaid;
+  const total = subtotal + transportCost;
+
+  // Installment amount (ceil to 2 decimals so collected amount is not less than required per installment)
+  const installmentAmount = useMemo(() => {
+    if (!isInstallment) return 0;
+    const n = Math.max(2, Math.min(24, Number(installmentCount) || 2));
+    if (total <= 0) return 0;
+    return Math.ceil((total / n) * 100) / 100;
+  }, [isInstallment, installmentCount, total]);
+
+  const installmentPaymentMethodId = useMemo(() => {
+    if (!isInstallment) return null;
+    if (installmentPaymentMode === 'card') return paymentMethods.card || 2;
+    if (installmentPaymentMode === 'bkash' || installmentPaymentMode === 'nagad') return paymentMethods.mobileWallet || 6;
+    return paymentMethods.cash || 1;
+  }, [isInstallment, installmentPaymentMode, paymentMethods]);
+
+  const totalPaid = isInstallment ? installmentAmount : cashPaid + cardPaid + bkashPaid + nagadPaid;
 
   // ✅ FIXED: Calculate due and change correctly
   const due = total - totalPaid;
-  const change = totalPaid > total ? totalPaid - total : 0;
+  const change = !isInstallment && totalPaid > total ? totalPaid - total : 0;
 
   // ============ ORDER SUBMISSION ============
 
@@ -479,9 +578,16 @@ export default function POSPage() {
       return;
     }
 
-    // ✅ FIXED: Only warn if there's actual unpaid balance (not overpayment)
-    if (due > 0 && !confirm(`Outstanding amount: ৳${due.toFixed(2)}. Continue?`)) {
-      return;
+    // ✅ Confirmation
+    if (isInstallment) {
+      const n = Math.max(2, Math.min(24, Number(installmentCount) || 2));
+      const msg = `Installment/EMI: ${n} × ৳${installmentAmount.toFixed(2)}. First installment will be collected now. Continue?`;
+      if (!confirm(msg)) return;
+    } else {
+      // ✅ FIXED: Only warn if there's actual unpaid balance (not overpayment)
+      if (due > 0 && !confirm(`Outstanding amount: ৳${due.toFixed(2)}. Continue?`)) {
+        return;
+      }
     }
 
     setIsProcessing(true);
@@ -498,6 +604,9 @@ export default function POSPage() {
 
       // ✅ Validate all cart items have required fields
       for (const item of cart) {
+        // ✅ Skip validation for service items
+        if (item.isService) continue;
+        
         if (!item.productId) {
           throw new Error(`Missing product_id for ${item.productName}`);
         }
@@ -512,30 +621,8 @@ export default function POSPage() {
         }
       }
 
-      // ✅ FIXED: Calculate tax amount for each item based on VAT rate and proportional distribution
-      const vatAmount = (subtotal * vatRate) / 100;
-
-      // Distribute VAT proportionally based on each item's share of subtotal
-      const itemsWithTax = cart.map((item) => {
-        const itemSubtotal = item.amount; // After discount
-        const itemTaxShare = subtotal > 0 ? (itemSubtotal / subtotal) * vatAmount : 0;
-        return {
-          item,
-          taxAmount: parseFloat(itemTaxShare.toFixed(2)),
-        };
-      });
-
-      console.log('📊 VAT Distribution:', {
-        subtotal: subtotal.toFixed(2),
-        vatRate: `${vatRate}%`,
-        totalVAT: vatAmount.toFixed(2),
-        itemDistribution: itemsWithTax.map(({ item, taxAmount }) => ({
-          product: item.productName,
-          itemAmount: item.amount.toFixed(2),
-          share: ((item.amount / subtotal) * 100).toFixed(2) + '%',
-          tax: taxAmount.toFixed(2),
-        })),
-      });
+      // VAT is inclusive in product prices; do not add extra tax in POS
+      const itemsWithTax = cart.map((item) => ({ item, taxAmount: 0 }));
 
       // Create order payload
       const orderPayload = {
@@ -554,8 +641,10 @@ export default function POSPage() {
             }
           : {}),
 
-        // ✅ Map cart items with proportional VAT distribution
-        items: itemsWithTax.map(({ item, taxAmount }) => {
+        // ✅ Map cart items (VAT inclusive — send tax_amount = 0)
+        items: itemsWithTax
+          .filter(({ item }) => !item.isService) // ✅ Filter out service items
+          .map(({ item, taxAmount }) => {
           const productId = parseInt(String(item.productId));
           const batchId = parseInt(String(item.batchId));
           const quantity = parseInt(String(item.qty));
@@ -582,7 +671,7 @@ export default function POSPage() {
             quantity: quantity,
             unit_price: unitPrice,
             discount_amount: discountAmount,
-            tax_amount: taxAmount, // ✅ FIXED: Use proportionally distributed VAT
+            tax_amount: taxAmount, // VAT inclusive — no extra tax
           };
 
           // ✅ CRITICAL: Only include barcode for NON-defective items
@@ -594,22 +683,43 @@ export default function POSPage() {
             ...itemPayload,
             isDefective: item.isDefective,
             hasBarcode: !!item.barcode,
-            vatShare: `${((item.amount / subtotal) * 100).toFixed(2)}%`,
           });
 
           return itemPayload;
         }),
 
+        // ✅ NEW: Add services as separate array
+        services: itemsWithTax
+          .filter(({ item }) => item.isService) // ✅ Filter only service items
+          .map(({ item }) => ({
+            service_id: item.serviceId,
+            service_name: item.productName,
+            quantity: item.qty,
+            unit_price: item.price,
+            discount_amount: item.discount || 0,
+            total_amount: item.amount,
+            category: item.serviceCategory,
+          })),
+
         // ✅ FIXED: Add totals correctly
         discount_amount: totalDiscount,
         shipping_amount: transportCost,
 
-        // ✅ Add notes if any
-        ...(address || vatRate > 0
+        // ✅ FIXED: start_date should be undefined instead of null
+        ...(isInstallment
           ? {
-              notes: `${vatRate > 0 ? `VAT: ${vatRate}%` : ''}${
-                address ? `, Address: ${address}` : ''
-              }${change > 0 ? `, Change Given: ৳${change.toFixed(2)}` : ''}`.trim(),
+              installment_plan: {
+                total_installments: Math.max(2, Math.min(24, Number(installmentCount) || 2)),
+                installment_amount: installmentAmount,
+                start_date: undefined, // ✅ Changed from null to undefined
+              },
+            }
+          : {}),
+
+        // ✅ Add notes if any
+        ...(address || change > 0
+          ? {
+              notes: `${address ? `Address: ${address}` : ''}${address && change > 0 ? ', ' : ''}${change > 0 ? `Change Given: ৳${change.toFixed(2)}` : ''}`.trim(),
             }
           : {}),
       };
@@ -655,84 +765,108 @@ export default function POSPage() {
         }
       }
 
-      // ✅ FIXED: Process payments - only charge the order total, not overpayment
-      const amountToCharge = Math.min(totalPaid, total); // Don't charge more than order total
+      // ✅ Payments
+      if (isInstallment) {
+        // Create installment plan during order creation, then collect 1st installment now
+        if (!installmentPaymentMethodId) {
+          throw new Error('Installment payment method is missing');
+        }
 
-      if (amountToCharge > 0) {
-        console.log('💰 Processing payments...');
-        console.log(
-          `Amount to charge: ৳${amountToCharge.toFixed(
-            2
-          )} (Total paid: ৳${totalPaid.toFixed(2)}, Order total: ৳${total.toFixed(2)})`
-        );
+        if (installmentAmount > 0) {
+          console.log('💳 Processing installment/EMI first payment...');
+          
+          // ✅ FIXED: Remove payment_type field
+          await paymentService.addInstallmentPayment(order.id, {
+            payment_method_id: installmentPaymentMethodId,
+            amount: installmentAmount,
+            auto_complete: true,
+            notes: `POS installment/EMI - 1st installment of ${Math.max(2, Math.min(24, Number(installmentCount) || 2))}`,
+            payment_data: installmentTransactionReference
+              ? { transaction_reference: installmentTransactionReference }
+              : {},
+          });
+          console.log('✅ Installment payment processed');
+        }
+      } else {
+        // ✅ FIXED: Process payments - only charge the order total, not overpayment
+        const amountToCharge = Math.min(totalPaid, total); // Don't charge more than order total
 
-        const paymentSplits: any[] = [];
-
-        // ✅ FIXED: If there's overpayment, reduce it from cash first
-        let adjustedCashPaid = cashPaid;
-        let adjustedCardPaid = cardPaid;
-        let adjustedBkashPaid = bkashPaid;
-        let adjustedNagadPaid = nagadPaid;
-
-        if (change > 0) {
-          // Customer overpaid - reduce cash payment by the change amount
-          adjustedCashPaid = Math.max(0, cashPaid - change);
+        if (amountToCharge > 0) {
+          console.log('💰 Processing payments...');
           console.log(
-            `⚠️ Overpayment detected. Reducing cash from ৳${cashPaid} to ৳${adjustedCashPaid}`
+            `Amount to charge: ৳${amountToCharge.toFixed(
+              2
+            )} (Total paid: ৳${totalPaid.toFixed(2)}, Order total: ৳${total.toFixed(2)})`
           );
+
+          const paymentSplits: any[] = [];
+
+          // ✅ FIXED: If there's overpayment, reduce it from cash first
+          let adjustedCashPaid = cashPaid;
+          let adjustedCardPaid = cardPaid;
+          let adjustedBkashPaid = bkashPaid;
+          let adjustedNagadPaid = nagadPaid;
+
+          if (change > 0) {
+            // Customer overpaid - reduce cash payment by the change amount
+            adjustedCashPaid = Math.max(0, cashPaid - change);
+            console.log(
+              `⚠️ Overpayment detected. Reducing cash from ৳${cashPaid} to ৳${adjustedCashPaid}`
+            );
+          }
+
+          if (adjustedCashPaid > 0) {
+            paymentSplits.push({
+              payment_method_id: paymentMethods.cash || 1,
+              amount: adjustedCashPaid,
+            });
+          }
+
+          if (adjustedCardPaid > 0) {
+            paymentSplits.push({
+              payment_method_id: paymentMethods.card || 2,
+              amount: adjustedCardPaid,
+            });
+          }
+
+          if (adjustedBkashPaid > 0) {
+            paymentSplits.push({
+              payment_method_id: paymentMethods.mobileWallet || 6,
+              amount: adjustedBkashPaid,
+            });
+          }
+
+          if (adjustedNagadPaid > 0) {
+            paymentSplits.push({
+              payment_method_id: paymentMethods.mobileWallet || 6,
+              amount: adjustedNagadPaid,
+            });
+          }
+
+          // Calculate actual total from splits
+          const splitsTotal = paymentSplits.reduce((sum, split) => sum + split.amount, 0);
+
+          console.log('💳 Payment splits:', paymentSplits);
+          console.log('💰 Splits total:', splitsTotal.toFixed(2));
+
+          if (paymentSplits.length === 1) {
+            await paymentService.process(order.id, {
+              payment_method_id: paymentSplits[0].payment_method_id,
+              amount: paymentSplits[0].amount,
+              payment_type: (due <= 0 ? 'full' : 'partial') as 'full' | 'partial',
+              auto_complete: true,
+            });
+          } else if (paymentSplits.length > 1) {
+            await paymentService.processSplit(order.id, {
+              total_amount: splitsTotal, // ✅ FIXED: Use actual splits total
+              payment_type: due <= 0 ? 'full' : 'partial',
+              auto_complete: true,
+              splits: paymentSplits,
+            });
+          }
+
+          console.log('✅ Payments processed');
         }
-
-        if (adjustedCashPaid > 0) {
-          paymentSplits.push({
-            payment_method_id: paymentMethods.cash || 1,
-            amount: adjustedCashPaid,
-          });
-        }
-
-        if (adjustedCardPaid > 0) {
-          paymentSplits.push({
-            payment_method_id: paymentMethods.card || 2,
-            amount: adjustedCardPaid,
-          });
-        }
-
-        if (adjustedBkashPaid > 0) {
-          paymentSplits.push({
-            payment_method_id: paymentMethods.mobileWallet || 6,
-            amount: adjustedBkashPaid,
-          });
-        }
-
-        if (adjustedNagadPaid > 0) {
-          paymentSplits.push({
-            payment_method_id: paymentMethods.mobileWallet || 6,
-            amount: adjustedNagadPaid,
-          });
-        }
-
-        // Calculate actual total from splits
-        const splitsTotal = paymentSplits.reduce((sum, split) => sum + split.amount, 0);
-
-        console.log('💳 Payment splits:', paymentSplits);
-        console.log('💰 Splits total:', splitsTotal.toFixed(2));
-
-        if (paymentSplits.length === 1) {
-          await paymentService.process(order.id, {
-            payment_method_id: paymentSplits[0].payment_method_id,
-            amount: paymentSplits[0].amount,
-            payment_type: (due <= 0 ? 'full' : 'partial') as 'full' | 'partial',
-            auto_complete: true,
-          });
-        } else if (paymentSplits.length > 1) {
-          await paymentService.processSplit(order.id, {
-            total_amount: splitsTotal, // ✅ FIXED: Use actual splits total
-            payment_type: due <= 0 ? 'full' : 'partial',
-            auto_complete: true,
-            splits: paymentSplits,
-          });
-        }
-
-        console.log('✅ Payments processed');
       }
 
       // Complete order
@@ -753,7 +887,7 @@ export default function POSPage() {
             }
 
             const fullOrder = await orderService.getById(order.id);
-            await printReceipt(fullOrder);
+            await printReceipt(fullOrder, undefined, { template: posReceiptStyle === 'detailed' ? 'pos_receipt' : 'receipt' });
             showToast('✅ Receipt printed', 'success');
           } catch (e: any) {
             console.error('❌ Receipt auto-print failed:', e);
@@ -837,7 +971,7 @@ export default function POSPage() {
         showToast('QZ Tray offline - opening receipt preview (Print → Save as PDF)', 'error');
       }
       const fullOrder = await orderService.getById(lastCompletedOrderId);
-      await printReceipt(fullOrder);
+      await printReceipt(fullOrder, undefined, { template: posReceiptStyle === 'detailed' ? 'pos_receipt' : 'receipt' });
       showToast('✅ Receipt printed', 'success');
     } catch (e: any) {
       console.error('❌ Receipt print failed:', e);
@@ -929,16 +1063,26 @@ export default function POSPage() {
     try {
       const response = await storeService.getStores({ is_active: true });
 
-      if (!response.success) {
+      // ✅ FIXED: Handle response type correctly
+      if (!response || (typeof response === 'object' && 'success' in response && !response.success)) {
         showToast('Failed to load stores', 'error');
         return;
       }
 
-      let stores: any = [];
-      if (Array.isArray(response.data)) {
-        stores = response.data;
-      } else if (response.data?.data) {
-        stores = Array.isArray(response.data.data) ? response.data.data : [response.data];
+      let stores: any[] = [];
+      
+      // ✅ Type guard to safely access data property
+      if (Array.isArray(response)) {
+        stores = response;
+      } else if (typeof response === 'object' && 'data' in response) {
+        const responseData = (response as any).data;
+        if (Array.isArray(responseData)) {
+          stores = responseData;
+        } else if (responseData?.data && Array.isArray(responseData.data)) {
+          stores = responseData.data;
+        } else if (typeof responseData === 'object') {
+          stores = [responseData];
+        }
       }
 
       setOutlets(stores);
@@ -957,10 +1101,106 @@ export default function POSPage() {
     }
   };
 
+  // ✅ FIXED: Don't fetch batches for all products upfront to avoid rate limiting
   const fetchProducts = async () => {
     if (!selectedOutlet) return;
 
     try {
+      console.log('🔄 Fetching products and batches for store:', selectedOutlet);
+
+      let allBatches: Batch[] = [];
+
+      // ✅ ROBUST: Try multiple batch fetching methods with fallbacks (like social commerce)
+      
+      // Method 1: Try getAvailableBatches
+      try {
+        const batchesData = await batchService.getAvailableBatches(parseInt(selectedOutlet));
+        console.log('✅ Raw batches from getAvailableBatches:', batchesData);
+
+        if (batchesData && batchesData.length > 0) {
+          allBatches = batchesData.filter((batch: any) => batch.quantity > 0);
+          console.log('✅ Fetched', allBatches.length, 'batches (method: getAvailableBatches)');
+        }
+      } catch (err) {
+        console.warn('⚠️ getAvailableBatches failed, trying getBatchesArray...', err);
+      }
+
+      // Method 2: Try getBatchesArray if Method 1 failed
+      if (allBatches.length === 0) {
+        try {
+          const batchesData = await batchService.getBatchesArray({
+            store_id: parseInt(selectedOutlet),
+            status: 'available',
+          });
+          console.log('✅ Raw batches from getBatchesArray:', batchesData);
+
+          if (batchesData && batchesData.length > 0) {
+            allBatches = batchesData.filter((batch: any) => batch.quantity > 0);
+            console.log('✅ Fetched', allBatches.length, 'batches (method: getBatchesArray)');
+          }
+        } catch (err) {
+          console.warn('⚠️ getBatchesArray failed, trying getBatchesByStore...', err);
+        }
+      }
+
+      // Method 3: Try getBatchesByStore if Method 2 failed
+      if (allBatches.length === 0) {
+        try {
+          const batchesData = await batchService.getBatchesByStore(parseInt(selectedOutlet));
+          console.log('✅ Raw batches from getBatchesByStore:', batchesData);
+
+          if (batchesData && batchesData.length > 0) {
+            allBatches = batchesData.filter((batch: any) => batch.quantity > 0);
+            console.log('✅ Fetched', allBatches.length, 'batches (method: getBatchesByStore)');
+          }
+        } catch (err) {
+          console.warn('⚠️ getBatchesByStore failed, trying getBatches...', err);
+        }
+      }
+
+      // Method 4: Fall back to getBatches (standard method) if all else failed
+      if (allBatches.length === 0) {
+        try {
+          const batchResponse = await batchService.getBatches({
+            store_id: parseInt(selectedOutlet),
+            status: 'available',
+            per_page: 5000,
+          });
+
+          allBatches = batchResponse.success && batchResponse.data?.data
+            ? batchResponse.data.data.filter((batch: Batch) => batch.quantity > 0)
+            : [];
+          
+          console.log('✅ Fetched', allBatches.length, 'batches (method: getBatches)');
+        } catch (err) {
+          console.error('❌ All batch fetch methods failed:', err);
+          showToast('Failed to load product batches', 'error');
+          return;
+        }
+      }
+
+      if (allBatches.length === 0) {
+        console.log('⚠️ No batches found for store:', selectedOutlet);
+        setProducts([]);
+        showToast('No products available in this store', 'error');
+        return;
+      }
+
+      // ✅ Group batches by product_id
+      const batchesByProduct = new Map<number, Batch[]>();
+      allBatches.forEach((batch: any) => {
+        const productId = batch.product?.id || batch.product_id;
+        if (productId) {
+          if (!batchesByProduct.has(productId)) {
+            batchesByProduct.set(productId, []);
+          }
+          batchesByProduct.get(productId)!.push(batch);
+        }
+      });
+
+      console.log('✅ Batches grouped for', batchesByProduct.size, 'products');
+
+      // ✅ Fetch all products
       const result = await productService.getAll({
         is_archived: false,
         per_page: 1000,
@@ -974,31 +1214,24 @@ export default function POSPage() {
         productsList = Array.isArray(result.data) ? result.data : result.data.data || [];
       }
 
-      const productsWithBatches = await Promise.all(
-        productsList.map(async (product: Product) => {
-          try {
-            const batchResponse = await batchService.getBatches({
-              product_id: product.id,
-              store_id: parseInt(selectedOutlet),
-              status: 'available',
-              per_page: 100,
-            });
+      console.log('✅ Fetched', productsList.length, 'products');
 
-            const batches =
-              batchResponse.success && batchResponse.data?.data
-                ? batchResponse.data.data.filter((batch: Batch) => batch.quantity > 0)
-                : [];
+      // ✅ Attach batches to products (no additional API calls!)
+      const productsWithBatches = productsList.map((product: Product) => {
+        const batches = batchesByProduct.get(product.id) || [];
+        return { ...product, batches };
+      });
 
-            return { ...product, batches };
-          } catch (error) {
-            return { ...product, batches: [] };
-          }
-        })
+      // ✅ Only show products that have batches in this store
+      const productsWithStock = productsWithBatches.filter(
+        (product) => product.batches && product.batches.length > 0
       );
 
-      setProducts(productsWithBatches);
+      console.log('✅ Final products with stock:', productsWithStock.length);
+
+      setProducts(productsWithStock);
     } catch (error) {
-      console.error('Error fetching products:', error);
+      console.error('❌ Error fetching products:', error);
       showToast('Failed to load products', 'error');
     }
   };
@@ -1051,13 +1284,14 @@ export default function POSPage() {
     fetchOutlets(role, storeId);
     fetchEmployees();
     fetchPaymentMethods();
-  }, []);
+  }, []); // ✅ Only run once on mount
 
+  // ✅ FIXED: Only fetch products when outlet changes, not on every render
   useEffect(() => {
     if (selectedOutlet) {
       fetchProducts();
     }
-  }, [selectedOutlet]);
+  }, [selectedOutlet]); // ✅ Only depend on selectedOutlet
 
   // ============ RENDER ============
 
@@ -1231,15 +1465,58 @@ export default function POSPage() {
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                             Product
                           </label>
+                          <div className="flex items-center gap-2 mb-2">
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              placeholder="Min ৳"
+                              value={minPriceFilter}
+                              onChange={(e) => setMinPriceFilter(e.target.value)}
+                              disabled={!selectedOutlet}
+                              className="w-24 px-3 py-2 border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm disabled:opacity-50"
+                            />
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              placeholder="Max ৳"
+                              value={maxPriceFilter}
+                              onChange={(e) => setMaxPriceFilter(e.target.value)}
+                              disabled={!selectedOutlet}
+                              className="w-24 px-3 py-2 border border-gray-200 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm disabled:opacity-50"
+                            />
+                          </div>
+
                           <select
                             value={product}
                             onChange={(e) => handleProductSelect(e.target.value)}
                             disabled={!selectedOutlet}
-                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50"
                           >
                             <option value="">Select Product</option>
                             {products
-                              .filter((p) => p.batches && p.batches.length > 0)
+                               .filter((p) => {
+                                if (!p.batches || p.batches.length === 0) return false;
+
+                                const min =
+                                  minPriceFilter.trim() !== '' && Number.isFinite(Number(minPriceFilter))
+                                    ? Number(minPriceFilter)
+                                    : null;
+                                const max =
+                                  maxPriceFilter.trim() !== '' && Number.isFinite(Number(maxPriceFilter))
+                                    ? Number(maxPriceFilter)
+                                    : null;
+
+                                if (min === null && max === null) return p.batches.length > 0;
+
+                                return p.batches.some((b) => {
+                                  if (Number(b.quantity) <= 0) return false;
+
+                                  const price = Number(String(b.sell_price ?? '0').replace(/[^0-9.-]/g, ''));
+                                  if (min !== null && price < min) return false;
+                                  if (max !== null && price > max) return false;
+                                  return true;
+                                });
+                              })
                               .map((prod) => (
                                 <option key={prod.id} value={prod.name}>
                                   {prod.name} ({prod.batches?.length || 0} batches)
@@ -1411,11 +1688,53 @@ export default function POSPage() {
                                 </div>
                               </div>
                             )}
+
+                            {/* ✅ Actions */}
+                            <div className="pt-2 flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                onClick={openEditCustomer}
+                                className="px-3 py-2 text-xs rounded-md bg-gray-900 text-white hover:bg-gray-800"
+                              >
+                                Edit Info
+                              </button>
+                              <button
+                                type="button"
+                                onClick={openEditCustomer}
+                                className="px-3 py-2 text-xs rounded-md border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200"
+                                title="Complete missing fields"
+                              >
+                                Add Info
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
                     )}
+
+                    {/* ✅ Register button when no customer found */}
+                    {!customerLookup.customer && (
+                      <div className="mt-3 flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={openCreateCustomer}
+                          className="px-3 py-2 text-xs rounded-md bg-blue-600 text-white hover:bg-blue-700"
+                        >
+                          Register Customer
+                        </button>
+                        <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                          Opens full customer form (name + phone required)
+                        </span>
+                      </div>
+                    )}
                   </div>
+
+                  {/* ✅ NEW: Service Selector */}
+                  <ServiceSelector 
+                    onAddService={addServiceToCart}
+                    darkMode={darkMode}
+                    allowManualPrice={true}
+                  />
 
                   {/* Cart Table */}
                   <CartTable
@@ -1424,7 +1743,6 @@ export default function POSPage() {
                     onUpdateQuantity={updateCartItemQuantity}
                     onUpdateDiscount={updateCartItemDiscount}
                     darkMode={darkMode}
-                    vatRate={vatRate}
                   />
                 </div>
 
@@ -1453,31 +1771,6 @@ export default function POSPage() {
                       </span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">
-                          VAT
-                        </label>
-                        <input
-                          type="number"
-                          value={vat.toFixed(2)}
-                          readOnly
-                          className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">
-                          VAT Rate %
-                        </label>
-                        <input
-                          type="number"
-                          value={vatRate}
-                          onChange={(e) => setVatRate(Number(e.target.value))}
-                          className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
-                        />
-                      </div>
-                    </div>
-
                     <div>
                       <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">
                         Transport Cost
@@ -1502,6 +1795,71 @@ export default function POSPage() {
                     </div>
 
                     <div className="space-y-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 text-xs text-gray-700 dark:text-gray-300">
+                          <input
+                            type="checkbox"
+                            checked={isInstallment}
+                            onChange={(e) => setIsInstallment(e.target.checked)}
+                            className="h-4 w-4"
+                          />
+                          Installment / EMI
+                        </label>
+                      </div>
+
+                      {isInstallment && (
+                        <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 p-3 space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[11px] text-gray-700 dark:text-gray-300 mb-1">Total installments</label>
+                              <input
+                                type="number"
+                                min={2}
+                                max={24}
+                                value={installmentCount}
+                                onChange={(e) => setInstallmentCount(Number(e.target.value))}
+                                className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] text-gray-700 dark:text-gray-300 mb-1">Paying now</label>
+                              <div className="w-full px-2 py-1.5 rounded border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm font-semibold text-gray-900 dark:text-white">
+                                ৳{installmentAmount.toFixed(2)}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-[11px] text-gray-700 dark:text-gray-300 mb-1">Payment method</label>
+                              <select
+                                value={installmentPaymentMode}
+                                onChange={(e) => setInstallmentPaymentMode(e.target.value as any)}
+                                className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                              >
+                                <option value="cash">Cash</option>
+                                <option value="card">Card</option>
+                                <option value="bkash">bKash</option>
+                                <option value="nagad">Nagad</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[11px] text-gray-700 dark:text-gray-300 mb-1">Txn ref (optional)</label>
+                              <input
+                                value={installmentTransactionReference}
+                                onChange={(e) => setInstallmentTransactionReference(e.target.value)}
+                                className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                                placeholder="e.g. Txn ID"
+                              />
+                            </div>
+                          </div>
+
+                          <p className="text-[11px] text-gray-600 dark:text-gray-300">
+                            Remaining after today: <span className="font-semibold">৳{Math.max(0, total - installmentAmount).toFixed(2)}</span>
+                          </p>
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">
@@ -1511,6 +1869,7 @@ export default function POSPage() {
                             type="number"
                             value={cashPaid}
                             onChange={(e) => setCashPaid(Number(e.target.value))}
+                            disabled={isProcessing || isInstallment}
                             className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
                           />
                         </div>
@@ -1522,6 +1881,7 @@ export default function POSPage() {
                             type="number"
                             value={cardPaid}
                             onChange={(e) => setCardPaid(Number(e.target.value))}
+                            disabled={isProcessing || isInstallment}
                             className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
                           />
                         </div>
@@ -1533,6 +1893,7 @@ export default function POSPage() {
                             type="number"
                             value={bkashPaid}
                             onChange={(e) => setBkashPaid(Number(e.target.value))}
+                            disabled={isProcessing || isInstallment}
                             className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
                           />
                         </div>
@@ -1544,6 +1905,7 @@ export default function POSPage() {
                             type="number"
                             value={nagadPaid}
                             onChange={(e) => setNagadPaid(Number(e.target.value))}
+                            disabled={isProcessing || isInstallment}
                             className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
                           />
                         </div>
@@ -1599,6 +1961,20 @@ export default function POSPage() {
                         Auto-print receipt
                       </label>
 
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-600 dark:text-gray-400">Receipt style</span>
+                        <select
+                          value={posReceiptStyle}
+                          onChange={(e) => setPosReceiptStyle(e.target.value as any)}
+                          className="text-xs rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-800 dark:text-gray-100"
+                          title="Choose receipt print format"
+                        >
+                          <option value="compact">Compact</option>
+                          <option value="detailed">Detailed (RISE-style)</option>
+                        </select>
+                      </div>
+
+
                       {lastCompletedOrderId && (
                         <button
                           type="button"
@@ -1615,7 +1991,7 @@ export default function POSPage() {
                       disabled={isProcessing || cart.length === 0}
                       className="w-full py-2.5 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-100 text-white dark:text-gray-900 rounded-md text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {isProcessing ? 'Processing...' : 'Complete Sale'}
+                      {isProcessing ? 'Processing...' : isInstallment ? 'Complete Sale (Installment)' : 'Complete Sale'}
                     </button>
                   </div>
                 </div>
@@ -1727,6 +2103,30 @@ export default function POSPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ✅ Customer registration / edit modal */}
+      {showCustomerModal && (
+        <CustomerFormModal
+          mode={customerModalMode}
+          customer={customerLookup.customer as any}
+          initial={{
+            name: customerName,
+            phone: customerLookup.phone,
+            address,
+            customer_type: 'counter',
+          }}
+          onClose={() => setShowCustomerModal(false)}
+          onSaved={(savedCustomer: any) => {
+            // Sync back to POS fields
+            setCustomerName(savedCustomer?.name || '');
+            if (savedCustomer?.phone) customerLookup.setPhone(String(savedCustomer.phone));
+            setAddress(savedCustomer?.address || savedCustomer?.customer_address || '');
+            setAutoCustomerId(savedCustomer?.id ?? null);
+            showToast('✅ Customer info saved', 'success');
+            setShowCustomerModal(false);
+          }}
+        />
       )}
     </div>
   );

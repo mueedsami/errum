@@ -216,7 +216,7 @@ export default function LoginRegisterPage() {
               <ArrowLeft size={20} className="mr-2" />
               <span>Back to Shop</span>
             </button>
-            <h1 className="text-2xl font-bold text-gray-900">Deshio</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Errum</h1>
             <div className="w-24"></div>
           </div>
         </div>

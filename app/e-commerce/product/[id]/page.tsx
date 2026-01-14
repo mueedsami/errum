@@ -14,6 +14,7 @@ import {
 
 import { useCart } from '@/app/e-commerce/CartContext';
 import Navigation from '@/components/ecommerce/Navigation';
+import { getBaseProductName, getColorLabel, getSizeLabel } from '@/lib/productNameUtils';
 import CartSidebar from '@/components/ecommerce/cart/CartSidebar';
 import catalogService, {
   Product,
@@ -78,27 +79,7 @@ export default function ProductDetailPage() {
       localStorage.getItem('token');
     return !!token;
   };
-
   // Helper functions
-  const getBaseName = (name: string): string => {
-    const match = name.match(/^(.+?)\s*-\s*([A-Za-z\s]+)$/);
-    if (match) return match[1].trim();
-    return name.trim();
-  };
-
-  const extractColorFromName = (name: string): string | undefined => {
-    const match = name.match(/\s*-\s*([A-Za-z\s]+)$/);
-    return match ? match[1].trim() : undefined;
-  };
-
-  const extractSizeFromName = (name: string): string | undefined => {
-  const match = name.match(
-    /\b(XXS|XS|S|M|L|XL|XXL|XXXL|EU 38 \(US 6\)|EU 39 \(US 7\)|EU 40 \(US 7\.5\)|EU 41 \(US 8\.5\)|EU 42 \(US 9\)|EU 43 \(US 10\)|\d+)\b/i
-  );
-  return match ? match[0] : undefined;
-};
-
-
   // Fetch suggested products
   useEffect(() => {
     if (!productId) return;
@@ -143,6 +124,26 @@ export default function ProductDetailPage() {
         setProduct(mainProduct);
         setRelatedProducts(response.related_products || []);
 
+        // ✅ If SKU is missing, treat this product as standalone (no variations)
+        if (!mainProduct.sku) {
+          const selfVariant: ProductVariant = {
+            id: mainProduct.id,
+            name: mainProduct.name,
+            sku: `product-${mainProduct.id}`,
+            color: getColorLabel(mainProduct.name),
+            size: getSizeLabel(mainProduct.name),
+            selling_price: (mainProduct as any).selling_price ?? null,
+            in_stock: !!(mainProduct as any).in_stock,
+            stock_quantity: (mainProduct as any).stock_quantity ?? 0,
+            images: (mainProduct as any).images ?? [],
+          };
+
+          setAllProducts([]);
+          setProductVariants([selfVariant]);
+          setSelectedVariant(selfVariant);
+          return;
+        }
+
         const allProductsResponse = await catalogService.getProducts({
           per_page: 100,
         });
@@ -155,8 +156,8 @@ export default function ProductDetailPage() {
             id: p.id,
             name: p.name,
             sku: p.sku,
-            color: extractColorFromName(p.name),
-            size: extractSizeFromName(p.name),
+            color: getColorLabel(p.name),
+            size: getSizeLabel(p.name),
             selling_price: (p as any).selling_price ?? null,
             in_stock: !!p.in_stock,
             stock_quantity: (p as any).stock_quantity ?? 0,
@@ -170,6 +171,25 @@ export default function ProductDetailPage() {
             if (aColor !== bColor) return aColor.localeCompare(bColor);
             return aSize.localeCompare(bSize);
           });
+
+        // ✅ If no variations were found for this SKU, still show the product itself
+        if (variations.length === 0) {
+          const selfVariant: ProductVariant = {
+            id: mainProduct.id,
+            name: mainProduct.name,
+            sku: mainProduct.sku || `product-${mainProduct.id}`,
+            color: getColorLabel(mainProduct.name),
+            size: getSizeLabel(mainProduct.name),
+            selling_price: (mainProduct as any).selling_price ?? null,
+            in_stock: !!(mainProduct as any).in_stock,
+            stock_quantity: (mainProduct as any).stock_quantity ?? 0,
+            images: (mainProduct as any).images ?? [],
+          };
+
+          setProductVariants([selfVariant]);
+          setSelectedVariant(selfVariant);
+          return;
+        }
 
         setProductVariants(variations);
 
@@ -259,25 +279,6 @@ export default function ProductDetailPage() {
     const stockQty = Number(selectedVariant.stock_quantity ?? 0);
     if (stockQty <= 0) return;
 
-    if (!isAuthenticated()) {
-      const pendingCartItem = {
-        product_id: selectedVariant.id,
-        quantity: quantity,
-        name: selectedVariant.name,
-        price: Number(selectedVariant.selling_price ?? 0),
-        image: (selectedVariant.images && selectedVariant.images[0]?.url) || '',
-        variant_options: {
-          color: selectedVariant.color,
-          size: selectedVariant.size,
-        }
-      };
-
-      localStorage.setItem('pending-cart-item', JSON.stringify(pendingCartItem));
-      localStorage.setItem('cart-redirect', 'true');
-      router.push('/e-commerce/login');
-      return;
-    }
-
     setIsAdding(true);
 
     try {
@@ -303,33 +304,10 @@ export default function ProductDetailPage() {
       setIsAdding(false);
 
       const errorMessage = error.message || '';
-      const isAuthError =
-        errorMessage.includes('401') ||
-        errorMessage.includes('Unauthenticated') ||
-        errorMessage.includes('unauthorized');
-
-      if (isAuthError) {
-        const pendingCartItem = {
-          product_id: selectedVariant.id,
-          quantity: quantity,
-          name: selectedVariant.name,
-          price: Number(selectedVariant.selling_price ?? 0),
-          image: (selectedVariant.images && selectedVariant.images[0]?.url) || '',
-          variant_options: {
-            color: selectedVariant.color,
-            size: selectedVariant.size,
-          }
-        };
-
-        localStorage.setItem('pending-cart-item', JSON.stringify(pendingCartItem));
-        localStorage.setItem('cart-redirect', 'true');
-        router.push('/e-commerce/login');
-      } else {
-        const displayMessage = errorMessage.includes('Insufficient stock')
-          ? errorMessage
-          : 'Failed to add item to cart. Please try again.';
-        alert(displayMessage);
-      }
+      const displayMessage = errorMessage.includes('Insufficient stock')
+        ? errorMessage
+        : 'Failed to add item to cart. Please try again.';
+      alert(displayMessage);
     }
   };
 
@@ -338,28 +316,9 @@ export default function ProductDetailPage() {
 
     if (!item.in_stock) return;
 
-    if (!isAuthenticated()) {
-      const color = extractColorFromName(item.name);
-      const size = extractSizeFromName(item.name);
-
-      const pendingCartItem = {
-        product_id: item.id,
-        quantity: 1,
-        name: item.name,
-        price: Number((item as any).selling_price ?? 0),
-        image: item.images?.[0]?.url || '/placeholder-product.jpg',
-        variant_options: { color, size }
-      };
-
-      localStorage.setItem('pending-cart-item', JSON.stringify(pendingCartItem));
-      localStorage.setItem('cart-redirect', 'true');
-      router.push('/e-commerce/login');
-      return;
-    }
-
     try {
-      const color = extractColorFromName(item.name);
-      const size = extractSizeFromName(item.name);
+      const color = getColorLabel(item.name);
+      const size = getSizeLabel(item.name);
 
       await cartService.addToCart({
         product_id: item.id,
@@ -375,33 +334,10 @@ export default function ProductDetailPage() {
       console.error('Error adding to cart:', error);
 
       const errorMessage = error.message || '';
-      const isAuthError =
-        errorMessage.includes('401') ||
-        errorMessage.includes('Unauthenticated') ||
-        errorMessage.includes('unauthorized');
-
-      if (isAuthError) {
-        const color = extractColorFromName(item.name);
-        const size = extractSizeFromName(item.name);
-
-        const pendingCartItem = {
-          product_id: item.id,
-          quantity: 1,
-          name: item.name,
-          price: Number((item as any).selling_price ?? 0),
-          image: item.images?.[0]?.url || '/placeholder-product.jpg',
-          variant_options: { color, size }
-        };
-
-        localStorage.setItem('pending-cart-item', JSON.stringify(pendingCartItem));
-        localStorage.setItem('cart-redirect', 'true');
-        router.push('/e-commerce/login');
-      } else {
-        const displayMessage = errorMessage.includes('Insufficient stock')
-          ? errorMessage
-          : 'Failed to add item to cart. Please try again.';
-        alert(displayMessage);
-      }
+      const displayMessage = errorMessage.includes('Insufficient stock')
+        ? errorMessage
+        : 'Failed to add item to cart. Please try again.';
+      alert(displayMessage);
     }
   };
 
@@ -416,7 +352,7 @@ export default function ProductDetailPage() {
       wishlistUtils.add({
         id: item.id,
         name: item.name,
-        image: item.images?.[0]?.url || '/placeholder-product.jpg',
+        image: item.images?.[0]?.url || '/placeholder-product.png',
         price: Number((item as any).selling_price ?? 0),
         sku: item.sku,
       });
@@ -507,7 +443,7 @@ export default function ProductDetailPage() {
   // ---------------------------
   // Derived safe values
   // ---------------------------
-  const baseName = getBaseName(product.name);
+  const baseName = getBaseProductName(product.name);
 
   const sellingPrice = Number(selectedVariant.selling_price ?? 0);
   const costPrice = Number((product as any).cost_price ?? 0);
@@ -516,7 +452,7 @@ export default function ProductDetailPage() {
   const safeImages =
     Array.isArray(selectedVariant.images) && selectedVariant.images.length > 0
       ? selectedVariant.images
-      : [{ id: 0, url: '/placeholder-product.jpg', is_primary: true, alt_text: 'Product' } as any];
+      : [{ id: 0, url: '/placeholder-product.png', is_primary: true, alt_text: 'Product' } as any];
 
   const primaryImage =
     safeImages[selectedImageIndex]?.url || safeImages[0]?.url;
@@ -916,7 +852,7 @@ export default function ProductDetailPage() {
             {!loadingSuggestions && suggestedProducts.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
                 {suggestedProducts.map((item) => {
-                  const itemImage = item.images?.[0]?.url || '/placeholder-product.jpg';
+                  const itemImage = item.images?.[0]?.url || '/placeholder-product.png';
                   const isItemInWishlist = wishlistUtils.isInWishlist(item.id);
                   const sp = Number((item as any).selling_price ?? 0);
 

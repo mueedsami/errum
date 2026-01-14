@@ -84,6 +84,66 @@ function formatMoney(n: number): string {
   return fixed;
 }
 
+// Minimal CSV parser (supports quoted fields + commas + newlines)
+function parseCsvText(text: string, maxRows = 60): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+
+    if (inQuotes) {
+      if (ch === '"') {
+        const next = text[i + 1];
+        if (next === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inQuotes = true;
+      continue;
+    }
+
+    if (ch === ',') {
+      row.push(field);
+      field = '';
+      continue;
+    }
+
+    if (ch === '\n') {
+      row.push(field);
+      field = '';
+      rows.push(row);
+      row = [];
+      if (rows.length >= maxRows) break;
+      continue;
+    }
+
+    if (ch === '\r') {
+      continue;
+    }
+
+    field += ch;
+  }
+
+  if (rows.length < maxRows && (field.length > 0 || row.length > 0)) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  return rows;
+}
+
 export default function InventoryReportsPage() {
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -106,6 +166,25 @@ export default function InventoryReportsPage() {
     completed: true,
     pending: false,
   });
+
+  // CSV Exports (Reporting API)
+  const [csvStoreId, setCsvStoreId] = useState('');
+  const [csvStatus, setCsvStatus] = useState(''); // empty = all statuses
+  const [csvCustomerId, setCsvCustomerId] = useState(''); // Sales/Booking CSV only
+  const [csvCategoryId, setCsvCategoryId] = useState(''); // Stock CSV only
+  const [csvProductId, setCsvProductId] = useState(''); // Stock/Booking CSV only
+  const [csvIncludeInactive, setCsvIncludeInactive] = useState(false); // Stock CSV only
+  const [csvBusy, setCsvBusy] = useState<{ category: boolean; sales: boolean; stock: boolean; booking: boolean }>({
+    category: false,
+    sales: false,
+    stock: false,
+    booking: false,
+  });
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewTitle, setPreviewTitle] = useState('');
+  const [previewHeader, setPreviewHeader] = useState<string[]>([]);
+  const [previewBody, setPreviewBody] = useState<string[][]>([]);
+  const [previewError, setPreviewError] = useState('');
 
   // Data states
   const [loading, setLoading] = useState(true);
@@ -208,6 +287,168 @@ export default function InventoryReportsPage() {
     const uniq = new Map<number, ApiOrder>();
     for (const o of all) uniq.set(o.id, o);
     return { orders: Array.from(uniq.values()), isTruncated: truncated };
+  };
+
+  // --- CSV Exports (Reporting API) helpers ---
+  const buildCategorySalesQuery = () => {
+    const q = new URLSearchParams();
+    if (dateFrom) q.set('date_from', dateFrom);
+    if (dateTo) q.set('date_to', dateTo);
+    if (csvStoreId.trim()) q.set('store_id', csvStoreId.trim());
+    if (csvStatus.trim()) q.set('status', csvStatus.trim());
+    return q;
+  };
+
+  const buildSalesQuery = () => {
+    const q = buildCategorySalesQuery();
+    if (csvCustomerId.trim()) q.set('customer_id', csvCustomerId.trim());
+    return q;
+  };
+
+  const buildStockQuery = () => {
+    const q = new URLSearchParams();
+    if (csvStoreId.trim()) q.set('store_id', csvStoreId.trim());
+    if (csvCategoryId.trim()) q.set('category_id', csvCategoryId.trim());
+    if (csvProductId.trim()) q.set('product_id', csvProductId.trim());
+    if (csvIncludeInactive) q.set('include_inactive', 'true');
+    return q;
+  };
+
+  const buildBookingQuery = () => {
+    const q = new URLSearchParams();
+    if (dateFrom) q.set('date_from', dateFrom);
+    if (dateTo) q.set('date_to', dateTo);
+    if (csvStoreId.trim()) q.set('store_id', csvStoreId.trim());
+    if (csvStatus.trim()) q.set('status', csvStatus.trim());
+    if (csvCustomerId.trim()) q.set('customer_id', csvCustomerId.trim());
+    if (csvProductId.trim()) q.set('product_id', csvProductId.trim());
+    return q;
+  };
+
+  const getAuthHeader = () => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('authToken') || '' : '';
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
+  const downloadCsv = async (endpoint: string, query: URLSearchParams) => {
+    const res = await fetch(`${endpoint}?${query.toString()}`, { headers: { ...getAuthHeader() } });
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(msg || 'Failed to download report');
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get('content-disposition') || '';
+    const m = cd.match(/filename="?([^";]+)"?/i);
+    const filename = m?.[1] || 'report.csv';
+
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const previewCsv = async (endpoint: string, query: URLSearchParams) => {
+    const res = await fetch(`${endpoint}?${query.toString()}`, { headers: { ...getAuthHeader() } });
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(msg || 'Failed to load report');
+    }
+    const text = await res.text();
+    const parsed = parseCsvText(text, 60);
+    const header = parsed[0] || [];
+    const body = parsed.slice(1);
+    return { header, body };
+  };
+
+  const doDownloadCategory = async () => {
+    setCsvBusy((s) => ({ ...s, category: true }));
+    setPreviewError('');
+    try {
+      await downloadCsv('/api/reporting/csv/category-sales', buildCategorySalesQuery());
+    } catch (e: any) {
+      setPreviewError(e?.message || 'Failed to download CSV');
+    } finally {
+      setCsvBusy((s) => ({ ...s, category: false }));
+    }
+  };
+
+  const doDownloadSales = async () => {
+    setCsvBusy((s) => ({ ...s, sales: true }));
+    setPreviewError('');
+    try {
+      await downloadCsv('/api/reporting/csv/sales', buildSalesQuery());
+    } catch (e: any) {
+      setPreviewError(e?.message || 'Failed to download CSV');
+    } finally {
+      setCsvBusy((s) => ({ ...s, sales: false }));
+    }
+  };
+
+  const doDownloadStock = async () => {
+    setCsvBusy((s) => ({ ...s, stock: true }));
+    setPreviewError('');
+    try {
+      await downloadCsv('/api/reporting/csv/stock', buildStockQuery());
+    } catch (e: any) {
+      setPreviewError(e?.message || 'Failed to download CSV');
+    } finally {
+      setCsvBusy((s) => ({ ...s, stock: false }));
+    }
+  };
+
+  const doDownloadBooking = async () => {
+    setCsvBusy((s) => ({ ...s, booking: true }));
+    setPreviewError('');
+    try {
+      await downloadCsv('/api/reporting/csv/booking', buildBookingQuery());
+    } catch (e: any) {
+      setPreviewError(e?.message || 'Failed to download CSV');
+    } finally {
+      setCsvBusy((s) => ({ ...s, booking: false }));
+    }
+  };
+
+  const doPreview = async (type: 'category' | 'sales' | 'stock' | 'booking') => {
+    setPreviewError('');
+    try {
+      const endpoint =
+        type === 'category'
+          ? '/api/reporting/csv/category-sales'
+          : type === 'sales'
+            ? '/api/reporting/csv/sales'
+            : type === 'stock'
+              ? '/api/reporting/csv/stock'
+              : '/api/reporting/csv/booking';
+
+      const q =
+        type === 'category'
+          ? buildCategorySalesQuery()
+          : type === 'sales'
+            ? buildSalesQuery()
+            : type === 'stock'
+              ? buildStockQuery()
+              : buildBookingQuery();
+
+      const { header, body } = await previewCsv(endpoint, q);
+      setPreviewTitle(
+        type === 'category'
+          ? 'Category Sales CSV'
+          : type === 'sales'
+            ? 'Sales CSV'
+            : type === 'stock'
+              ? 'Stock CSV'
+              : 'Booking CSV'
+      );
+      setPreviewHeader(header);
+      setPreviewBody(body);
+      setPreviewOpen(true);
+    } catch (e: any) {
+      setPreviewError(e?.message || 'Failed to preview CSV');
+    }
   };
 
   const categoryName = (categoryId: number): string => {
@@ -952,6 +1193,194 @@ export default function InventoryReportsPage() {
               </div>
             </div>
 
+            {/* CSV Exports */}
+            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden mb-6">
+              <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center gap-2">
+                <BarChart3 className="w-5 h-5" />
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">CSV Exports</h2>
+              </div>
+              <div className="p-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Store ID (optional)</label>
+                    <input
+                      value={csvStoreId}
+                      onChange={(e) => setCsvStoreId(e.target.value)}
+                      placeholder="e.g. 1"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Status (optional)</label>
+                    <select
+                      value={csvStatus}
+                      onChange={(e) => setCsvStatus(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white"
+                    >
+                      <option value="">All statuses</option>
+                      <option value="completed">completed</option>
+                      <option value="confirmed">confirmed</option>
+                      <option value="pending">pending</option>
+                      <option value="pending_assignment">pending_assignment</option>
+                      <option value="cancelled">cancelled</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Customer ID (Sales CSV only)</label>
+                    <input
+                      value={csvCustomerId}
+                      onChange={(e) => setCsvCustomerId(e.target.value)}
+                      placeholder="e.g. 25"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="flex items-end gap-2">
+                    <button
+                      onClick={() => loadAll()}
+                      className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700"
+                    >
+                      Refresh data
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mt-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Category ID (Stock CSV only)</label>
+                    <input
+                      value={csvCategoryId}
+                      onChange={(e) => setCsvCategoryId(e.target.value)}
+                      placeholder="e.g. 12"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Product ID (Stock/Booking CSV)</label>
+                    <input
+                      value={csvProductId}
+                      onChange={(e) => setCsvProductId(e.target.value)}
+                      placeholder="e.g. 105"
+                      className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <label className="inline-flex items-center gap-2 text-sm text-gray-900 dark:text-white">
+                      <input
+                        type="checkbox"
+                        checked={csvIncludeInactive}
+                        onChange={(e) => setCsvIncludeInactive(e.target.checked)}
+                        className="w-4 h-4"
+                      />
+                      Include inactive batches (Stock)
+                    </label>
+                  </div>
+                  <div className="flex items-end">
+                    <div className="text-xs text-gray-500 dark:text-gray-400">
+                      Date range applies to: <span className="font-semibold">Category Sales</span>, <span className="font-semibold">Sales</span>, <span className="font-semibold">Booking</span>
+                    </div>
+                  </div>
+                </div>
+
+                {previewError && (
+                  <div className="mt-3 p-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-sm text-red-700 dark:text-red-300">
+                    {previewError}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                    <h3 className="font-semibold text-gray-900 dark:text-white">Category Sales CSV</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Grouped by product category with VAT (7.5) and net breakdown.</p>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={() => doPreview('category')}
+                        className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700"
+                      >
+                        Preview
+                      </button>
+                      <button
+                        disabled={csvBusy.category}
+                        onClick={doDownloadCategory}
+                        className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        {csvBusy.category ? 'Preparing…' : 'Download CSV'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                    <h3 className="font-semibold text-gray-900 dark:text-white">Sales CSV</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">Order-level export (customer, products, delivery, payment, status).</p>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={() => doPreview('sales')}
+                        className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700"
+                      >
+                        Preview
+                      </button>
+                      <button
+                        disabled={csvBusy.sales}
+                        onClick={doDownloadSales}
+                        className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        {csvBusy.sales ? 'Preparing…' : 'Download CSV'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                    <h3 className="font-semibold text-gray-900 dark:text-white">Stock CSV</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                      Batch-wise stock with sold quantity + remaining stock value. Filters: store/category/product, include inactive.
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={() => doPreview('stock')}
+                        className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700"
+                      >
+                        Preview
+                      </button>
+                      <button
+                        disabled={csvBusy.stock}
+                        onClick={doDownloadStock}
+                        className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        {csvBusy.stock ? 'Preparing…' : 'Download CSV'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                    <h3 className="font-semibold text-gray-900 dark:text-white">Booking CSV</h3>
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                      Order-items export with barcode, batch pricing, and payable/paid/due. Filters: date/store/status/customer/product.
+                    </p>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={() => doPreview('booking')}
+                        className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700"
+                      >
+                        Preview
+                      </button>
+                      <button
+                        disabled={csvBusy.booking}
+                        onClick={doDownloadBooking}
+                        className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-60"
+                      >
+                        {csvBusy.booking ? 'Preparing…' : 'Download CSV'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 text-xs text-gray-500 dark:text-gray-400">
+                  Date range: <span className="font-semibold">{dateFrom}</span> → <span className="font-semibold">{dateTo}</span> (applies to Category Sales, Sales, Booking).
+                </div>
+              </div>
+            </div>
+
             {/* Weekly report */}
             <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
               <div className="p-4 border-b border-gray-200 dark:border-gray-700">
@@ -1016,6 +1445,64 @@ export default function InventoryReportsPage() {
                 </table>
               </div>
             </div>
+
+            {/* CSV Preview Modal */}
+            {previewOpen && (
+              <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" onClick={() => setPreviewOpen(false)}>
+                <div
+                  className="w-full max-w-5xl max-h-[85vh] bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden flex flex-col"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{previewTitle}</h3>
+                      <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">Showing first {previewBody.length} rows</p>
+                    </div>
+                    <button
+                      onClick={() => setPreviewOpen(false)}
+                      className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-sm text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 dark:bg-gray-900/40 sticky top-0">
+                        <tr>
+                          {previewHeader.map((h, idx) => (
+                            <th
+                              key={idx}
+                              className="text-left py-2 px-3 text-xs font-semibold text-gray-600 dark:text-gray-400 whitespace-nowrap"
+                            >
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewBody.map((r, ridx) => (
+                          <tr key={ridx} className="border-t border-gray-100 dark:border-gray-700">
+                            {r.map((c, cidx) => (
+                              <td key={cidx} className="py-2 px-3 text-gray-900 dark:text-white whitespace-nowrap">
+                                {c}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                        {previewBody.length === 0 && (
+                          <tr>
+                            <td colSpan={previewHeader.length || 1} className="py-10 text-center text-gray-600 dark:text-gray-400">
+                              No rows.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
           </main>
         </div>
       </div>

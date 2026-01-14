@@ -2,30 +2,12 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { computeMenuPosition } from '@/lib/menuPosition';
 import { MoreVertical, Edit, Trash2, Eye, Plus } from 'lucide-react';
+import type { ProductGroup, ProductVariant } from '@/types/product';
 
 const ERROR_IMG_SRC =
   'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODgiIGhlaWdodD0iODgiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgc3Ryb2tlPSIjMDAwIiBzdHJva2UtbGluZWpvaW49InJvdW5kIiBvcGFjaXR5PSIuMyIgZmlsbD0ibm9uZSIgc3Ryb2tlLXdpZHRoPSIzLjciPjxyZWN0IHg9IjE2IiB5PSIxNiIgd2lkdGg9IjU2IiBoZWlnaHQ9IjU2IiByeD0iNiIvPjxwYXRoIGQ9Im0xNiA1OCAxNi0xOCAzMiAzMiIvPjxjaXJjbGUgY3g9IjUzIiBjeT0iMzUiIHI9IjciLz48L3N2Zz4=';
-
-interface ProductVariant {
-  id: number;
-  name: string;
-  sku: string;
-  color?: string;
-  size?: string;
-  image: string | null;
-}
-
-interface ProductGroup {
-  sku: string;
-  baseName: string;
-  totalVariants: number;
-  variants: ProductVariant[];
-  primaryImage: string | null;
-  categoryPath: string;
-  category_id: number;
-  hasVariations: boolean;
-}
 
 interface ProductListItemProps {
   productGroup: ProductGroup;
@@ -81,10 +63,8 @@ export default function ProductListItem({
   const handleMenuClick = () => {
     if (buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
-      setDropdownPos({
-        top: rect.bottom + window.scrollY + 4,
-        left: rect.left + window.scrollX - 180
-      });
+      const { top, left } = computeMenuPosition(rect, 208, 220, 4, 8);
+      setDropdownPos({ top, left });
     }
     if (!showDropdown) {
       setIsDropdownMounted(true);
@@ -147,7 +127,31 @@ export default function ProductListItem({
               <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 mb-2">
                 <span className="truncate">{productGroup.categoryPath}</span>
               </div>
-            </div>
+            
+              <div className="flex flex-wrap items-center gap-2 text-xs text-gray-600 dark:text-gray-400 mb-2">
+                {productGroup.vendorName ? (
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                    Vendor: {productGroup.vendorName}
+                  </span>
+                ) : null}
+
+                <span
+                  className={`inline-flex items-center px-2.5 py-1 rounded-md font-medium ${
+                    productGroup.inStock === false || productGroup.stockQuantity === 0
+                      ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                      : productGroup.sellingPrice != null
+                        ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                        : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                  }`}
+                >
+                  {productGroup.inStock === false || productGroup.stockQuantity === 0
+                    ? 'Not in stock'
+                    : productGroup.sellingPrice != null
+                      ? `৳${Number(productGroup.sellingPrice).toFixed(2)}`
+                      : 'Checking stock...'}
+                </span>
+              </div>
+</div>
           </div>
           
           <div className="flex flex-wrap items-center gap-2">

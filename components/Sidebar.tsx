@@ -8,6 +8,7 @@ import {
   FolderTree,
   Package,
   ClipboardList,
+  Wrench,
   CreditCard,
   ShoppingCart,
   Image,
@@ -50,16 +51,24 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   };
 
   const menuItems: MenuItem[] = [
-    { icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard' },
-    { icon: Store, label: 'Store', href: '/store' },
-    { icon: FolderTree, label: 'Category', href: '/category' },
-    { icon: Truck,
-       label: 'Vendor Management',
-       subMenu:[
+    {
+      icon: LayoutDashboard,
+      label: 'Dashboard',
+      subMenu: [
+        { label: 'Overview', href: '/dashboard' },
+        { label: 'Stores Summary', href: '/dashboard/stores-summary' },
+      ],
+    },
+    {
+      icon: Truck,
+      label: 'Vendor Management',
+      subMenu: [
         { label: 'Vendor Payment', href: '/vendor' },
         { label: 'Purchase Order', href: '/purchase-order' },
-       ]
+      ],
     },
+    { icon: Store, label: 'Store', href: '/store' },
+    { icon: FolderTree, label: 'Category', href: '/category' },
     { icon: Image, label: 'Gallery', href: '/gallery' },
     {
       icon: Package,
@@ -78,28 +87,30 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         { label: 'Manage Stock', href: '/inventory/manage_stock' },
         { label: 'View Inventory', href: '/inventory/view' },
         { label: 'Price Adjustment', href: '/inventory/batch-price-update' },
+        { label: 'Dispatches', href: '/inventory/outlet-stock' },
         { label: 'Reports', href: '/inventory/reports' },
       ],
     },
-    { icon: ShoppingCart, label: 'Store Assingment', href: '/store-assingment' },
-    { icon: ShoppingCart, label: 'Packing', href: '/store-fulfillment' },
     { icon: ShoppingCart, label: 'POS', href: '/pos' },
-    { icon: ShoppingCart,
-       label: 'Social Commerce',
-       subMenu:[
-        { label: 'Take Orders', href: '/social-commerce' },
-        { label: 'Pack Orders', href: '/social-commerce/package' },
-       ]
-    },
-    {icon: Package, label: 'Preorders', href: '/preorders' },
-    {icon: Package, label: 'Orders', href: '/orders' },
-    {icon: History, label: 'Activity Logs', href: '/activity-logs' },
     { icon: ClipboardList, label: 'Purchase History', href: '/purchase-history' },
-    { icon: Search, label: 'Lookup', href: '/lookup' },
+    { icon: ShoppingCart, label: 'Social Commerce', href: '/social-commerce' },
+    {
+      icon: Wrench,
+      label: 'Services',
+      subMenu: [
+        { label: 'Services Catalog', href: '/services-management' },
+        { label: 'Service Orders', href: '/service-orders' },
+      ],
+    },
+    { icon: Package, label: 'Orders', href: '/orders' },
+    { icon: CreditCard, label: 'Installments', href: '/orders?view=installments' },
+    { icon: Package, label: 'Online Order Packing', href: '/social-commerce/package' },
+    { icon: Package, label: 'PreOrders', href: '/preorders' },
     { icon: AlertTriangle, label: 'Extra Panel', href: '/extra' },
+    { icon: Search, label: 'Lookup', href: '/lookup' },
+    { icon: History, label: 'Activity Log', href: '/activity-logs' },
     { icon: CreditCard, label: 'Transaction', href: '/transaction' },
     { icon: CreditCard, label: 'Accounting', href: '/accounting' },
-    
     { icon: CreditCard, label: 'Employee Management', href: '/employees' },
   ];
 
@@ -152,9 +163,11 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
               const Icon = item.icon;
               const hasSubMenu = 'subMenu' in item;
 
+              const hrefPath = (href: string) => href.split('?')[0];
+
               const isActive = hasSubMenu
-                ? item.subMenu.some((sub) => sub.href === pathname)
-                : 'href' in item && item.href === pathname;
+                ? item.subMenu.some((sub) => hrefPath(sub.href) === pathname)
+                : 'href' in item && hrefPath(item.href) === pathname;
 
               const isSubMenuOpen = openMenu === item.label;
 

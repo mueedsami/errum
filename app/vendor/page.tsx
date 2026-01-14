@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { X, Plus, DollarSign, ShoppingCart, MoreVertical, Eye, Receipt, Loader2, AlertCircle } from 'lucide-react';
+import { X, Plus, DollarSign, ShoppingCart, MoreVertical, Eye, Receipt, Loader2, AlertCircle, Pencil, Trash2 } from 'lucide-react';
+import { computeMenuPosition } from '@/lib/menuPosition';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import { vendorService, Vendor } from '@/services/vendorService';
@@ -76,13 +77,19 @@ export default function VendorPaymentPage() {
   const [vendorPayments, setVendorPayments] = useState<any[]>([]);
 
   // Modal states
+
   const [showAddVendor, setShowAddVendor] = useState(false);
+  const [vendorModalMode, setVendorModalMode] = useState<'add' | 'edit'>('add');
+  const [editingVendorId, setEditingVendorId] = useState<number | null>(null);
+  const [showDeleteVendor, setShowDeleteVendor] = useState(false);
+  const [vendorToDelete, setVendorToDelete] = useState<Vendor | null>(null);
   const [showAddPurchase, setShowAddPurchase] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [showViewVendor, setShowViewVendor] = useState(false);
   const [showTransactions, setShowTransactions] = useState(false);
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState<number | null>(null);
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number } | null>(null);
 
   // Form states - Add Vendor
   const [vendorForm, setVendorForm] = useState({
@@ -356,9 +363,14 @@ export default function VendorPaymentPage() {
       return;
     }
 
+    if (vendorModalMode === 'edit' && !editingVendorId) {
+      showAlert('error', 'Invalid vendor selected for editing');
+      return;
+    }
+
     try {
       setLoading(true);
-      const newVendor = await vendorService.create({
+      const payload = {
         name: vendorForm.name,
         email: vendorForm.email || undefined,
         phone: vendorForm.phone || undefined,
@@ -369,9 +381,19 @@ export default function VendorPaymentPage() {
         credit_limit: vendorForm.credit_limit ? parseFloat(vendorForm.credit_limit) : undefined,
         payment_terms: vendorForm.payment_terms || undefined,
         notes: vendorForm.notes || undefined
-      });
+      
+      };
 
-      setVendors([...vendors, newVendor]);
+      if (vendorModalMode === 'edit') {
+        const updatedVendor = await vendorService.update(editingVendorId as number, payload);
+        setVendors(vendors.map(v => (v.id === updatedVendor.id ? updatedVendor : v)));
+        showAlert('success', 'Vendor updated successfully');
+      } else {
+        const newVendor = await vendorService.create(payload);
+        setVendors([...vendors, newVendor]);
+        showAlert('success', 'Vendor added successfully');
+      }
+
       setVendorForm({
         name: '',
         email: '',
@@ -385,7 +407,8 @@ export default function VendorPaymentPage() {
         notes: ''
       });
       setShowAddVendor(false);
-      showAlert('success', 'Vendor added successfully');
+      setVendorModalMode('add');
+      setEditingVendorId(null);
     } catch (error: any) {
       showAlert('error', error.message || 'Failed to add vendor');
     } finally {
@@ -594,6 +617,48 @@ export default function VendorPaymentPage() {
     setDropdownOpen(null);
   };
 
+
+  const openEditVendor = (vendor: Vendor) => {
+    setVendorModalMode('edit');
+    setEditingVendorId(vendor.id);
+    setVendorForm({
+      name: vendor.name || '',
+      email: vendor.email || '',
+      phone: vendor.phone || '',
+      address: vendor.address || '',
+      contact_person: vendor.contact_person || '',
+      website: vendor.website || '',
+      type: (vendor.type as any) || 'manufacturer',
+      credit_limit: vendor.credit_limit !== undefined && vendor.credit_limit !== null ? String(vendor.credit_limit) : '',
+      payment_terms: vendor.payment_terms || '',
+      notes: vendor.notes || ''
+    });
+    setShowAddVendor(true);
+    setDropdownOpen(null);
+  };
+
+  const openDeleteVendorConfirm = (vendor: Vendor) => {
+    setVendorToDelete(vendor);
+    setShowDeleteVendor(true);
+    setDropdownOpen(null);
+  };
+
+  const handleDeleteVendor = async () => {
+    if (!vendorToDelete) return;
+    try {
+      setLoading(true);
+      await vendorService.delete(vendorToDelete.id);
+      setShowDeleteVendor(false);
+      setVendorToDelete(null);
+      loadVendors(); // refresh from server
+      showAlert('success', 'Vendor deleted successfully');
+    } catch (error: any) {
+      showAlert('error', error.message || 'Failed to delete vendor');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Calculate total allocated amount
   const calculateTotalAllocated = () => {
     return Object.values(selectedPOs)
@@ -631,11 +696,27 @@ export default function VendorPaymentPage() {
             </h1>
             <div className="flex gap-3">
               <button
-                onClick={() => setShowAddVendor(true)}
+                onClick={() => {
+                  setVendorModalMode('add');
+                  setEditingVendorId(null);
+                  setVendorForm({
+        name: '',
+        email: '',
+        phone: '',
+        address: '',
+        contact_person: '',
+        website: '',
+        type: 'manufacturer',
+        credit_limit: '',
+        payment_terms: '',
+        notes: ''
+      });
+                  setShowAddVendor(true);
+                }}
                 className="flex items-center gap-2 bg-gray-900 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
               >
                 <Plus className="w-4 h-4" />
-                Add Vendor
+                {vendorModalMode === 'add' ? 'Add Vendor' : 'Update Vendor'}
               </button>
               <button
                 onClick={() => setShowAddPurchase(true)}
@@ -707,19 +788,20 @@ export default function VendorPaymentPage() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setDropdownOpen(dropdownOpen === vendor.id ? null : vendor.id);
+                                const next = dropdownOpen === vendor.id ? null : vendor.id;
+                                if (next !== null) {
+                                  const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                  setDropdownPos(computeMenuPosition(rect, 192, 180, 6, 8));
+                                }
+                                setDropdownOpen(next);
                               }}
                               className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
                             >
                               <MoreVertical className="w-4 h-4 text-gray-600 dark:text-gray-400" />
                             </button>
 
-                            {dropdownOpen === vendor.id && (
-                              <div className="fixed mt-1 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50"
-                                   style={{
-                                     transform: 'translateX(-100%)',
-                                     marginLeft: '-12px'
-                                   }}>
+                            {dropdownOpen === vendor.id && dropdownPos && (
+                              <div className="fixed w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-50" style={{ top: dropdownPos.top, left: dropdownPos.left }}>
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -730,6 +812,26 @@ export default function VendorPaymentPage() {
                                 >
                                   <Eye className="w-4 h-4" />
                                   View Details
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEditVendor(vendor);
+                                  }}
+                                  className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                  Edit Vendor
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openDeleteVendorConfirm(vendor);
+                                  }}
+                                  className="flex items-center gap-2 w-full px-4 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-gray-700 transition-colors"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                  Delete Vendor
                                 </button>
                                 <button
                                   onClick={(e) => {
@@ -765,7 +867,7 @@ export default function VendorPaymentPage() {
       <Modal
         isOpen={showAddVendor}
         onClose={() => setShowAddVendor(false)}
-        title="Add New Vendor"
+        title={vendorModalMode === 'add' ? 'Add New Vendor' : 'Edit Vendor'}
         size="lg"
       >
         <div className="space-y-4">
@@ -911,7 +1013,11 @@ export default function VendorPaymentPage() {
 
           <div className="flex gap-3 justify-end pt-2">
             <button
-              onClick={() => setShowAddVendor(false)}
+              onClick={() => {
+              setShowAddVendor(false);
+              setVendorModalMode('add');
+              setEditingVendorId(null);
+            }}
               className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
               disabled={loading}
             >
@@ -923,7 +1029,47 @@ export default function VendorPaymentPage() {
               className="px-4 py-2 bg-gray-900 hover:bg-gray-700 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
             >
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-              Add Vendor
+              {vendorModalMode === 'add' ? 'Add Vendor' : 'Update Vendor'}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+
+      {/* Delete Vendor Confirmation */}
+      <Modal
+        isOpen={showDeleteVendor}
+        onClose={() => {
+          setShowDeleteVendor(false);
+          setVendorToDelete(null);
+        }}
+        title="Delete Vendor"
+        size="md"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            Are you sure you want to delete{' '}
+            <span className="font-semibold">{vendorToDelete?.name}</span>? This action cannot be undone.
+          </p>
+
+          <div className="flex gap-3 justify-end pt-2">
+            <button
+              onClick={() => {
+                setShowDeleteVendor(false);
+                setVendorToDelete(null);
+              }}
+              className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+              disabled={loading}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleDeleteVendor}
+              disabled={loading}
+              className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+              Delete
             </button>
           </div>
         </div>

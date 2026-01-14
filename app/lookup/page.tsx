@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import CustomerTagManager from '@/components/customers/CustomerTagManager';
@@ -9,7 +9,9 @@ import customerService, { Customer, CustomerOrder } from '@/services/customerSer
 import orderService from '@/services/orderService';
 import batchService, { Batch } from '@/services/batchService';
 import barcodeTrackingService from '@/services/barcodeTrackingService';
-import barcodeOrderMapper from '@/services/barcodeOrderMapper';
+import lookupService from '@/services/lookupService';
+import purchaseOrderService from '@/services/purchase-order.service';
+import storeService, { Store } from '@/services/storeService';
 import { connectQZ, getDefaultPrinter } from '@/lib/qz-tray';
 
 type LookupTab = 'customer' | 'order' | 'barcode' | 'batch';
@@ -90,6 +92,46 @@ export default function LookupPage() {
   // Shared UI
   const [error, setError] = useState('');
 
+  // Shared: store directory (for showing store names when APIs only return store_id)
+  const [stores, setStores] = useState<Store[]>([]);
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await storeService.getStores({ per_page: 300, is_active: true });
+        const list: any[] = Array.isArray(res) ? res : Array.isArray(res?.data) ? res.data : Array.isArray(res?.data?.data) ? res.data.data : [];
+        if (mounted) setStores(list as Store[]);
+      } catch (e) {
+        // silent: lookup should still work without store names
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const storeNameById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const s of stores || []) {
+      if (s && typeof (s as any).id === 'number') m.set((s as any).id, (s as any).name || '');
+    }
+    return m;
+  }, [stores]);
+
+  const getStoreNameFromAny = (x: any): string => {
+    const direct = x?.store?.name || x?.store_name || x?.storeName || '';
+    if (direct) return direct;
+
+    const idRaw = x?.store?.id ?? x?.store_id ?? x?.storeId ?? x?.current_store_id ?? x?.assigned_store_id ?? x?.source_store_id ?? x?.from_store_id;
+    const id = typeof idRaw === 'number' ? idRaw : idRaw != null ? parseInt(String(idRaw), 10) : NaN;
+    if (Number.isFinite(id)) {
+      const name = storeNameById.get(id);
+      if (name) return name;
+      return `Store #${id}`;
+    }
+    return '—';
+  };
+
   // =========================
   // CUSTOMER LOOKUP
   // =========================
@@ -117,6 +159,11 @@ export default function LookupPage() {
   const [barcodeInput, setBarcodeInput] = useState('');
   const [barcodeLoading, setBarcodeLoading] = useState(false);
   const [barcodeData, setBarcodeData] = useState<BarcodeHistoryData | null>(null);
+
+  // Purchase info (best effort): which PO this barcode/batch came from
+  const [barcodePurchaseInfo, setBarcodePurchaseInfo] = useState<{ poId: number; poNumber?: string; vendorName?: string } | null>(null);
+  const [barcodePurchaseLoading, setBarcodePurchaseLoading] = useState(false);
+
 
   // Cache to resolve order/customer for barcode history + current_location
   const [orderMetaCache, setOrderMetaCache] = useState<
@@ -152,9 +199,58 @@ export default function LookupPage() {
   // -----------------------
   const formatPhoneNumber = (phone: string) => phone.replace(/\D/g, '');
 
+  // NOTE: backend may return numbers as strings with commas (e.g. "1,000"),
+  // or with currency text (e.g. "BDT 1,000"). parseFloat("1,000") => 1.
+  const toNumberString = (v: any) => {
+    if (v == null) return '';
+    const s = String(v).trim();
+    // Remove common thousand separators and any currency/non-numeric chars.
+    // Keep digits, dot, minus.
+    return s.replace(/,/g, '').replace(/[^0-9.\-]/g, '');
+  };
+
   const safeNum = (v: any) => {
-    const n = typeof v === 'number' ? v : v != null ? parseFloat(String(v)) : NaN;
+    const n = typeof v === 'number' ? v : v != null ? parseFloat(toNumberString(v)) : NaN;
     return Number.isFinite(n) ? n : 0;
+  };
+
+  const safeNumOrNull = (v: any): number | null => {
+    const n = typeof v === 'number' ? v : v != null ? parseFloat(toNumberString(v)) : NaN;
+    return Number.isFinite(n) ? n : null;
+  };
+
+  /** Best-effort batch price extraction (backend payloads differ across endpoints). */
+  const extractBatchPrices = (x: any): { cost: number | null; sell: number | null } => {
+    if (!x) return { cost: null, sell: null };
+
+    const meta =
+      x?.metadata ??
+      x?.meta ??
+      x?.location_metadata ??
+      x?.locationMetadata ??
+      x?.data ??
+      {};
+
+    const prices = x?.batch_prices ?? x?.batchPrices ?? x?.prices ?? meta?.batch_prices ?? meta?.batchPrices ?? meta?.prices ?? null;
+
+    const costRaw =
+      x?.cost_price ?? x?.costPrice ?? x?.cost ?? prices?.cost_price ?? prices?.costPrice ?? prices?.cost ?? null;
+
+    const sellRaw =
+      x?.selling_price ??
+      x?.sell_price ??
+      x?.sellPrice ??
+      x?.sell ??
+      prices?.selling_price ??
+      prices?.sell_price ??
+      prices?.sellPrice ??
+      prices?.sell ??
+      null;
+
+    return {
+      cost: safeNumOrNull(costRaw),
+      sell: safeNumOrNull(sellRaw),
+    };
   };
 
   const formatCurrency = (amount: string | number) => {
@@ -166,18 +262,18 @@ export default function LookupPage() {
     }).format(numAmount);
   };
 
-  const formatDate = (dateString: string) => {
-    try {
-      return new Date(dateString).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return dateString;
-    }
+  const formatDate = (dateString?: any) => {
+    if (!dateString) return '—';
+    // Some APIs send non-ISO strings or nulls. Avoid showing "Invalid Date".
+    const d = new Date(dateString);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   };
 
   const formatOrderType = (order: CustomerOrder) => {
@@ -189,6 +285,32 @@ export default function LookupPage() {
         .join(' ');
     }
     return 'N/A';
+  };
+
+  const normalizeCustomerOrders = (list: any): CustomerOrder[] => {
+    const arr = Array.isArray(list) ? list : [];
+    return arr
+      .filter(Boolean)
+      .map((o: any) => {
+        const store = o?.store || (o?.store_name || o?.store_id ? { id: o?.store_id || 0, name: o?.store_name || '—' } : undefined);
+        return {
+          id: o?.id,
+          order_number: o?.order_number || o?.orderNo || o?.number || '',
+          order_date: o?.order_date || o?.created_at || o?.date || '',
+          order_type: o?.order_type || o?.type || '',
+          order_type_label: o?.order_type_label || o?.order_type || o?.type || '',
+          total_amount: o?.total_amount ?? o?.total ?? '0',
+          paid_amount: o?.paid_amount ?? o?.paid ?? '0',
+          outstanding_amount: o?.outstanding_amount ?? o?.outstanding ?? '0',
+          payment_status: o?.payment_status || o?.payment || o?.status || 'unknown',
+          status: o?.status || 'unknown',
+          store: store || { id: 0, name: '—' },
+          items: Array.isArray(o?.items) ? o.items : [],
+          shipping_address: o?.shipping_address || o?.delivery_address || o?.address,
+          notes: o?.notes,
+        } as CustomerOrder;
+      })
+      .filter((o: any) => o?.id);
   };
 
   const getStatusBadge = (status?: string | null) => {
@@ -240,7 +362,14 @@ export default function LookupPage() {
     );
   };
 
-  const readMeta = (x: any) => x?.metadata ?? x?.meta ?? {};
+  // Backend is not consistent: some endpoints use metadata/meta, others use location_metadata.
+  const readMeta = (x: any) =>
+    x?.metadata ??
+    x?.meta ??
+    x?.location_metadata ??
+    x?.locationMetadata ??
+    x?.data ??
+    {};
 
   const extractOrderIdLoose = (x: any): number | null => {
     const meta = readMeta(x);
@@ -251,7 +380,14 @@ export default function LookupPage() {
 
   const extractOrderNumberLoose = (x: any): string | null => {
     const meta = readMeta(x);
-    const v = x?.order_number ?? meta?.order_number ?? meta?.orderNo ?? meta?.order ?? null;
+    const v =
+      x?.order_number ??
+      x?.orderNo ??
+      meta?.order_number ??
+      meta?.orderNo ??
+      meta?.orderNumber ??
+      meta?.order ??
+      null;
     return typeof v === 'string' && v.trim() ? v.trim() : null;
   };
 
@@ -431,8 +567,49 @@ export default function LookupPage() {
     }
   };
 
+  const normalizeLookupOrderToSingleOrder = (payload: any) => {
+    const o = payload?.order || {};
+    const items = Array.isArray(payload?.items) ? payload.items : [];
+
+    return {
+      id: o.id ?? payload?.id ?? 0,
+      order_number: o.order_number ?? '',
+      order_type: o.order_type ?? 'unknown',
+      status: o.status ?? 'unknown',
+      payment_status: o.payment_status ?? 'unknown',
+      // Keep store info so UI can show "Sold From" (some lookup endpoints only include store/store_id inside order)
+      store: o.store ?? payload?.store ?? null,
+      store_id: o.store_id ?? payload?.store_id ?? o?.store?.id ?? payload?.store?.id ?? null,
+      store_name: o.store_name ?? payload?.store_name ?? o?.store?.name ?? payload?.store?.name ?? null,
+      subtotal: o.subtotal,
+      total_amount: o.total_amount ?? o.total ?? o.total_price,
+      // some UIs expect order_date; keep both
+      order_date: o.order_date ?? o.created_at ?? payload?.created_at ?? null,
+      created_at: o.order_date ?? o.created_at ?? null,
+      updated_at: o.updated_at ?? null,
+      items: items.map((it: any, idx: number) => {
+        const barcodeVal = it?.barcode?.barcode ?? it?.barcode ?? null;
+        const barcodesArr = Array.isArray(it?.barcodes) ? it.barcodes : [];
+        const finalBarcodes: string[] = barcodeVal
+          ? [String(barcodeVal)]
+          : barcodesArr.map((b: any) => String(b?.barcode ?? b)).filter(Boolean);
+
+        return {
+          id: it?.item_id ?? it?.id ?? idx,
+          product_id: it?.product?.id ?? it?.product_id ?? null,
+          product_name: it?.product?.name ?? it?.product_name ?? 'Unknown Product',
+          product_sku: it?.product?.sku ?? it?.product_sku ?? 'N/A',
+          quantity: it?.quantity ?? 0,
+          unit_price: it?.unit_price ?? it?.sale_price ?? it?.price ?? null,
+          total_amount: it?.total_amount ?? it?.total ?? null,
+          barcodes: finalBarcodes,
+        };
+      }),
+    };
+  };
+
   // -----------------------
-  // Open order by ID (ensures barcodes are fetched)
+  // Open order by ID (Lookup API)
   // -----------------------
   const openOrderById = async (orderId: number) => {
     setLoading(true);
@@ -442,26 +619,46 @@ export default function LookupPage() {
     setOrders([]);
 
     try {
-      const orderWithBarcodes: any = await barcodeOrderMapper.getOrderWithBarcodes(orderId);
-      const orderData = normalizeOrderToCustomerOrder(orderWithBarcodes);
+      const res: any = await lookupService.getOrder(orderId);
+      if (!res?.success) {
+        throw new Error(res?.message || 'Order not found');
+      }
 
-      setOrderNumber(orderWithBarcodes.order_number || `#${orderId}`);
+      const payload = res.data;
+      const orderData = normalizeLookupOrderToSingleOrder(payload);
+
+      // Some lookup endpoints do not include store/store_id inside the payload.
+      // In that case, enrich from the main Orders API so "Sold From" is always available.
+      try {
+        const hasStore = !!(orderData as any)?.store?.name || !!(orderData as any)?.store_name || !!(orderData as any)?.store_id;
+        if (!hasStore) {
+          const full = await orderService.getById(orderId);
+          (orderData as any).store = (full as any)?.store ?? (orderData as any).store;
+          (orderData as any).store_id = (full as any)?.store?.id ?? (full as any)?.store_id ?? (orderData as any).store_id;
+          (orderData as any).store_name = (full as any)?.store?.name ?? (full as any)?.store_name ?? (orderData as any).store_name;
+        }
+      } catch {
+        // Silent: lookup should still work even if enrichment fails
+      }
+
+      setOrderNumber(payload?.order?.order_number || `#${orderId}`);
       setSingleOrder(orderData);
 
-      if (orderWithBarcodes.customer) {
+      if (payload?.customer) {
+        // Cast/shape to our Customer model as best-effort
         const customerData: Customer = {
-          id: orderWithBarcodes.customer.id,
-          customer_code: orderWithBarcodes.customer.customer_code,
-          name: orderWithBarcodes.customer.name,
-          phone: orderWithBarcodes.customer.phone,
-          email: orderWithBarcodes.customer.email,
-          customer_type: orderWithBarcodes.customer.customer_type || 'unknown',
+          id: payload.customer.id,
+          customer_code: payload.customer.customer_code,
+          name: payload.customer.name,
+          phone: payload.customer.phone,
+          email: payload.customer.email,
+          customer_type: payload.customer.customer_type || 'unknown',
           status: 'active',
-          tags: orderWithBarcodes.customer.tags,
-          total_orders: orderWithBarcodes.customer.total_orders,
-          total_purchases: orderWithBarcodes.customer.total_purchases,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          tags: payload.customer.tags,
+          total_orders: payload.customer.total_orders,
+          total_purchases: payload.customer.total_purchases,
+          created_at: payload.customer.created_at || new Date().toISOString(),
+          updated_at: payload.customer.updated_at || new Date().toISOString(),
         };
         setCustomer(customerData);
       }
@@ -745,7 +942,7 @@ export default function LookupPage() {
         page: 1,
       });
 
-      setOrders(ordersResponse.data || []);
+      setOrders(normalizeCustomerOrders(ordersResponse.data));
     } catch (err: any) {
       setError(err.message || 'An error occurred while loading customer data');
     } finally {
@@ -793,7 +990,7 @@ export default function LookupPage() {
         per_page: 100,
         page: 1,
       });
-      setOrders(ordersResponse.data || []);
+      setOrders(normalizeCustomerOrders(ordersResponse.data));
     } catch (err: any) {
       setError(err.message || 'An error occurred while searching');
     } finally {
@@ -852,6 +1049,114 @@ export default function LookupPage() {
   // -----------------------
   // Barcode handlers
   // -----------------------
+  /**
+   * Enrich barcode history payload with batch cost/sell prices.
+   * Tracking endpoints often omit pricing, but batches API has it.
+   */
+  const enrichBarcodeHistoryWithBatchPrices = async (bd: any) => {
+    try {
+      const loc = bd?.current_location;
+      const batchId =
+        Number(loc?.batch?.id || loc?.batch_id || loc?.batchId || bd?.batch_id || bd?.batchId || null) || null;
+      if (!batchId) return bd;
+
+      // normalize keys if the backend sent sell_price instead of selling_price
+      if (loc?.batch) {
+        if (loc.batch.selling_price == null && loc.batch.sell_price != null) loc.batch.selling_price = loc.batch.sell_price;
+        if (loc.batch.cost_price == null && loc.batch.cost != null) loc.batch.cost_price = loc.batch.cost;
+      }
+
+      const existing = extractBatchPrices(loc?.batch || loc);
+      if (existing.cost != null || existing.sell != null) {
+        // Already have pricing (or partial). Keep it.
+        if (loc?.batch) {
+          if (loc.batch.cost_price == null && existing.cost != null) loc.batch.cost_price = existing.cost;
+          if (loc.batch.selling_price == null && existing.sell != null) loc.batch.selling_price = existing.sell;
+        }
+        return bd;
+      }
+
+      const res = await batchService.getBatch(batchId);
+      if (res?.success && res?.data) {
+        const b: any = res.data;
+        bd.current_location = bd.current_location || {};
+        bd.current_location.batch = bd.current_location.batch || {};
+        bd.current_location.batch.id = b.id;
+        bd.current_location.batch.batch_number = bd.current_location.batch.batch_number || b.batch_number;
+        bd.current_location.batch.cost_price = b.cost_price ?? bd.current_location.batch.cost_price;
+        bd.current_location.batch.selling_price = (b.sell_price ?? b.selling_price) ?? bd.current_location.batch.selling_price;
+      }
+    } catch {
+      // non-blocking
+    }
+    return bd;
+  };
+
+  
+  const extractPurchaseOrderIdFromBarcode = (data: any): number | null => {
+    const tryParse = (v: any) => {
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      if (typeof v === 'string' && v.trim() && !Number.isNaN(Number(v))) return Number(v);
+      return null;
+    };
+
+    // Most likely locations: batch fields
+    const batch = data?.current_location?.batch ?? data?.current_location?.productBatch ?? data?.batch ?? null;
+    const direct =
+      tryParse(batch?.purchase_order_id) ||
+      tryParse(batch?.purchaseOrderId) ||
+      tryParse(batch?.po_id) ||
+      tryParse(batch?.poId) ||
+      tryParse(batch?.purchase_order?.id) ||
+      tryParse(batch?.purchaseOrder?.id);
+
+    if (direct) return direct;
+
+    // Sometimes stored in history metadata
+    const hist: any[] = Array.isArray(data?.history) ? data.history : [];
+    for (const h of hist) {
+      const m =
+        tryParse(h?.purchase_order_id) ||
+        tryParse(h?.purchaseOrderId) ||
+        tryParse(h?.po_id) ||
+        tryParse(h?.poId) ||
+        tryParse(h?.metadata?.purchase_order_id) ||
+        tryParse(h?.metadata?.purchaseOrderId) ||
+        tryParse(h?.meta?.purchase_order_id) ||
+        tryParse(h?.meta?.purchaseOrderId);
+      if (m) return m;
+    }
+
+    // fallback: current_location metadata
+    const m2 =
+      tryParse(data?.current_location?.purchase_order_id) ||
+      tryParse(data?.current_location?.purchaseOrderId) ||
+      tryParse(data?.current_location?.metadata?.purchase_order_id) ||
+      tryParse(data?.current_location?.meta?.purchase_order_id);
+    return m2;
+  };
+
+  const resolveBarcodePurchaseInfo = async (data: any) => {
+    const poId = extractPurchaseOrderIdFromBarcode(data);
+    if (!poId) {
+      setBarcodePurchaseInfo(null);
+      return;
+    }
+
+    setBarcodePurchaseLoading(true);
+    try {
+      const res = await purchaseOrderService.getById(poId);
+      const po: any = res?.data || res; // api wrapper differences
+      const poNumber = po?.po_number || po?.poNumber || po?.order_number || po?.orderNumber;
+      const vendorName = po?.vendor?.name || po?.vendor_name || po?.vendorName;
+      setBarcodePurchaseInfo({ poId, poNumber, vendorName });
+    } catch {
+      setBarcodePurchaseInfo({ poId });
+    } finally {
+      setBarcodePurchaseLoading(false);
+    }
+  };
+
   const handleSearchBarcode = async () => {
     const code = barcodeInput.trim();
     if (!code) {
@@ -862,6 +1167,7 @@ export default function LookupPage() {
     setBarcodeLoading(true);
     setError('');
     setBarcodeData(null);
+    setBarcodePurchaseInfo(null);
 
     try {
       const res = await barcodeTrackingService.getBarcodeHistory(code);
@@ -869,7 +1175,9 @@ export default function LookupPage() {
         setError('Barcode not found');
         return;
       }
-      setBarcodeData(res.data as any);
+      const enriched = await enrichBarcodeHistoryWithBatchPrices(res.data as any);
+      setBarcodeData(enriched as any);
+      await resolveBarcodePurchaseInfo(enriched as any);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch barcode history');
     } finally {
@@ -913,7 +1221,23 @@ export default function LookupPage() {
         setError('Batch not found');
         return;
       }
-      setBatchData(res.data as any);
+      const data: any = res.data as any;
+
+      // Pricing is often missing from the barcode tracking batch endpoint.
+      // Fetch it from /batches/{id} and merge for display.
+      try {
+        const br = await batchService.getBatch(finalBatchId);
+        if (br?.success && br?.data) {
+          data.batch = data.batch || {};
+          data.batch.cost_price = (br.data as any).cost_price ?? data.batch.cost_price;
+          // batches API uses sell_price; UI expects selling_price
+          data.batch.selling_price = ((br.data as any).sell_price ?? (br.data as any).selling_price) ?? data.batch.selling_price;
+        }
+      } catch {
+        // non-blocking
+      }
+
+      setBatchData(data);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch batch history');
     } finally {
@@ -970,7 +1294,7 @@ export default function LookupPage() {
         setError('Barcode not found');
         return;
       }
-      const bd = res.data as any;
+      const bd = await enrichBarcodeHistoryWithBatchPrices(res.data as any);
       setBatchBarcodeData(bd);
 
       const ord = await resolveOrderFromBarcodeData(bd);
@@ -1045,6 +1369,7 @@ export default function LookupPage() {
     }
     if (tab === 'barcode') {
       setBarcodeData(null);
+    setBarcodePurchaseInfo(null);
     }
     if (tab === 'batch') {
       setBatchData(null);
@@ -1065,6 +1390,25 @@ export default function LookupPage() {
     const soldVia = extractSoldViaLoose(loc) || extractSoldViaLoose((bd.history || []).find((h: any) => isSoldLike(h)));
 
     return { orderId, orderNo, soldVia };
+  };
+
+  const prettySoldVia = (v?: string | null) => {
+    if (!v) return '';
+    const s = String(v).trim().toLowerCase();
+    const m: Record<string, string> = {
+      order: 'Order',
+      pos: 'POS',
+      counter: 'Counter',
+      ecommerce: 'E-commerce',
+      'e-commerce': 'E-commerce',
+      social_commerce: 'Social Commerce',
+      'social-commerce': 'Social Commerce',
+    };
+    if (m[s]) return m[s];
+    return s
+      .split('_')
+      .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+      .join(' ');
   };
 
   const barcodeSaleInfo = getBarcodeSaleInfo(barcodeData);
@@ -1309,7 +1653,7 @@ export default function LookupPage() {
                                   <div className="grid grid-cols-2 gap-2">
                                     <div>
                                       <p className="text-[9px] font-semibold text-black dark:text-white uppercase mb-1">Store</p>
-                                      <p className="text-[10px] text-gray-600 dark:text-gray-400 font-medium">{order.store.name}</p>
+                                      <p className="text-[10px] text-gray-600 dark:text-gray-400 font-medium">{getStoreNameFromAny(order)}</p>
                                     </div>
                                     <div>
                                       <p className="text-[9px] font-semibold text-black dark:text-white uppercase mb-1">Payment</p>
@@ -1437,6 +1781,17 @@ export default function LookupPage() {
                           </div>
                         </div>
 
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                          <div>
+                            <p className="text-[9px] text-gray-500 uppercase font-medium">Sold From</p>
+                            <p className="text-sm text-black dark:text-white">{getStoreNameFromAny(singleOrder)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[9px] text-gray-500 uppercase font-medium">Type</p>
+                            <p className="text-sm text-black dark:text-white">{formatOrderType(singleOrder)}</p>
+                          </div>
+                        </div>
+
                         <div className="bg-white dark:bg-black rounded border border-gray-200 dark:border-gray-800 overflow-hidden">
                           <table className="w-full text-[10px]">
                             <thead className="bg-gray-50 dark:bg-gray-900">
@@ -1469,6 +1824,7 @@ export default function LookupPage() {
                                                   setActiveTab('barcode');
                                                   setBarcodeInput(code);
                                                   setBarcodeData(null);
+    setBarcodePurchaseInfo(null);
                                                   setError('');
                                                   setTimeout(() => handleSearchBarcode(), 0);
                                                 }}
@@ -1577,7 +1933,7 @@ export default function LookupPage() {
                             </div>
                             <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
                               <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Current Store</p>
-                              <p className="text-xs text-black dark:text-white">{barcodeData.current_location.current_store?.name || '—'}</p>
+                              <p className="text-xs text-black dark:text-white">{getStoreNameFromAny(barcodeData.current_location)}</p>
                             </div>
                             <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
                               <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Batch</p>
@@ -1590,22 +1946,45 @@ export default function LookupPage() {
                               <p className="text-[10px] text-black dark:text-white">
                                 Cost:{' '}
                                 <span className="font-semibold">
-                                  {barcodeData.current_location.batch?.cost_price != null
-                                    ? formatCurrency(barcodeData.current_location.batch?.cost_price)
-                                    : '—'}
+                                  {(() => {
+                                    const p = extractBatchPrices(barcodeData.current_location.batch || barcodeData.current_location);
+                                    return p.cost != null ? formatCurrency(p.cost) : '—';
+                                  })()}
                                 </span>
                               </p>
                               <p className="text-[10px] text-black dark:text-white">
                                 Sell:{' '}
                                 <span className="font-semibold">
-                                  {barcodeData.current_location.batch?.selling_price != null
-                                    ? formatCurrency(barcodeData.current_location.batch?.selling_price)
-                                    : '—'}
+                                  {(() => {
+                                    const p = extractBatchPrices(barcodeData.current_location.batch || barcodeData.current_location);
+                                    return p.sell != null ? formatCurrency(p.sell) : '—';
+                                  })()}
                                 </span>
                               </p>
                             </div>
                           </div>
                         )}
+
+                        {/* PURCHASE ORDER / VENDOR (NEW) */}
+                        <div className="mt-3 border border-gray-200 dark:border-gray-800 rounded p-2 bg-white dark:bg-gray-900/20">
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-[9px] text-gray-500 uppercase font-medium">Purchase</p>
+                            {barcodePurchaseLoading && (
+                              <span className="text-[9px] text-gray-500 dark:text-gray-400">loading…</span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-black dark:text-white mt-1">
+                            Purchase Order:{' '}
+                            <span className="font-semibold">
+                              {barcodePurchaseInfo?.poNumber ||
+                                (barcodePurchaseInfo?.poId ? `#${barcodePurchaseInfo.poId}` : '—')}
+                            </span>
+                          </p>
+                          <p className="text-[10px] text-black dark:text-white">
+                            Vendor:{' '}
+                            <span className="font-semibold">{barcodePurchaseInfo?.vendorName || '—'}</span>
+                          </p>
+                        </div>
 
                         {/* SOLD / ORDER INFO (works even if movement history is empty, if backend sends meta) */}
                         {barcodeSaleInfo && (
@@ -1614,10 +1993,10 @@ export default function LookupPage() {
                               <div>
                                 <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Sale / Order</p>
                                 <p className="text-xs font-semibold text-black dark:text-white">
-                                  Sold{barcodeSaleInfo.soldVia ? ` via ${barcodeSaleInfo.soldVia}` : ''}
+                                  Sold{barcodeSaleInfo.soldVia ? ` via ${prettySoldVia(barcodeSaleInfo.soldVia)}` : ''}
                                 </p>
                                 <p className="text-[10px] text-gray-600 dark:text-gray-400">
-                                  Order:{' '}
+                                  Order #:{' '}
                                   <span className="font-semibold text-black dark:text-white">
                                     {barcodeSaleInfo.orderNo || (barcodeSaleInfo.orderId ? `#${barcodeSaleInfo.orderId}` : '—')}
                                   </span>
@@ -1833,9 +2212,21 @@ export default function LookupPage() {
 
                             {/* Batch price (if backend provides) */}
                             <div className="mt-1 text-[10px] text-gray-600 dark:text-gray-400">
-                              Cost: <span className="font-semibold text-black dark:text-white">{batchData.batch.cost_price != null ? formatCurrency(batchData.batch.cost_price) : '—'}</span>
+                              Cost:{' '}
+                              <span className="font-semibold text-black dark:text-white">
+                                {(() => {
+                                  const p = extractBatchPrices(batchData.batch);
+                                  return p.cost != null ? formatCurrency(p.cost) : '—';
+                                })()}
+                              </span>
                               <span className="mx-2">•</span>
-                              Sell: <span className="font-semibold text-black dark:text-white">{batchData.batch.selling_price != null ? formatCurrency(batchData.batch.selling_price) : '—'}</span>
+                              Sell:{' '}
+                              <span className="font-semibold text-black dark:text-white">
+                                {(() => {
+                                  const p = extractBatchPrices(batchData.batch);
+                                  return p.sell != null ? formatCurrency(p.sell) : '—';
+                                })()}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -2026,17 +2417,19 @@ export default function LookupPage() {
                                       <p className="text-[10px] text-black dark:text-white">
                                         Cost:{' '}
                                         <span className="font-semibold">
-                                          {batchBarcodeData.current_location.batch?.cost_price != null
-                                            ? formatCurrency(batchBarcodeData.current_location.batch?.cost_price)
-                                            : '—'}
+                                          {(() => {
+                                            const p = extractBatchPrices(batchBarcodeData.current_location.batch || batchBarcodeData.current_location);
+                                            return p.cost != null ? formatCurrency(p.cost) : '—';
+                                          })()}
                                         </span>
                                       </p>
                                       <p className="text-[10px] text-black dark:text-white">
                                         Sell:{' '}
                                         <span className="font-semibold">
-                                          {batchBarcodeData.current_location.batch?.selling_price != null
-                                            ? formatCurrency(batchBarcodeData.current_location.batch?.selling_price)
-                                            : '—'}
+                                          {(() => {
+                                            const p = extractBatchPrices(batchBarcodeData.current_location.batch || batchBarcodeData.current_location);
+                                            return p.sell != null ? formatCurrency(p.sell) : '—';
+                                          })()}
                                         </span>
                                       </p>
                                     </div>

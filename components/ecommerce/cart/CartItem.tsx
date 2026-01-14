@@ -9,8 +9,9 @@ import { useCart } from '../../../app/e-commerce/CartContext';
 interface CartItemProps {
   item: {
     id: number;
+    productId: number;
     name: string;
-    image: string;
+    image?: string;
     price: string | number;
     quantity: number;
     sku?: string;
@@ -114,7 +115,7 @@ export default function CartItem({ item, onQuantityChange, onRemove, isUpdating:
 
   // ✅ Navigate to product detail
   const handleNavigateToProduct = () => {
-    router.push(`/e-commerce/product/${item.id}`);
+    router.push(`/e-commerce/product/${item.productId}`);
   };
 
   // Safety check
@@ -137,7 +138,7 @@ export default function CartItem({ item, onQuantityChange, onRemove, isUpdating:
         onClick={handleNavigateToProduct}
       >
         <img
-          src={item.image || '/placeholder-product.jpg'}
+          src={item.image || '/placeholder-product.png'}
           alt={item.name}
           className="w-full h-full object-cover rounded hover:opacity-80 transition-opacity"
         />

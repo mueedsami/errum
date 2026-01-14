@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { X, Plus, Trash2, RefreshCw } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { X, Plus, Trash2, RefreshCw, Scan, RotateCcw, AlertTriangle } from 'lucide-react';
 import { Store } from '@/services/storeService';
 import batchService from '@/services/batchService';
+import barcodeService from '@/services/barcodeService';
 
 interface DispatchItem {
   batch_id: string;
@@ -19,6 +20,16 @@ interface CreateDispatchModalProps {
   loading: boolean;
   defaultSourceStoreId?: number;
 }
+
+type AddMode = 'batch' | 'barcode';
+
+type ScanEntry = {
+  barcode: string;
+  batch_id: string;
+  batch_number: string;
+  product_name: string;
+  scanned_at: string;
+};
 
 const CreateDispatchModal: React.FC<CreateDispatchModalProps> = ({
   isOpen,
@@ -38,6 +49,29 @@ const CreateDispatchModal: React.FC<CreateDispatchModalProps> = ({
   });
 
   const [items, setItems] = useState<DispatchItem[]>([]);
+
+  // Only for UI convenience while creating dispatch (does NOT replace send/receive scan flow).
+  type AddMode = 'batch' | 'barcode';
+  type ScanEntry = {
+    barcode: string;
+    batch_id: string;
+    batch_number: string;
+    product_name: string;
+    scanned_at: string;
+  };
+
+  const [addMode, setAddMode] = useState<AddMode>('batch');
+  const [scanInput, setScanInput] = useState('');
+  const [scanError, setScanError] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanHistory, setScanHistory] = useState<ScanEntry[]>([]);
+  const scanInputRef = useRef<HTMLInputElement | null>(null);
+
+  const scannedSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const it of scanHistory) s.add(it.barcode);
+    return s;
+  }, [scanHistory]);
   const [currentItem, setCurrentItem] = useState({
     batch_id: '',
     quantity: '',
@@ -60,6 +94,11 @@ const CreateDispatchModal: React.FC<CreateDispatchModalProps> = ({
       setCurrentItem({ batch_id: '', quantity: '' });
       setBatchData(null);
       setAvailableBatches([]);
+      setAddMode('batch');
+      setScanInput('');
+      setScanError(null);
+      setScanning(false);
+      setScanHistory([]);
     } else if (isOpen && defaultSourceStoreId) {
       setFormData(prev => ({
         ...prev,
@@ -76,6 +115,11 @@ const CreateDispatchModal: React.FC<CreateDispatchModalProps> = ({
       setBatchData(null);
       setCurrentItem({ batch_id: '', quantity: '' });
     }
+
+    // barcode scan UI depends on source store
+    setScanInput('');
+    setScanError(null);
+    setScanHistory([]);
   }, [formData.source_store_id]);
 
   const fetchAvailableBatches = async () => {
@@ -143,6 +187,8 @@ const CreateDispatchModal: React.FC<CreateDispatchModalProps> = ({
   }, [currentItem.batch_id]);
 
   const addItem = () => {
+    if (addMode !== 'batch') return;
+
     if (!batchData || !currentItem.quantity) {
       alert('Please select a batch and enter quantity');
       return;
@@ -172,8 +218,149 @@ const CreateDispatchModal: React.FC<CreateDispatchModalProps> = ({
     setBatchData(null);
   };
 
+  const handleBarcodeScan = async () => {
+    const value = scanInput.trim();
+    if (!value) return;
+
+    if (!formData.source_store_id) {
+      setScanError('Select the Source Store first, then scan.');
+      return;
+    }
+
+    if (scannedSet.has(value)) {
+      setScanError('This barcode is already scanned in this dispatch draft.');
+      return;
+    }
+
+    setScanError(null);
+    setScanning(true);
+
+    try {
+      const res = await barcodeService.scanBarcode(value);
+      if (!res?.success) {
+        setScanError(res?.message || 'Barcode not found');
+        return;
+      }
+
+      const data = res.data;
+      const sourceId = Number(formData.source_store_id);
+      const locationId = data?.current_location?.id;
+
+      if (!locationId || locationId !== sourceId) {
+        setScanError('Barcode is not currently at the selected source store.');
+        return;
+      }
+
+      if (!data?.current_batch?.id) {
+        setScanError('This barcode is not linked to any active batch.');
+        return;
+      }
+
+      if (!data?.is_available) {
+        setScanError('This barcode is not available for dispatch.');
+        return;
+      }
+
+      const batchId = String(data.current_batch.id);
+      const batchNumber = data.current_batch.batch_number;
+      const productName = data.product?.name || 'Unknown Product';
+
+      const availableQty = Number(
+        typeof data.quantity_available === 'number'
+          ? data.quantity_available
+          : data.current_batch.quantity_available ?? 0
+      );
+
+      setItems((prev) => {
+        const idx = prev.findIndex((it) => it.batch_id === batchId);
+
+        if (idx === -1) {
+          return [
+            ...prev,
+            {
+              batch_id: batchId,
+              batch_number: batchNumber,
+              product_name: productName,
+              quantity: '1',
+              available_quantity: availableQty,
+            },
+          ];
+        }
+
+        const next = [...prev];
+        const existing = next[idx];
+        const existingQty = Number.parseInt(existing.quantity || '0', 10) || 0;
+        const nextQty = existingQty + 1;
+
+        const maxAllowed = existing.available_quantity || availableQty;
+        if (maxAllowed > 0 && nextQty > maxAllowed) {
+          setScanError(`Batch limit reached. Only ${maxAllowed} active unit(s) available.`);
+          return prev;
+        }
+
+        next[idx] = {
+          ...existing,
+          quantity: String(nextQty),
+          available_quantity: maxAllowed,
+        };
+        return next;
+      });
+
+      setScanHistory((prev) => [
+        {
+          barcode: value,
+          batch_id: batchId,
+          batch_number: batchNumber,
+          product_name: productName,
+          scanned_at: new Date().toISOString(),
+        },
+        ...prev,
+      ]);
+
+      setScanInput('');
+      // keep the input focused for hardware scanners
+      setTimeout(() => scanInputRef.current?.focus(), 0);
+    } catch (err: any) {
+      setScanError(err?.response?.data?.message || err?.message || 'Failed to scan barcode');
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const removeLastScan = () => {
+    const last = scanHistory[0];
+    if (!last) return;
+
+    setScanHistory((prev) => prev.slice(1));
+    setItems((prev) => {
+      const idx = prev.findIndex((it) => it.batch_id === last.batch_id);
+      if (idx === -1) return prev;
+      const next = [...prev];
+      const item = next[idx];
+      const existingQty = Number.parseInt(item.quantity || '0', 10) || 0;
+      const nextQty = Math.max(0, existingQty - 1);
+      if (nextQty === 0) {
+        next.splice(idx, 1);
+      } else {
+        next[idx] = { ...item, quantity: String(nextQty) };
+      }
+      return next;
+    });
+  };
+
+  const clearScans = () => {
+    // Reduce quantities only for items added via scans. Since we don't know which were manual,
+    // safest behavior: clear scan list only (does not auto-remove items).
+    setScanHistory([]);
+    setScanError(null);
+  };
+
   const removeItem = (index: number) => {
+    const removed = items[index];
     setItems(items.filter((_, i) => i !== index));
+    if (removed?.batch_id) {
+      setScanHistory((prev) => prev.filter((s) => s.batch_id !== removed.batch_id));
+    }
   };
 
   const handleSubmit = () => {
@@ -326,7 +513,140 @@ const CreateDispatchModal: React.FC<CreateDispatchModalProps> = ({
               )}
             </div>
 
-            <div className="grid grid-cols-12 gap-2 mb-3">
+            {/* Add mode toggle (manual batch vs barcode scan) */}
+            <div className="flex items-center gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setAddMode('batch');
+                  setScanError(null);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+                  addMode === 'batch'
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                }`}
+              >
+                Select Batch
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAddMode('barcode');
+                  setScanError(null);
+                  setTimeout(() => scanInputRef.current?.focus(), 0);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors flex items-center gap-1 ${
+                  addMode === 'barcode'
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                }`}
+              >
+                <Scan className="w-3.5 h-3.5" /> Scan Barcodes
+              </button>
+              {addMode === 'barcode' && (
+                <span className="text-xs text-gray-500 dark:text-gray-400">
+                  Each scan adds <b>1 unit</b> to the matching batch.
+                </span>
+              )}
+            </div>
+
+            {addMode === 'barcode' && (
+              <div className="mb-3">
+                <div className="grid grid-cols-12 gap-2">
+                  <div className="col-span-7">
+                    <div className="relative">
+                      <Scan className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        ref={scanInputRef}
+                        type="text"
+                        value={scanInput}
+                        onChange={(e) => setScanInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            void handleBarcodeScan();
+                          }
+                        }}
+                        placeholder={formData.source_store_id ? 'Scan barcode and press Enter…' : 'Select source store first'}
+                        disabled={!formData.source_store_id || scanning}
+                        className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm disabled:bg-gray-100 dark:disabled:bg-gray-600"
+                      />
+                    </div>
+                  </div>
+                  <div className="col-span-2">
+                    <button
+                      type="button"
+                      onClick={handleBarcodeScan}
+                      disabled={!formData.source_store_id || scanning || !scanInput.trim()}
+                      className="w-full px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 text-white rounded-lg text-sm flex items-center justify-center"
+                      title="Scan & add"
+                    >
+                      <Scan className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="col-span-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={removeLastScan}
+                      disabled={scanHistory.length === 0 || scanning}
+                      className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 text-gray-800 dark:text-gray-200 rounded-lg text-sm flex items-center justify-center"
+                      title="Undo last scan"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearScans}
+                      disabled={scanHistory.length === 0 || scanning}
+                      className="flex-1 px-3 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 text-gray-800 dark:text-gray-200 rounded-lg text-xs"
+                      title="Clear scan list"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                {scanError && (
+                  <div className="mt-2 p-2 rounded border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 text-amber-800 dark:text-amber-300 text-xs flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 mt-0.5" />
+                    <div>{scanError}</div>
+                  </div>
+                )}
+
+                {scanHistory.length > 0 && (
+                  <div className="mt-2 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 bg-gray-50 dark:bg-gray-700">
+                      <div className="text-xs font-semibold text-gray-700 dark:text-gray-200">
+                        Scanned ({scanHistory.length})
+                      </div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                        Latest first
+                      </div>
+                    </div>
+                    <div className="max-h-28 overflow-y-auto divide-y divide-gray-200 dark:divide-gray-700">
+                      {scanHistory.slice(0, 10).map((s, idx) => (
+                        <div key={s.barcode} className="px-3 py-2">
+                          <div className="text-xs font-mono text-gray-900 dark:text-white truncate">
+                            {idx + 1}. {s.barcode}
+                          </div>
+                          <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
+                            {s.product_name} • {s.batch_number}
+                          </div>
+                        </div>
+                      ))}
+                      {scanHistory.length > 10 && (
+                        <div className="px-3 py-2 text-[11px] text-gray-500 dark:text-gray-400">
+                          +{scanHistory.length - 10} more…
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className={`grid grid-cols-12 gap-2 mb-3 ${addMode === 'barcode' ? 'opacity-50 pointer-events-none' : ''}`}>
               <div className="col-span-6">
                 <select
                   value={currentItem.batch_id}

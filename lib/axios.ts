@@ -1,7 +1,10 @@
 import axios from 'axios';
 
+// NOTE:
+// In local dev, NEXT_PUBLIC_API_URL is sometimes missing.
+// Fallback keeps admin panels working out-of-the-box.
 const axiosInstance = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL,
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api',
   headers: {
     'Content-Type': 'application/json',
     'Accept': 'application/json',
@@ -14,12 +17,17 @@ const PUBLIC_ROUTES = [
   '/login',
   '/forgot-password',
   '/reset-password',
+  // Public customer registration (no auth)
+  '/customer-registration',
   '/customer-auth/register',
   '/customer-auth/login',
   '/customer-auth/password/reset-request',
   '/customer-auth/password/reset',
   '/customer-auth/email/verify',
   '/customer-auth/email/resend',
+  // Guest checkout (no auth)
+  '/guest-checkout',
+  '/guest-orders/by-phone',
   '/payment-method',
 ];
 

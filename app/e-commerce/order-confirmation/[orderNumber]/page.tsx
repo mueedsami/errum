@@ -214,7 +214,7 @@ export default function OrderConfirmationPage() {
                       alt={item.product_name}
                       className="w-20 h-20 object-cover rounded"
                       onError={(e) => {
-                        e.currentTarget.src = '/placeholder-product.jpg';
+                        e.currentTarget.src = '/placeholder-product.png';
                       }}
                     />
                   )}
@@ -256,14 +256,6 @@ export default function OrderConfirmationPage() {
                 <span>Shipping</span>
                 <span>৳{order.shipping_charge.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</span>
               </div>
-              
-              {order.tax_amount > 0 && (
-                <div className="flex justify-between text-gray-700">
-                  <span>Tax</span>
-                  <span>৳{order.tax_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</span>
-                </div>
-              )}
-              
               {order.discount_amount > 0 && (
                 <div className="flex justify-between text-green-600">
                   <span>Discount</span>

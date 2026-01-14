@@ -455,6 +455,39 @@ const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Stat
 
   const parseMoney = (val: any) => Number(String(val ?? '0').replace(/[^0-9.-]/g, ''));
 
+
+  // Robust boolean parser (handles 0/1, "0"/"1", true/false, "true"/"false")
+  const toBool = (v: any): boolean => {
+    if (v === true || v === 1) return true;
+    if (v === false || v === 0 || v == null) return false;
+    if (typeof v === 'string') {
+      const s = v.trim().toLowerCase();
+      if (s === '1' || s === 'true' || s === 'yes') return true;
+      if (s === '0' || s === 'false' || s === 'no' || s === '') return false;
+    }
+    return Boolean(v);
+  };
+
+  const hasInstallmentInfo = (info: any): boolean => {
+    if (!info || typeof info !== 'object') return false;
+    const total = Number((info as any).total_installments ?? (info as any).totalInstallments ?? 0);
+    const amt = Number((info as any).installment_amount ?? (info as any).installmentAmount ?? 0);
+    const paidCount = Number((info as any).paid_installments ?? (info as any).paidInstallments ?? 0);
+    const nextDue = (info as any).next_payment_due ?? (info as any).nextPaymentDue ?? null;
+    return total > 0 || amt > 0 || paidCount > 0 || Boolean(nextDue);
+  };
+
+  const pickInstallmentInfo = (order: any): any | null => {
+    const a = order?.installment_info;
+    const b = order?.installment_plan;
+    const c = order?.installment;
+    if (hasInstallmentInfo(a)) return a;
+    if (hasInstallmentInfo(b)) return b;
+    if (hasInstallmentInfo(c)) return c;
+    return null;
+  };
+
+
   const formatShippingAddress = (shipping: any): string => {
     if (!shipping) return '';
     if (typeof shipping === 'string') return shipping;
@@ -726,8 +759,13 @@ const derivePaymentStatus = (order: any) => {
       paymentStatus: normalize(pStatusRaw) || 'pending',
       paymentStatusLabel: statusLabel(pStatusRaw || 'pending'),
 
-      isInstallment: Boolean(order.is_installment || order.is_installment_payment || order.installment_info || order.installment_plan),
-      installmentInfo: (order.installment_info ?? order.installment_plan ?? null),
+      isInstallment:
+        toBool(order.is_installment) ||
+        toBool(order.is_installment_payment) ||
+        hasInstallmentInfo(order.installment_info) ||
+        hasInstallmentInfo(order.installment_plan) ||
+        hasInstallmentInfo(order.installment),
+      installmentInfo: pickInstallmentInfo(order),
 
       salesBy: order.salesman?.name || userName || 'N/A',
       store: order.store?.name || '',
@@ -764,10 +802,9 @@ const derivePaymentStatus = (order: any) => {
     setIsLoading(true);
     try {
       let allOrders: any[] = [];
-
       if (viewMode === 'installments') {
+        // ✅ Installment-only view: try broad query first (no order_type filter)
         const inst = await orderService.getAll({
-          order_type: 'counter',
           installment_only: true,
           sort_by: 'created_at',
           sort_order: 'desc',
@@ -775,6 +812,34 @@ const derivePaymentStatus = (order: any) => {
         });
 
         allOrders = inst.data || [];
+
+        // Fallback: some backends require order_type filtering
+        if (allOrders.length === 0) {
+          const [counter, pos] = await Promise.all([
+            orderService.getAll({
+              order_type: 'counter',
+              installment_only: true,
+              sort_by: 'created_at',
+              sort_order: 'desc',
+              per_page: 1000,
+            }),
+            orderService.getAll({
+              order_type: 'pos',
+              installment_only: true,
+              sort_by: 'created_at',
+              sort_order: 'desc',
+              per_page: 1000,
+            }),
+          ]);
+
+          const merged = [...(counter.data || []), ...(pos.data || [])];
+          const uniq = new Map<number, any>();
+          merged.forEach((o: any) => {
+            if (o?.id != null) uniq.set(Number(o.id), o);
+          });
+
+          allOrders = Array.from(uniq.values());
+        }
       } else {
         const [social, ecommerce] = await Promise.all([
           orderService.getAll({

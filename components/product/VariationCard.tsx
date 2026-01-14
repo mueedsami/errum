@@ -3,13 +3,10 @@ import { Trash2, Plus, X } from 'lucide-react';
 // Clothing + Footwear sizes (EU 38–43 with US mapping in label)
 const SIZE_OPTIONS = [
   // Apparel (letter sizes)
-  'XXS','XS','S','M','L','XL','XXL','XXXL',
+  'XXS','XS','S','M','L','XL','XXL','XXXL','XXXXL','XXXXL',
 
   // Numeric sizes (dress/footwear etc.)
-  '35','36','37','38','39','40','41','42','43','44','45','46','47','48','49','50',
-
-  // Jewellery (bangle) sizes
-  '2.4','2.6','2.8','2.10',
+  '36 ','37','38','39 (US 6.5)','40 (US 7)','41 (US 8)','42 (US 8.5)','43 (US 9.5)','44 (US 10)','45 (US 11)','46 (US 12)',
 ];
 
 

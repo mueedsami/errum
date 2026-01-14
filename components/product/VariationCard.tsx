@@ -31,6 +31,13 @@ interface VariationCardProps {
   onSizeAdd: () => void;
   onSizeUpdate: (sizeIndex: number, value: string) => void;
   onSizeRemove: (sizeIndex: number) => void;
+
+  // Optional: override size dropdown options (e.g., sneakers-only or dresses-only)
+  sizeOptions?: string[];
+
+  // Optional: preset buttons (e.g., add all sneaker sizes)
+  sizePresetButtons?: Array<{ key: string; label: string }>;
+  onApplySizePreset?: (key: string) => void;
 }
 
 export default function VariationCard({
@@ -42,8 +49,13 @@ export default function VariationCard({
   onImageRemove,
   onSizeAdd,
   onSizeUpdate,
-  onSizeRemove
+  onSizeRemove,
+  sizeOptions,
+  sizePresetButtons,
+  onApplySizePreset
 }: VariationCardProps) {
+  const options = Array.isArray(sizeOptions) && sizeOptions.length > 0 ? sizeOptions : SIZE_OPTIONS;
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-5">
       <div className="flex items-start justify-between mb-4">
@@ -127,18 +139,33 @@ export default function VariationCard({
 
         {/* Sizes */}
         <div>
-          <div className="flex items-center justify-between mb-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
               Sizes <span className="text-gray-500 font-normal">(Optional)</span>
             </label>
-            <button
-              type="button"
-              onClick={onSizeAdd}
-              className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-            >
-              <Plus className="w-4 h-4" />
-              Add Size
-            </button>
+
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {Array.isArray(sizePresetButtons) &&
+                sizePresetButtons.map((b) => (
+                  <button
+                    key={b.key}
+                    type="button"
+                    onClick={() => onApplySizePreset?.(b.key)}
+                    className="px-2.5 py-1 text-xs rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    {b.label}
+                  </button>
+                ))}
+
+              <button
+                type="button"
+                onClick={onSizeAdd}
+                className="text-sm text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+              >
+                <Plus className="w-4 h-4" />
+                Add Size
+              </button>
+            </div>
           </div>
 
           {variation.sizes.length === 0 ? (
@@ -158,7 +185,7 @@ export default function VariationCard({
                     className="flex-1 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:bg-gray-800 dark:text-white"
                   >
                     <option value="">Select</option>
-                    {SIZE_OPTIONS.map((s) => (
+                    {options.map((s) => (
                       <option key={s} value={s}>
                         {s}
                       </option>

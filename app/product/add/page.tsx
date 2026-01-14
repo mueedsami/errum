@@ -21,6 +21,7 @@ import {
   VariationData,
   FALLBACK_IMAGE_URL,
 } from '@/types/product';
+import { SIZE_PRESETS, getPresetLabel, type SizePresetKey } from '@/data/sizePresets';
 
 interface AddEditProductPageProps {
   productId?: string;
@@ -130,70 +131,176 @@ export default function AddEditProductPage({
   const [categories, setCategories] = useState<CategoryTree[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
 
+
+  // --- Size presets (Errum): quickly select full size chart for a category ---
+  const findCategoryNameById = (nodes: CategoryTree[], id: string): string => {
+    const target = String(id || '').trim();
+    if (!target) return '';
+    const stack: any[] = Array.isArray(nodes) ? [...nodes] : [];
+    while (stack.length) {
+      const node: any = stack.pop();
+      if (!node) continue;
+      if (String(node.id) === target) return String(node.name || '');
+      const children = (node.children || node.all_children || []) as any[];
+      if (Array.isArray(children) && children.length) stack.push(...children);
+    }
+    return '';
+  };
+
+  const selectedCategoryName = (() => {
+    const id = categorySelection.level0 ? String(categorySelection.level0) : '';
+    return id ? findCategoryNameById(categories, id) : '';
+  })();
+
+  const sizeContext = (() => {
+    const name = String(selectedCategoryName || '').toLowerCase();
+
+    const footwearKeywords = [
+      'shoe',
+      'shoes',
+      'sneaker',
+      'sneakers',
+      'footwear',
+      'boot',
+      'boots',
+      'sandal',
+      'sandals',
+      'loafer',
+      'loafers',
+      'heel',
+      'heels',
+    ];
+
+    const apparelKeywords = [
+      'dress',
+      'dresses',
+      'apparel',
+      'clothing',
+      't-shirt',
+      'tshirt',
+      'shirt',
+      'tops',
+      'top',
+      'pant',
+      'pants',
+      'trouser',
+      'trousers',
+      'jeans',
+      'kurti',
+      'kameez',
+      'salwar',
+      'saree',
+      'sari',
+      'jacket',
+      'hoodie',
+      'sweater',
+      'blouse',
+      'skirt',
+      'abaya',
+    ];
+
+    const isFootwear = footwearKeywords.some((k) => name.includes(k));
+    const isApparel = apparelKeywords.some((k) => name.includes(k));
+
+    if (isFootwear) return { options: SIZE_PRESETS.sneakers as readonly string[] };
+    if (isApparel) return { options: SIZE_PRESETS.dresses as readonly string[] };
+    return { options: null as readonly string[] | null };
+  })();
+
+  const getSizeOptionsForVariation = (sizes: string[]): string[] | undefined => {
+    if (!sizeContext.options) return undefined;
+    const existing = (Array.isArray(sizes) ? sizes : [])
+      .map((s) => String(s || '').trim())
+      .filter(Boolean);
+
+    return Array.from(new Set([...(sizeContext.options || []), ...existing]));
+  };
+
+  const sizePresetButtons = [
+    { key: 'sneakers', label: getPresetLabel('sneakers') },
+    { key: 'dresses', label: getPresetLabel('dresses') },
+  ];
+
+  const applySizePreset = (variationId: string, presetKey: SizePresetKey) => {
+    const preset = Array.isArray(SIZE_PRESETS[presetKey]) ? Array.from(SIZE_PRESETS[presetKey]) : [];
+    if (preset.length === 0) return;
+
+    setVariations((prev) =>
+      prev.map((v) => {
+        if (v.id !== variationId) return v;
+        const existing = (Array.isArray(v.sizes) ? v.sizes : [])
+          .map((s) => String(s || '').trim())
+          .filter(Boolean);
+        const merged = Array.from(new Set([...existing, ...preset]));
+        return { ...v, sizes: merged.length > 0 ? merged : [''] };
+      })
+    );
+  };
+
   useEffect(() => {
     fetchInitialData();
   }, []);
 
   useEffect(() => {
     if (isEditMode && productId && availableFields.length > 0) {
-      fetchProduct();
-    } else if (addVariationMode) {
-      setFormData({
-        name: storedBaseName,
-        sku: storedBaseSku,
-        description: '',
-      });
-      setCategorySelection({ level0: storedCategoryId });
-      if (storedVendorId) {
-        setSelectedVendorId(String(storedVendorId));
+        fetchProduct();
+      } else if (addVariationMode) {
+        setFormData({
+          name: storedBaseName,
+          sku: storedBaseSku,
+          description: '',
+        });
+        setCategorySelection({ level0: storedCategoryId });
+        if (storedVendorId) {
+          setSelectedVendorId(String(storedVendorId));
+        }
+        setHasVariations(true);
+        setActiveTab('general');
       }
-      setHasVariations(true);
-      setActiveTab('general');
-    }
   }, [isEditMode, productId, availableFields, addVariationMode, storedBaseName, storedBaseSku, storedCategoryId, storedVendorId]);
 
   useEffect(() => {
-    if (hasVariations && !isEditMode) {
-      setActiveTab('variations');
-    }
-  }, [hasVariations, isEditMode]);
+      if (hasVariations && !isEditMode) {
+        setActiveTab('variations');
+      }
+    }, [hasVariations, isEditMode]);
 
-  // In edit mode, fetch all products that share the same SKU so the user can manage variations
-  useEffect(() => {
-    if (!isEditMode) return;
-    const sku = String(formData.sku || '').trim();
-    if (!sku) return;
-    fetchSkuGroupProducts(sku);
-  }, [isEditMode, formData.sku]);
+    // In edit mode, fetch all products that share the same SKU so the user can manage variations
+    useEffect(() => {
+      if (!isEditMode) return;
+      const sku = String(formData.sku || '').trim();
+      if (!sku) return;
+      fetchSkuGroupProducts(sku);
+    }, [isEditMode, formData.sku]);
 
-  /**
-   * Normalize category tree so sub-categories always render.
-   *
-   * Some API responses return nested nodes in `all_children` (and may omit `children`).
-   * Our UI (CategoryTreeSelector) prefers `children`, so we unify both into `children`.
-   */
-  const filterActiveCategories = (cats: CategoryTree[]): CategoryTree[] => {
-    const getChildren = (cat: CategoryTree): CategoryTree[] => {
-      const rawChildren = (cat as any)?.children;
-      const rawAllChildren = (cat as any)?.all_children;
+    /**
+     * Normalize category tree so sub-categories always render.
+     *
+     * Some API responses return nested nodes in `all_children` (and may omit `children`).
+     * Our UI (CategoryTreeSelector) prefers `children`, so we unify both into `children`.
+     */
+    const filterActiveCategories = (cats: CategoryTree[]): CategoryTree[] => {
+      const getChildren = (cat: CategoryTree): CategoryTree[] => {
+        const rawChildren = (cat as any)?.children;
+        const rawAllChildren = (cat as any)?.all_children;
 
-      if (Array.isArray(rawChildren) && rawChildren.length > 0) return rawChildren;
-      if (Array.isArray(rawAllChildren) && rawAllChildren.length > 0) return rawAllChildren;
-      return [];
+        if (Array.isArray(rawChildren) && rawChildren.length > 0) return rawChildren;
+        if (Array.isArray(rawAllChildren) && rawAllChildren.length > 0) return rawAllChildren;
+        return [];
+      };
+
+      return (Array.isArray(cats) ? cats : [])
+        .filter((cat) => Boolean(cat) && Boolean((cat as any).is_active))
+        .map((cat) => {
+          const nested = filterActiveCategories(getChildren(cat));
+          return {
+            ...cat,
+            children: nested,
+            // keep for backward-compatibility, but ensure it doesn't shadow children
+            all_children: nested,
+          } as CategoryTree;
+        });
     };
-
-    return (Array.isArray(cats) ? cats : [])
-      .filter((cat) => Boolean(cat) && Boolean((cat as any).is_active))
-      .map((cat) => {
-        const nested = filterActiveCategories(getChildren(cat));
-        return {
-          ...cat,
-          children: nested,
-          // keep for backward-compatibility, but ensure it doesn't shadow children
-          all_children: nested,
-        } as CategoryTree;
-      });
-  };
 
   const fetchInitialData = async () => {
     try {
@@ -1559,6 +1666,9 @@ export default function AddEditProductPage({
                             onSizeAdd={() => addSize(variation.id)}
                             onSizeUpdate={(sizeIdx, value) => updateSizeValue(variation.id, sizeIdx, value)}
                             onSizeRemove={(sizeIdx) => removeSize(variation.id, sizeIdx)}
+                            sizeOptions={getSizeOptionsForVariation(variation.sizes)}
+                            sizePresetButtons={sizePresetButtons}
+                            onApplySizePreset={(key) => applySizePreset(variation.id, key as SizePresetKey)}
                           />
                         ))}
                       </div>

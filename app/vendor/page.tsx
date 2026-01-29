@@ -753,21 +753,25 @@ export default function VendorPaymentPage() {
       showAlert('error', 'Please select a vendor first');
       return;
     }
-    if (!quickProductForm.name.trim() || !quickProductForm.sku.trim() || !quickProductForm.category_id) {
-      showAlert('error', 'Name, SKU and category are required');
+    if (!quickProductForm.name.trim() || !quickProductForm.category_id) {
+      showAlert('error', 'Name and category are required');
       return;
     }
 
     try {
       setLoading(true);
 
-      const created = await productService.create({
+      const sku = quickProductForm.sku.trim();
+      const payload: any = {
         name: quickProductForm.name.trim(),
-        sku: quickProductForm.sku.trim(),
         description: quickProductForm.description?.trim() || undefined,
         category_id: parseInt(quickProductForm.category_id, 10),
         vendor_id: parseInt(purchaseForm.vendor_id, 10),
-      } as any);
+      };
+      // SKU is optional; backend will auto-generate if omitted
+      if (sku) payload.sku = sku;
+
+      const created = await productService.create(payload);
 
       // refresh product list so it shows in finder immediately
       await loadProducts();
@@ -2261,12 +2265,12 @@ export default function VendorPaymentPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">SKU *</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">SKU (optional)</label>
               <input
                 value={quickProductForm.sku}
                 onChange={(e) => setQuickProductForm({ ...quickProductForm, sku: e.target.value })}
                 className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                placeholder="SKU"
+                placeholder="Leave empty to auto-generate (9 digits)"
               />
             </div>
           </div>

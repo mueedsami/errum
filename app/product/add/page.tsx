@@ -719,7 +719,9 @@ export default function AddEditProductPage({
       return false;
     }
 
-    if (!formData.sku.trim()) {
+    // SKU is optional on create (backend will auto-generate). But in edit/add-variation mode,
+    // SKU must exist because we manage & group variations by SKU.
+    if ((isEditMode || addVariationMode) && !String(formData.sku || '').trim()) {
       setToast({ message: 'SKU is required', type: 'error' });
       return false;
     }
@@ -856,6 +858,9 @@ export default function AddEditProductPage({
         value: f.value,
       }));
 
+      // ✅ SKU is optional on create. If empty, send null so backend can auto-generate.
+      const normalizedSku: string | null = String(formData.sku || '').trim() || null;
+
       if (isEditMode) {
         await productService.update(parseInt(productId!), {
           name: formData.name,
@@ -877,7 +882,7 @@ export default function AddEditProductPage({
       } else {
         const baseData = {
           name: formData.name,
-          sku: formData.sku,
+          sku: normalizedSku,
           description: formData.description,
           category_id: finalCategoryId,
           vendor_id: parseInt(selectedVendorId),
@@ -896,11 +901,15 @@ export default function AddEditProductPage({
             return;
           }
 
-          const createdProducts = [];
+          const createdProducts: any[] = [];
           const VARIATION_FIELD_IDS = [colorField.id, sizeField.id];
           const baseCustomFields = customFields.filter(
             cf => !VARIATION_FIELD_IDS.includes(cf.field_id)
           );
+
+          // If SKU is empty, we'll auto-generate ONCE from the first created variation
+          // and reuse it for all other variations so they remain grouped by SKU.
+          let sharedSku: string | null = normalizedSku;
 
           // ✅ OPTIMIZED: Prepare all variations first (no API calls)
           const variationsToCreate: Array<{
@@ -940,6 +949,59 @@ export default function AddEditProductPage({
             }
           }
 
+          // ✅ If SKU was left empty, create ONE seed variation first so backend can
+          // generate a SKU, then reuse that SKU for all other variations.
+          if (!sharedSku && variationsToCreate.length > 0) {
+            const seed = variationsToCreate.shift()!;
+            try {
+              setToast({ message: 'Generating SKU for variations...', type: 'success' });
+
+              const seedProduct = await productService.create({
+                name: seed.name,
+                sku: null,
+                description: baseData.description,
+                category_id: baseData.category_id,
+                vendor_id: baseData.vendor_id,
+                custom_fields: seed.customFields,
+              } as any);
+
+              sharedSku = String((seedProduct as any).sku || '').trim() || null;
+              if (sharedSku) {
+                // reflect in UI so user can see the generated SKU
+                setFormData(prev => ({ ...prev, sku: sharedSku || '' }));
+              }
+
+              // Upload seed images
+              if (seed.images.length > 0 && (seedProduct as any).id) {
+                for (let imgIdx = 0; imgIdx < seed.images.length; imgIdx++) {
+                  try {
+                    await productImageService.uploadImage(
+                      (seedProduct as any).id,
+                      seed.images[imgIdx],
+                      {
+                        is_primary: imgIdx === 0,
+                        sort_order: imgIdx,
+                      }
+                    );
+                    if (imgIdx < seed.images.length - 1) {
+                      await new Promise(resolve => setTimeout(resolve, 300));
+                    }
+                  } catch (error) {
+                    console.error(`Failed to upload seed image ${imgIdx + 1} for ${seed.name}:`, error);
+                  }
+                }
+              }
+
+              createdProducts.push(seedProduct);
+              console.log(`✅ Seed variation created (generated SKU: ${sharedSku || 'unknown'})`);
+            } catch (error) {
+              console.error('❌ Failed to create seed variation for SKU generation:', error);
+              setToast({ message: 'Failed to generate SKU for variations', type: 'error' });
+              setLoading(false);
+              return;
+            }
+          }
+
           console.log(`🔄 Creating ${variationsToCreate.length} variations in batches...`);
 
           // ✅ OPTIMIZED: Process in batches of 5 with delays
@@ -974,7 +1036,7 @@ export default function AddEditProductPage({
                   try {
                     product = await productService.create({
                       name: varData.name,
-                      sku: baseData.sku,
+                      sku: sharedSku,
                       description: baseData.description,
                       category_id: baseData.category_id,
                       vendor_id: baseData.vendor_id,
@@ -1232,20 +1294,34 @@ export default function AddEditProductPage({
 
                         <div>
                           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            SKU <span className="text-red-500">*</span>
+                            SKU
+                            {(isEditMode || addVariationMode) && (
+                              <span className="text-red-500"> *</span>
+                            )}
                           </label>
                           <input
                             type="text"
                             value={formData.sku}
                             onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
-                            placeholder="e.g., PROD-001"
+                            placeholder={
+                              isEditMode || addVariationMode
+                                ? 'e.g., PROD-001'
+                                : 'Leave empty to auto-generate (9 digits)'
+                            }
                             // disabled={isEditMode || addVariationMode}
                             disabled={addVariationMode}
                             className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500 focus:border-transparent dark:bg-gray-700 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                           />
-                          {(isEditMode || addVariationMode) && (
+                          {(isEditMode || addVariationMode) ? (
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              {addVariationMode ? 'All variations share the same SKU' : 'SKU cannot be changed after creation'}
+                              {addVariationMode
+                                ? 'All variations share the same SKU'
+                                : 'SKU cannot be changed after creation'}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                              Leave blank and the system will auto-generate a unique 9-digit SKU.
+                              {hasVariations ? ' For variations, the first item will generate the SKU and the rest will reuse it.' : ''}
                             </p>
                           )}
                         </div>
@@ -1629,7 +1705,7 @@ export default function AddEditProductPage({
                           How Variations Work:
                         </h4>
                         <ul className="text-sm text-blue-800 dark:text-blue-400 space-y-1">
-                          <li>• All variations use the same SKU: "<strong>{formData.sku || 'Enter SKU in General tab'}</strong>"</li>
+                          <li>• All variations use the same SKU: "<strong>{formData.sku || 'Leave empty to auto-generate'}</strong>"</li>
                           <li>• Each <strong>color is required</strong> for a variation</li>
                           <li>• Sizes are optional - leave empty for "One Size" products</li>
                           <li>• Each color gets one set of images (shared across all sizes)</li>

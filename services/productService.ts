@@ -54,7 +54,8 @@ export interface Field {
 
 export interface CreateProductData {
   name: string;
-  sku: string;
+  /** Optional: backend will auto-generate (9-digit) if omitted/null/empty */
+  sku?: string | null;
   description?: string;
   category_id: number;
   vendor_id: number;

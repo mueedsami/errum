@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
@@ -11,6 +11,7 @@ import {
   MoreVertical,
   Eye,
   Package,
+  Wrench,
   XCircle,
   Loader,
   Globe,
@@ -23,14 +24,21 @@ import {
   Settings,
   CheckCircle,
   HandCoins,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 
 import orderService, { type Order as BackendOrder } from '@/services/orderService';
+import pathaoOrderLookupService, {
+  type PathaoBulkLookupItem,
+  type PathaoLookupData,
+} from '@/services/pathaoOrderLookupService';
 import paymentService from '@/services/paymentService';
 import type { PaymentMethod } from '@/services/paymentMethodService';
 import axios from '@/lib/axios';
 import batchService from '@/services/batchService';
 import productService from '@/services/productService';
+import serviceManagementService from '@/services/serviceManagementService';
 
 import ReturnProductModal from '@/components/sales/ReturnProductModal';
 import ExchangeProductModal from '@/components/sales/ExchangeProductModal';
@@ -63,6 +71,15 @@ interface Order {
     price: number;
     discount: number;
   }>;
+  services: Array<{
+    id: number;
+    serviceId?: number;
+    name: string;
+    category?: string;
+    quantity: number;
+    price: number;
+    discount: number;
+  }>;
   subtotal: number;
   discount: number;
   shipping: number;
@@ -79,6 +96,9 @@ interface Order {
   // ✅ payment status separate
   paymentStatus: string;
   paymentStatusLabel: string;
+
+  // Intended courier marker
+  intendedCourier?: string | null;
 
   // Installments / EMI
   isInstallment?: boolean;
@@ -216,6 +236,15 @@ const titleCase = (s: string) =>
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
 
+const sanitizePhone = (phone?: string) => String(phone || '').replace(/[^0-9+]/g, '');
+
+const buildPathaoTrackingUrl = (consignmentId: string, phone?: string) => {
+  const cid = encodeURIComponent(String(consignmentId || '').trim());
+  const ph = encodeURIComponent(sanitizePhone(phone));
+  // Pathao merchant panel tracking page
+  return `https://merchant.pathao.com/tracking?consignment_id=${cid}&phone=${ph}`;
+};
+
 const getApiBaseUrl = () => {
   const raw = process.env.NEXT_PUBLIC_API_URL || '';
   return raw.replace(/\/api\/?$/, '').replace(/\/$/, '');
@@ -268,6 +297,12 @@ export default function OrdersDashboard() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [filteredOrders, setFilteredOrders] = useState<Order[]>([]);
 
+  // 🚚 Pathao lookup (order_number -> lookup info)
+  const [pathaoLookupByOrderNumber, setPathaoLookupByOrderNumber] = useState<Record<string, PathaoBulkLookupItem>>({});
+  const [selectedOrderPathao, setSelectedOrderPathao] = useState<PathaoLookupData | null>(null);
+  const [isPathaoLookupLoading, setIsPathaoLookupLoading] = useState(false);
+  const pathaoInFlightRef = useRef<Set<string>>(new Set());
+
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('');
 
@@ -278,6 +313,14 @@ export default function OrdersDashboard() {
   const [orderStatusFilter, setOrderStatusFilter] = useState('All Order Status');
   
 const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Status');
+
+  // Courier marker filters / edit
+  const [courierFilter, setCourierFilter] = useState('All Couriers');
+  const [availableCouriers, setAvailableCouriers] = useState<string[]>([]);
+  const [showCourierModal, setShowCourierModal] = useState(false);
+  const [courierModalOrder, setCourierModalOrder] = useState<Order | null>(null);
+  const [courierModalValue, setCourierModalValue] = useState<string>('');
+  const [isSavingCourier, setIsSavingCourier] = useState(false);
 
   const searchParams = useSearchParams();
   const initialViewMode = useMemo(() => {
@@ -291,6 +334,33 @@ const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Stat
   useEffect(() => {
     setViewMode(initialViewMode);
   }, [initialViewMode]);
+
+  // ♻️ Restore cached Pathao lookup results (10 min TTL)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = sessionStorage.getItem('pathao_lookup_cache_v1');
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      const ts = Number(parsed?.ts || 0);
+      const map = parsed?.map || {};
+      if (ts && Date.now() - ts < 10 * 60 * 1000 && map && typeof map === 'object') {
+        setPathaoLookupByOrderNumber(map);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // ♻️ Save Pathao lookup cache
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      sessionStorage.setItem('pathao_lookup_cache_v1', JSON.stringify({ ts: Date.now(), map: pathaoLookupByOrderNumber }));
+    } catch {
+      // ignore
+    }
+  }, [pathaoLookupByOrderNumber]);
 
 
   const [selectedBackendOrder, setSelectedBackendOrder] = useState<any | null>(null);
@@ -334,6 +404,14 @@ const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Stat
   const [isProductLoading, setIsProductLoading] = useState(false);
   const [pickerBatches, setPickerBatches] = useState<any[]>([]);
   const [pickerStoreId, setPickerStoreId] = useState<number | null>(null);
+
+  // 🛠️ Service picker (for Edit Order)
+  const [showServicePicker, setShowServicePicker] = useState(false);
+  const [serviceSearch, setServiceSearch] = useState('');
+  const [availableServices, setAvailableServices] = useState<any[]>([]);
+  const [serviceResults, setServiceResults] = useState<any[]>([]);
+  const [isServiceLoading, setIsServiceLoading] = useState(false);
+  const [servicesTouched, setServicesTouched] = useState(false);
 
   // 🖼️ Product thumbnails (used in View Details / Edit Order / Packing-like tables)
   const [productThumbsById, setProductThumbsById] = useState<Record<number, string>>({});
@@ -381,6 +459,10 @@ const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Stat
 
   // 📦 Address editing (Social Commerce: Pathao / International, E-commerce checkout)
   const [scIsInternational, setScIsInternational] = useState(false);
+
+  // ✅ NEW: Pathao auto location (address -> city/zone/area mapping happens inside Pathao)
+  // If enabled, City/Zone/Area are optional in the editor.
+  const [scUsePathaoAutoLocation, setScUsePathaoAutoLocation] = useState<boolean>(true);
 
   const [pathaoCities, setPathaoCities] = useState<PathaoCity[]>([]);
   const [pathaoZones, setPathaoZones] = useState<PathaoZone[]>([]);
@@ -448,45 +530,16 @@ const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Stat
     const name = localStorage.getItem('userName') || '';
     setUserName(name);
     loadOrders();
+    if (viewMode === 'online') {
+      // Courier dropdown options (safe if endpoint is missing)
+      loadAvailableCouriers();
+    }
     checkPrinterStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode]);
 
 
   const parseMoney = (val: any) => Number(String(val ?? '0').replace(/[^0-9.-]/g, ''));
-
-
-  // Robust boolean parser (handles 0/1, "0"/"1", true/false, "true"/"false")
-  const toBool = (v: any): boolean => {
-    if (v === true || v === 1) return true;
-    if (v === false || v === 0 || v == null) return false;
-    if (typeof v === 'string') {
-      const s = v.trim().toLowerCase();
-      if (s === '1' || s === 'true' || s === 'yes') return true;
-      if (s === '0' || s === 'false' || s === 'no' || s === '') return false;
-    }
-    return Boolean(v);
-  };
-
-  const hasInstallmentInfo = (info: any): boolean => {
-    if (!info || typeof info !== 'object') return false;
-    const total = Number((info as any).total_installments ?? (info as any).totalInstallments ?? 0);
-    const amt = Number((info as any).installment_amount ?? (info as any).installmentAmount ?? 0);
-    const paidCount = Number((info as any).paid_installments ?? (info as any).paidInstallments ?? 0);
-    const nextDue = (info as any).next_payment_due ?? (info as any).nextPaymentDue ?? null;
-    return total > 0 || amt > 0 || paidCount > 0 || Boolean(nextDue);
-  };
-
-  const pickInstallmentInfo = (order: any): any | null => {
-    const a = order?.installment_info;
-    const b = order?.installment_plan;
-    const c = order?.installment;
-    if (hasInstallmentInfo(a)) return a;
-    if (hasInstallmentInfo(b)) return b;
-    if (hasInstallmentInfo(c)) return c;
-    return null;
-  };
-
 
   const formatShippingAddress = (shipping: any): string => {
     if (!shipping) return '';
@@ -586,6 +639,8 @@ const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Stat
         setScInternationalPostalCode(sa.postal_code || '');
         setScInternationalStreet(sa.street || sa.address || '');
       } else {
+        const hasAllIds = !!sa.pathao_city_id && !!sa.pathao_zone_id && !!sa.pathao_area_id;
+        setScUsePathaoAutoLocation(!hasAllIds);
         setPathaoCityId(sa.pathao_city_id ? String(sa.pathao_city_id) : '');
         setPathaoZoneId(sa.pathao_zone_id ? String(sa.pathao_zone_id) : '');
         setPathaoAreaId(sa.pathao_area_id ? String(sa.pathao_area_id) : '');
@@ -608,16 +663,34 @@ const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Stat
     if (!showEditModal) return;
     if (normalize(editableOrder?.orderType) !== 'social_commerce') return;
     if (scIsInternational) return;
+    if (scUsePathaoAutoLocation) return;
 
     fetchPathaoCities();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showEditModal, editableOrder?.orderType, scIsInternational]);
+  }, [showEditModal, editableOrder?.orderType, scIsInternational, scUsePathaoAutoLocation]);
+
+  // If auto-location is enabled, clear any manual Pathao selections
+  useEffect(() => {
+    if (!showEditModal) return;
+    if (normalize(editableOrder?.orderType) !== 'social_commerce') return;
+    if (scIsInternational) return;
+
+    if (scUsePathaoAutoLocation) {
+      setPathaoCityId('');
+      setPathaoZoneId('');
+      setPathaoAreaId('');
+      setPathaoZones([]);
+      setPathaoAreas([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scUsePathaoAutoLocation, showEditModal, editableOrder?.orderType, scIsInternational]);
 
   // Cascading: City -> Zones
   useEffect(() => {
     if (!showEditModal) return;
     if (normalize(editableOrder?.orderType) !== 'social_commerce') return;
     if (scIsInternational) return;
+    if (scUsePathaoAutoLocation) return;
 
     if (!pathaoCityId) {
       setPathaoZones([]);
@@ -636,6 +709,7 @@ const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Stat
     if (!showEditModal) return;
     if (normalize(editableOrder?.orderType) !== 'social_commerce') return;
     if (scIsInternational) return;
+    if (scUsePathaoAutoLocation) return;
 
     if (!pathaoZoneId) {
       setPathaoAreas([]);
@@ -717,6 +791,85 @@ const derivePaymentStatus = (order: any) => {
     const oStatusRaw = order.status ?? '';
     const pStatusRaw = derivePaymentStatus(order);
 
+
+    // 🧩 Products vs Services (POS can create orders with services)
+    const rawItems = Array.isArray(order.items) ? order.items : [];
+    const looksLikeService = (it: any) =>
+      Boolean(
+        it?.service_id ||
+          it?.serviceId ||
+          it?.is_service ||
+          it?.isService ||
+          normalize(it?.item_type) === 'service' ||
+          normalize(it?.type) === 'service'
+      );
+
+    const productItems = rawItems
+      .filter((it: any) => !looksLikeService(it))
+      .map((item: any) => {
+        const unitPrice = parseMoney(item.unit_price);
+        const discountAmount = parseMoney(item.discount_amount);
+        return {
+          id: item.id,
+          productId: item.product_id,
+          imageUrl: pickOrderItemImage(item),
+          name: item.product_name,
+          sku: item.product_sku,
+          quantity: item.quantity,
+          price: unitPrice,
+          discount: discountAmount,
+        };
+      });
+
+    const servicesFromItems = rawItems
+      .filter((it: any) => looksLikeService(it))
+      .map((it: any, i: number) => {
+        const unitPrice = parseMoney(it.unit_price ?? it.price ?? 0);
+        const discountAmount = parseMoney(it.discount_amount ?? it.discount ?? 0);
+        const id = Number(it?.id) || -(Number(order.id || 0) * 10000 + (i + 1));
+        const serviceId = Number(it?.service_id ?? it?.serviceId ?? 0) || undefined;
+
+        return {
+          id,
+          serviceId,
+          name: it?.service_name || it?.product_name || it?.name || '',
+          category: it?.category || it?.service_category || it?.service?.category || undefined,
+          quantity: Number(it?.quantity ?? 1) || 1,
+          price: unitPrice,
+          discount: discountAmount,
+        };
+      });
+
+    const rawServices: any[] =
+      (order.services ??
+        order.service_items ??
+        order.order_services ??
+        order.orderServices ??
+        order.serviceItems ??
+        []) as any[];
+
+    const services =
+      Array.isArray(rawServices) && rawServices.length > 0
+        ? rawServices.map((s: any, i: number) => {
+            const unitPrice = parseMoney(s?.unit_price ?? s?.price ?? s?.base_price ?? 0);
+            const discountAmount = parseMoney(s?.discount_amount ?? s?.discount ?? 0);
+
+            const id =
+              Number(s?.id ?? s?.order_service_id ?? s?.orderServiceId ?? s?.pivot?.id) ||
+              -(Number(order.id || 0) * 10000 + (i + 1));
+            const serviceId = Number(s?.service_id ?? s?.serviceId ?? s?.service?.id ?? 0) || undefined;
+
+            return {
+              id,
+              serviceId,
+              name: s?.service_name || s?.name || s?.service?.name || '',
+              category: s?.category || s?.service_category || s?.service?.category || undefined,
+              quantity: Number(s?.quantity ?? 1) || 1,
+              price: unitPrice,
+              discount: discountAmount,
+            };
+          })
+        : servicesFromItems;
     return {
       id: order.id,
       orderNumber: order.order_number,
@@ -729,21 +882,9 @@ const derivePaymentStatus = (order: any) => {
         email: order.customer_email ?? order.customer?.email ?? '',
         address: order.customer_address != null ? order.customer_address : formatShippingAddress(order.shipping_address),
       },
-      items:
-        order.items?.map((item: any) => {
-          const unitPrice = parseMoney(item.unit_price);
-          const discountAmount = parseMoney(item.discount_amount);
-          return {
-            id: item.id,
-            productId: item.product_id,
-            imageUrl: pickOrderItemImage(item),
-            name: item.product_name,
-            sku: item.product_sku,
-            quantity: item.quantity,
-            price: unitPrice,
-            discount: discountAmount,
-          };
-        }) || [],
+      items: productItems,
+      services,
+
       subtotal: parseMoney(order.subtotal),
       discount: parseMoney(order.discount_amount),
       shipping: parseMoney(order.shipping_amount),
@@ -759,13 +900,10 @@ const derivePaymentStatus = (order: any) => {
       paymentStatus: normalize(pStatusRaw) || 'pending',
       paymentStatusLabel: statusLabel(pStatusRaw || 'pending'),
 
-      isInstallment:
-        toBool(order.is_installment) ||
-        toBool(order.is_installment_payment) ||
-        hasInstallmentInfo(order.installment_info) ||
-        hasInstallmentInfo(order.installment_plan) ||
-        hasInstallmentInfo(order.installment),
-      installmentInfo: pickInstallmentInfo(order),
+      intendedCourier: order.intended_courier ?? order.intendedCourier ?? null,
+
+      isInstallment: Boolean(order.is_installment || order.is_installment_payment || order.installment_info || order.installment_plan),
+      installmentInfo: (order.installment_info ?? order.installment_plan ?? null),
 
       salesBy: order.salesman?.name || userName || 'N/A',
       store: order.store?.name || '',
@@ -779,7 +917,9 @@ const derivePaymentStatus = (order: any) => {
   };
 
   const recalcOrderTotals = (order: Order): Order => {
-    const subtotal = order.items.reduce((sum, item) => sum + (item.price - item.discount) * item.quantity, 0);
+    const productsSubtotal = order.items.reduce((sum, item) => sum + (item.price - item.discount) * item.quantity, 0);
+    const servicesSubtotal = (order.services || []).reduce((sum, s) => sum + (s.price - s.discount) * s.quantity, 0);
+    const subtotal = productsSubtotal + servicesSubtotal;
     const discount = order.discount ?? 0;
     const shipping = order.shipping ?? 0;
     const total = subtotal - discount + shipping;
@@ -797,14 +937,120 @@ const derivePaymentStatus = (order: any) => {
     };
   };
 
+  const normalizeCourier = (v: any) => normalize(v);
+
+  const courierLabel = (raw: any): string => {
+    const n = normalizeCourier(raw);
+    if (!n) return 'Unassigned';
+    const map: Record<string, string> = {
+      pathao: 'Pathao',
+      steadfast: 'Steadfast',
+      sundarban: 'Sundarban',
+      redx: 'RedX',
+      paperfly: 'Paperfly',
+      ecourier: 'eCourier',
+      'e-courier': 'eCourier',
+      manual: 'Manual',
+    };
+    return map[n] || String(raw);
+  };
+
+  const getCourierBadge = (raw: any) => {
+    const n = normalizeCourier(raw);
+    const cls =
+      n === 'pathao'
+        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
+        : n === 'steadfast'
+        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
+        : n === 'sundarban'
+        ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300'
+        : n === 'redx'
+        ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+        : n
+        ? 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
+        : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400';
+
+    return (
+      <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${cls}`}>
+        {courierLabel(raw)}
+      </span>
+    );
+  };
+
+  // ✅ Hydrate intended courier from DB using the official lookup API
+  // This avoids relying on localStorage/sessionStorage and guarantees correctness after reload.
+  const hydrateCouriersFromDB = async (list: Order[]): Promise<Order[]> => {
+    try {
+      const missingIds = list
+        .filter((o) => !normalizeCourier(o.intendedCourier))
+        .map((o) => o.id)
+        .filter((id) => Number.isFinite(id) && id > 0);
+
+      if (missingIds.length === 0) return list;
+
+      const chunks: number[][] = [];
+      for (let i = 0; i < missingIds.length; i += 100) chunks.push(missingIds.slice(i, i + 100));
+
+      const map = new Map<number, string | null>();
+      for (const chunk of chunks) {
+        const res = await orderService.bulkLookupCouriers(chunk);
+        (res?.orders || []).forEach((row: any) => {
+          const id = Number(row?.order_id);
+          if (!Number.isFinite(id) || id <= 0) return;
+          const v = row?.intended_courier;
+          map.set(id, v === undefined ? null : (v as any));
+        });
+      }
+
+      return list.map((o) => {
+        if (normalizeCourier(o.intendedCourier)) return o;
+        if (!map.has(o.id)) return o;
+        return { ...o, intendedCourier: map.get(o.id) ?? null };
+      });
+    } catch (e) {
+      console.warn('Failed to hydrate courier markers from DB:', e);
+      return list;
+    }
+  };
+
+  const DEFAULT_COURIERS = useMemo(
+    () => ['pathao', 'sundarban', 'steadfast', 'redx', 'paperfly', 'eCourier', 'manual'],
+    []
+  );
+
+  const courierFilterOptions = useMemo(() => {
+    const set = new Set<string>();
+    DEFAULT_COURIERS.forEach((c) => set.add(String(c)));
+    (availableCouriers || []).forEach((c) => c && set.add(String(c)));
+    // also include whatever already exists in loaded orders (so it always shows)
+    (orders || []).forEach((o) => {
+      if (o?.intendedCourier) set.add(String(o.intendedCourier));
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [DEFAULT_COURIERS, availableCouriers, orders]);
+
+  const loadAvailableCouriers = async () => {
+    try {
+      const list = await orderService.getAvailableCouriers();
+      const names = Array.from(
+        new Set((list || []).map((x) => x?.courier_name).filter(Boolean).map((x) => String(x)))
+      );
+      setAvailableCouriers(names);
+    } catch (e) {
+      console.warn('Failed to load available couriers:', e);
+      setAvailableCouriers([]);
+    }
+  };
+
   // ✅ Social Commerce + E-Commerce orders
   const loadOrders = async () => {
     setIsLoading(true);
     try {
       let allOrders: any[] = [];
+
       if (viewMode === 'installments') {
-        // ✅ Installment-only view: try broad query first (no order_type filter)
         const inst = await orderService.getAll({
+          order_type: 'counter',
           installment_only: true,
           sort_by: 'created_at',
           sort_order: 'desc',
@@ -812,34 +1058,6 @@ const derivePaymentStatus = (order: any) => {
         });
 
         allOrders = inst.data || [];
-
-        // Fallback: some backends require order_type filtering
-        if (allOrders.length === 0) {
-          const [counter, pos] = await Promise.all([
-            orderService.getAll({
-              order_type: 'counter',
-              installment_only: true,
-              sort_by: 'created_at',
-              sort_order: 'desc',
-              per_page: 1000,
-            }),
-            orderService.getAll({
-              order_type: 'pos',
-              installment_only: true,
-              sort_by: 'created_at',
-              sort_order: 'desc',
-              per_page: 1000,
-            }),
-          ]);
-
-          const merged = [...(counter.data || []), ...(pos.data || [])];
-          const uniq = new Map<number, any>();
-          merged.forEach((o: any) => {
-            if (o?.id != null) uniq.set(Number(o.id), o);
-          });
-
-          allOrders = Array.from(uniq.values());
-        }
       } else {
         const [social, ecommerce] = await Promise.all([
           orderService.getAll({
@@ -862,9 +1080,10 @@ const derivePaymentStatus = (order: any) => {
       allOrders.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       const transformedOrders = allOrders.map((o: any) => transformOrder(o));
+      const hydrated = await hydrateCouriersFromDB(transformedOrders);
 
-      setOrders(transformedOrders);
-      setFilteredOrders(transformedOrders);
+      setOrders(hydrated);
+      setFilteredOrders(hydrated);
     } catch (error: any) {
       console.error('Get orders error:', error);
       alert('Failed to fetch orders: ' + (error?.message || 'Unknown error'));
@@ -956,8 +1175,69 @@ const derivePaymentStatus = (order: any) => {
       filtered = filtered.filter((o) => normalize(o.paymentStatus) === target);
     }
 
+    // ✅ Courier marker filter
+    if (courierFilter !== 'All Couriers') {
+      const target = normalizeCourier(courierFilter);
+      filtered = filtered.filter((o) => normalizeCourier(o.intendedCourier) === target);
+    }
+
     setFilteredOrders(filtered);
-  }, [search, dateFilter, orderTypeFilter, orderStatusFilter, paymentStatusFilter, orders]);
+  }, [search, dateFilter, orderTypeFilter, orderStatusFilter, paymentStatusFilter, courierFilter, orders]);
+
+  // 🧾 Bulk lookup Pathao status for displayed orders
+  const filteredOrderNumbers = useMemo(() => {
+    return (filteredOrders || []).map((o) => o.orderNumber).filter(Boolean);
+  }, [filteredOrders]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const run = async () => {
+      const unique = Array.from(new Set(filteredOrderNumbers));
+      if (unique.length === 0) return;
+
+      // Only fetch missing and not-in-flight order numbers
+      const missing = unique.filter(
+        (n) => !pathaoLookupByOrderNumber[n] && !pathaoInFlightRef.current.has(n)
+      );
+
+      if (missing.length === 0) return;
+
+      // Mark in-flight to avoid duplicate concurrent requests
+      missing.forEach((n) => pathaoInFlightRef.current.add(n));
+      setIsPathaoLookupLoading(true);
+
+      try {
+        for (let i = 0; i < missing.length; i += 100) {
+          if (cancelled) return;
+          const chunk = missing.slice(i, i + 100);
+          const res = await pathaoOrderLookupService.lookupBulk(chunk);
+          if (cancelled) return;
+
+          const next: Record<string, PathaoBulkLookupItem> = {};
+          (res.data || []).forEach((item) => {
+            if (item?.order_number) next[item.order_number] = item;
+          });
+
+          if (Object.keys(next).length > 0) {
+            setPathaoLookupByOrderNumber((prev) => ({ ...prev, ...next }));
+          }
+        }
+      } catch (e) {
+        console.error('Failed to bulk lookup Pathao orders:', e);
+      } finally {
+        // Clear in-flight markers
+        missing.forEach((n) => pathaoInFlightRef.current.delete(n));
+        if (!cancelled) setIsPathaoLookupLoading(false);
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filteredOrderNumbers, pathaoLookupByOrderNumber]);
 
   const handleViewDetails = async (order: Order) => {
     setIsLoadingDetails(true);
@@ -969,13 +1249,69 @@ const derivePaymentStatus = (order: any) => {
       setSelectedBackendOrder(fullOrder);
       const transformedOrder = transformOrder(fullOrder);
       setSelectedOrder(transformedOrder);
-      ensureProductThumbs(fullOrder.items?.map((it: any) => it.product_id));
+      // Ensure we always pass an array (never undefined) and keep types narrow for TS
+      ensureProductThumbs((fullOrder.items ?? []).map((it: any) => it?.product_id));
+
+      // 🔎 Pathao lookup for this order (for tracking info)
+      try {
+        const odNo = fullOrder?.order_number || transformedOrder.orderNumber;
+        if (odNo) {
+          const lookup = await pathaoOrderLookupService.lookupSingle(odNo);
+          setSelectedOrderPathao(lookup);
+          setPathaoLookupByOrderNumber((prev) => ({
+            ...prev,
+            [lookup.order_number]: {
+              ...lookup,
+              found: true,
+            },
+          }));
+        } else {
+          setSelectedOrderPathao(null);
+        }
+      } catch (e) {
+        console.warn('Pathao lookup failed for order:', e);
+        setSelectedOrderPathao(null);
+      }
     } catch (error: any) {
       console.error('Failed to load order details:', error);
       alert('Failed to load order details: ' + error.message);
       setShowDetailsModal(false);
     } finally {
       setIsLoadingDetails(false);
+    }
+  };
+
+  const openCourierEditor = (order: Order) => {
+    setActiveMenu(null);
+    setCourierModalOrder(order);
+    setCourierModalValue(order.intendedCourier ? String(order.intendedCourier) : '');
+    setShowCourierModal(true);
+  };
+
+  const saveCourierMarker = async () => {
+    if (!courierModalOrder) return;
+    const nextVal = courierModalValue?.trim() ? courierModalValue.trim() : null;
+
+    setIsSavingCourier(true);
+    try {
+      const res = await orderService.setIntendedCourier(courierModalOrder.id, nextVal);
+      const applied = res?.intended_courier ?? nextVal;
+
+      setOrders((prev) =>
+        prev.map((o) => (o.id === courierModalOrder.id ? { ...o, intendedCourier: applied } : o))
+      );
+
+      if (applied) {
+        setAvailableCouriers((prev) => Array.from(new Set([...(prev || []), String(applied)])));
+      }
+
+      setShowCourierModal(false);
+      setCourierModalOrder(null);
+      alert('Courier marker updated successfully');
+    } catch (e: any) {
+      alert(e?.message || 'Failed to update courier marker');
+    } finally {
+      setIsSavingCourier(false);
     }
   };
 
@@ -996,7 +1332,7 @@ const derivePaymentStatus = (order: any) => {
 
         setInstallmentMethods(Array.isArray(methods) ? methods : []);
         if (Array.isArray(methods) && methods.length && installmentMethodId === '') {
-          setInstallmentMethodId(String(methods[0].id));
+          setInstallmentMethodId(methods[0].id);
         }
       }
 
@@ -1080,7 +1416,8 @@ const derivePaymentStatus = (order: any) => {
 
       setSelectedOrder(transformedOrder);
       setEditableOrder(transformedOrder);
-      ensureProductThumbs(fullOrder.items?.map((it: any) => it.product_id));
+      setServicesTouched(false);
+      ensureProductThumbs((fullOrder.items ?? []).map((it: any) => it?.product_id));
       if (fullOrder.store?.id) {
         setPickerStoreId(fullOrder.store.id);
       }
@@ -1100,7 +1437,7 @@ const derivePaymentStatus = (order: any) => {
       const transformed = transformOrder(fullOrder);
       setSelectedOrder(transformed);
       setEditableOrder(transformed);
-      ensureProductThumbs(fullOrder.items?.map((it: any) => it.product_id));
+      ensureProductThumbs((fullOrder.items ?? []).map((it: any) => it?.product_id));
       await loadOrders();
     } catch (e: any) {
       console.error('Failed to reload order after item change:', e);
@@ -1387,6 +1724,39 @@ const derivePaymentStatus = (order: any) => {
     );
   };
 
+  const getDeliveryBadge = (orderNumber: string) => {
+    const info = pathaoLookupByOrderNumber[orderNumber];
+    if (!info) {
+      return isPathaoLookupLoading ? (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+          <Loader className="h-3 w-3 animate-spin" />
+          Checking
+        </span>
+      ) : (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+          <Package className="h-3 w-3" />
+          —
+        </span>
+      );
+    }
+
+    if (info.is_sent_via_pathao) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+          <Truck className="h-3 w-3" />
+          Pathao
+        </span>
+      );
+    }
+
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-300">
+        <Package className="h-3 w-3" />
+        Regular
+      </span>
+    );
+  };
+
   const totalRevenue = orders.reduce((sum, order) => sum + order.amounts.total, 0);
   const paidOrders = orders.filter((o) => normalize(o.paymentStatus) === 'paid').length;
   const dueOrders = orders.filter((o) => normalize(o.paymentStatus) !== 'paid').length;
@@ -1529,6 +1899,37 @@ const derivePaymentStatus = (order: any) => {
 
       alert(`Bulk Send to Pathao Completed!\n\nSuccess: ${successCount}\nFailed: ${failedCount}`);
       setSelectedOrders(new Set());
+      // Set courier marker to Pathao in DB (persists after reload + can be filtered)
+      try {
+        const ids = selectedOrdersList
+          .map((o) => Number(o?.id))
+          .filter((id) => Number.isFinite(id) && id > 0);
+
+        if (ids.length > 0) {
+          const idSet = new Set<number>(ids);
+          const concurrency = Math.min(5, ids.length);
+          let idx = 0;
+
+          const worker = async () => {
+            while (idx < ids.length) {
+              const current = ids[idx++];
+              try {
+                await orderService.setIntendedCourier(current, 'pathao');
+              } catch {
+                // ignore per-order failures
+              }
+            }
+          };
+
+          await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+          // optimistic UI update
+          setOrders((prev) => prev.map((o) => (idSet.has(o.id) ? { ...o, intendedCourier: 'pathao' } : o)));
+        }
+      } catch (e) {
+        console.warn('Failed to set intended courier for bulk Pathao send:', e);
+      }
+
       await loadOrders();
     } catch (error: any) {
       console.error('Bulk send to Pathao error:', error);
@@ -1780,6 +2181,14 @@ const derivePaymentStatus = (order: any) => {
         alert(`❌ Failed to send to Pathao.\n\nReason: ${item.reason ?? 'Unknown error'}`);
       } else {
         alert('Pathao response received, but could not determine success/failure.');
+      }
+
+      // Set courier marker to Pathao in DB (persists after reload)
+      try {
+        await orderService.setIntendedCourier(order.id, 'pathao');
+        setOrders((prev) => prev.map((o) => (o.id === order.id ? { ...o, intendedCourier: 'pathao' } : o)));
+      } catch (e) {
+        console.warn('Failed to set intended courier for this order:', e);
       }
 
       await loadOrders();
@@ -2067,6 +2476,87 @@ const derivePaymentStatus = (order: any) => {
     setProductResults([]);
   };
 
+
+  // 🛠️ Services in orders (created from POS as separate service lines)
+  const loadServicesOnce = useCallback(async () => {
+    if (availableServices.length > 0) return;
+    setIsServiceLoading(true);
+    try {
+      const list = await serviceManagementService.getActiveServices();
+      setAvailableServices(Array.isArray(list) ? list : []);
+    } catch (e) {
+      console.error('Failed to load services:', e);
+      setAvailableServices([]);
+    } finally {
+      setIsServiceLoading(false);
+    }
+  }, [availableServices.length]);
+
+  useEffect(() => {
+    if (!showServicePicker) return;
+    loadServicesOnce();
+  }, [showServicePicker, loadServicesOnce]);
+
+  useEffect(() => {
+    if (!showServicePicker) return;
+
+    const q = serviceSearch.trim().toLowerCase();
+    const base = Array.isArray(availableServices) ? availableServices : [];
+    const filtered = q
+      ? base.filter((s: any) => String(s?.name || '').toLowerCase().includes(q))
+      : base;
+
+    // Keep list short in UI for performance
+    setServiceResults(filtered.slice(0, 60));
+  }, [serviceSearch, availableServices, showServicePicker]);
+
+  const handleSelectServiceForOrder = (svc: any) => {
+    if (!editableOrder) return;
+
+    const serviceId = Number(svc?.id) || undefined;
+    const name = String(svc?.name || '').trim();
+    const category = svc?.category ? String(svc.category) : undefined;
+    const basePrice = Number(svc?.basePrice ?? svc?.base_price ?? 0) || 0;
+
+    setEditableOrder((prev) => {
+      if (!prev) return prev;
+
+      // If the same service already exists, just increase qty
+      const idx = prev.services.findIndex((x) => x.serviceId && serviceId && Number(x.serviceId) === Number(serviceId));
+      const nextServices = [...prev.services];
+
+      if (idx >= 0) {
+        nextServices[idx] = { ...nextServices[idx], quantity: (nextServices[idx].quantity || 0) + 1 };
+      } else {
+        const fallbackId = -(Number(prev.id || 0) * 10000 + (nextServices.length + 1));
+        nextServices.push({
+          id: fallbackId,
+          serviceId,
+          name,
+          category,
+          quantity: 1,
+          price: basePrice,
+          discount: 0,
+        });
+      }
+
+      return recalcOrderTotals({ ...prev, services: nextServices });
+    });
+
+    setServicesTouched(true);
+    setShowServicePicker(false);
+    setServiceSearch('');
+  };
+
+  const handleRemoveServiceLine = (serviceLineId: number) => {
+    setEditableOrder((prev) => {
+      if (!prev) return prev;
+      const nextServices = prev.services.filter((s) => s.id !== serviceLineId);
+      return recalcOrderTotals({ ...prev, services: nextServices });
+    });
+    setServicesTouched(true);
+  };
+
   const handleRemoveItem = async (itemId: number) => {
     if (!editableOrder) return;
     if (!confirm('Remove this item from the order?')) return;
@@ -2152,35 +2642,44 @@ const derivePaymentStatus = (order: any) => {
           const parts = [scInternationalStreet, scCity, scState, scCountry].filter(Boolean);
           customer_address_text = parts.join(', ') + (scInternationalPostalCode ? ` - ${scInternationalPostalCode}` : '');
         } else {
-          const cityObj = pathaoCities.find((c) => String(c.city_id) === String(pathaoCityId));
-          const zoneObj = pathaoZones.find((z) => String(z.zone_id) === String(pathaoZoneId));
-          const areaObj = pathaoAreas.find((a) => String(a.area_id) === String(pathaoAreaId));
+          const isAuto = scUsePathaoAutoLocation;
 
-          const cityIdNum = pathaoCityId ? Number(pathaoCityId) : undefined;
-          const zoneIdNum = pathaoZoneId ? Number(pathaoZoneId) : undefined;
-          const areaIdNum = pathaoAreaId ? Number(pathaoAreaId) : undefined;
+          if (isAuto) {
+            // ✅ Auto mode: no city/zone/area IDs (Pathao will infer from address text)
+            shipping_address = {
+              ...shipping_address,
+              name: customerName ?? shipping_address.name ?? '',
+              phone: customerPhone ?? shipping_address.phone ?? '',
+              street: scStreetAddress,
+              postal_code: scPostalCode || undefined,
+            };
 
-          shipping_address = {
-            ...shipping_address,
-            name: customerName ?? shipping_address.name ?? '',
-            phone: customerPhone ?? shipping_address.phone ?? '',
-            street: scStreetAddress,
-            area: areaObj?.area_name || shipping_address.area || '',
-            city: cityObj?.city_name || shipping_address.city || '',
-            pathao_city_id: cityIdNum,
-            pathao_zone_id: zoneIdNum,
-            pathao_area_id: areaIdNum,
-            postal_code: scPostalCode || undefined,
-          };
+            customer_address_text = `${scStreetAddress}${scPostalCode ? ` - ${scPostalCode}` : ''}`;
+          } else {
+            const cityObj = pathaoCities.find((c) => String(c.city_id) === String(pathaoCityId));
+            const zoneObj = pathaoZones.find((z) => String(z.zone_id) === String(pathaoZoneId));
+            const areaObj = pathaoAreas.find((a) => String(a.area_id) === String(pathaoAreaId));
 
-          const parts = [
-            scStreetAddress,
-            areaObj?.area_name || '',
-            zoneObj?.zone_name || '',
-            cityObj?.city_name || '',
-          ].filter(Boolean);
+            const cityIdNum = pathaoCityId ? Number(pathaoCityId) : undefined;
+            const zoneIdNum = pathaoZoneId ? Number(pathaoZoneId) : undefined;
+            const areaIdNum = pathaoAreaId ? Number(pathaoAreaId) : undefined;
 
-          customer_address_text = parts.join(', ') + (scPostalCode ? ` - ${scPostalCode}` : '');
+            shipping_address = {
+              ...shipping_address,
+              name: customerName ?? shipping_address.name ?? '',
+              phone: customerPhone ?? shipping_address.phone ?? '',
+              street: scStreetAddress,
+              area: areaObj?.area_name || shipping_address.area || '',
+              city: cityObj?.city_name || shipping_address.city || '',
+              pathao_city_id: cityIdNum,
+              pathao_zone_id: zoneIdNum,
+              pathao_area_id: areaIdNum,
+              postal_code: scPostalCode || undefined,
+            };
+
+            const parts = [scStreetAddress, areaObj?.area_name || '', zoneObj?.zone_name || '', cityObj?.city_name || ''].filter(Boolean);
+            customer_address_text = parts.join(', ') + (scPostalCode ? ` - ${scPostalCode}` : '');
+          }
         }
       } else if (orderType === 'ecommerce') {
         shipping_address = {
@@ -2208,6 +2707,20 @@ const derivePaymentStatus = (order: any) => {
         discount_amount: editableOrder.discount ?? 0,
         shipping_amount: editableOrder.shipping ?? 0,
         notes: editableOrder.notes ?? '',
+        ...(servicesTouched
+          ? {
+              services: (editableOrder.services || []).map((s) => ({
+                // Some backends require line id for updates; safe to omit if it's a client-only temp id
+                ...(s.id > 0 ? { id: s.id } : {}),
+                service_id: s.serviceId ?? undefined,
+                service_name: s.name,
+                category: s.category ?? undefined,
+                quantity: s.quantity,
+                unit_price: s.price,
+                discount_amount: s.discount ?? 0,
+              })),
+            }
+          : {}),
       };
 
       const payloadWithShipping =
@@ -2370,6 +2883,7 @@ const derivePaymentStatus = (order: any) => {
                     setOrderTypeFilter('All Types');
                     setOrderStatusFilter('All Order Status');
                     setPaymentStatusFilter('All Payment Status');
+                    setCourierFilter('All Couriers');
                     setSearch('');
                     setDateFilter('');
                     setSelectedOrders(new Set());
@@ -2389,6 +2903,7 @@ const derivePaymentStatus = (order: any) => {
                     setOrderTypeFilter('All Types');
                     setOrderStatusFilter('All Order Status');
                     setPaymentStatusFilter('All Payment Status');
+                    setCourierFilter('All Couriers');
                     setSearch('');
                     setDateFilter('');
                     setSelectedOrders(new Set());
@@ -2472,6 +2987,22 @@ const derivePaymentStatus = (order: any) => {
                     </option>
                   ))}
                 </select>
+
+                {viewMode === 'online' && (
+                  <select
+                    value={courierFilter}
+                    onChange={(e) => setCourierFilter(e.target.value)}
+                    className="w-full md:w-auto px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
+                    title="Filter by intended courier marker"
+                  >
+                    <option value="All Couriers">All Couriers</option>
+                    {courierFilterOptions.map((c) => (
+                      <option key={c} value={c}>
+                        {courierLabel(c)}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <p className="text-xs text-gray-500 dark:text-gray-500">
@@ -2643,6 +3174,8 @@ const derivePaymentStatus = (order: any) => {
 
                                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                   {getOrderTypeBadge(order.orderType)}
+                                  {getDeliveryBadge(order.orderNumber)}
+                                  {viewMode === 'online' && getCourierBadge(order.intendedCourier)}
                                   {order.isInstallment && (
                                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
                                       EMI
@@ -2710,6 +3243,14 @@ const derivePaymentStatus = (order: any) => {
                           Type
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                          Delivery
+                        </th>
+                        {viewMode === 'online' && (
+                          <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                            Courier
+                          </th>
+                        )}
+                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
                           Customer
                         </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
@@ -2754,6 +3295,36 @@ const derivePaymentStatus = (order: any) => {
                               )}
                             </div>
                           </td>
+
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-1">
+                              {getDeliveryBadge(order.orderNumber)}
+                              {pathaoLookupByOrderNumber[order.orderNumber]?.is_sent_via_pathao &&
+                                pathaoLookupByOrderNumber[order.orderNumber]?.pathao_consignment_id && (
+                                  <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                                    {pathaoLookupByOrderNumber[order.orderNumber]?.pathao_consignment_id}
+                                  </span>
+                                )}
+                            </div>
+                          </td>
+
+                          {viewMode === 'online' && (
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                {getCourierBadge(order.intendedCourier)}
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openCourierEditor(order);
+                                  }}
+                                  className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+                                  title="Edit courier marker"
+                                >
+                                  <Edit className="h-3.5 w-3.5 text-gray-700 dark:text-gray-300" />
+                                </button>
+                              </div>
+                            </td>
+                          )}
 
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
@@ -2923,6 +3494,71 @@ const derivePaymentStatus = (order: any) => {
         </div>
       )}
 
+      {/* Courier Marker Modal */}
+      {showCourierModal && courierModalOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-md w-full border border-gray-200 dark:border-gray-800">
+            <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-black dark:text-white">Set Courier Marker</h3>
+                <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                  {courierModalOrder.orderNumber} • #{courierModalOrder.id}
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowCourierModal(false);
+                  setCourierModalOrder(null);
+                }}
+                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+              >
+                <XCircle className="h-4 w-4 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-2">
+              <label className="block text-[11px] text-gray-700 dark:text-gray-300">Courier</label>
+              <select
+                value={courierModalValue}
+                onChange={(e) => setCourierModalValue(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
+              >
+                <option value="">Unassigned</option>
+                {courierFilterOptions.map((c) => (
+                  <option key={c} value={c}>
+                    {courierLabel(c)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                This is just an intended courier marker for tracking & filtering. You can change it anytime.
+              </p>
+            </div>
+
+            <div className="px-5 py-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-end gap-2">
+              <button
+                onClick={() => {
+                  setShowCourierModal(false);
+                  setCourierModalOrder(null);
+                }}
+                className="px-3 py-2 text-xs font-semibold border border-gray-300 dark:border-gray-700 rounded hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-black dark:text-white"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={saveCourierMarker}
+                disabled={isSavingCourier}
+                className="px-3 py-2 text-xs font-semibold bg-black text-white dark:bg-white dark:text-black rounded hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                <Truck className="h-4 w-4" />
+                {isSavingCourier ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Fixed Position Dropdown Menu */}
       {activeMenu !== null && menuPosition && (
         <div
@@ -2952,6 +3588,20 @@ const derivePaymentStatus = (order: any) => {
             <Edit className="h-5 w-5 flex-shrink-0" />
             <span>Edit Order</span>
           </button>
+
+          {viewMode === 'online' && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                const order = filteredOrders.find((o) => o.id === activeMenu);
+                if (order) openCourierEditor(order);
+              }}
+              className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700"
+            >
+              <Truck className="h-5 w-5 flex-shrink-0" />
+              <span>Set Courier Marker</span>
+            </button>
+          )}
 
           {(() => {
             const order = filteredOrders.find((o) => o.id === activeMenu);
@@ -3150,6 +3800,7 @@ const derivePaymentStatus = (order: any) => {
                   setSelectedOrder(null);
                   setSelectedBackendOrder(null);
                   setImagePreview(null);
+                  setSelectedOrderPathao(null);
                 }}
                 className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
               >
@@ -3188,6 +3839,79 @@ const derivePaymentStatus = (order: any) => {
                   <div>
                     <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-1">Store</p>
                     <p className="text-sm font-medium text-black dark:text-white">{selectedOrder.store}</p>
+                  </div>
+                </div>
+
+                {/* 🚚 Delivery / Pathao Tracking */}
+                <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-xs text-gray-500 dark:text-gray-500 uppercase mb-2">Delivery</p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {getDeliveryBadge(selectedOrder.orderNumber)}
+                        {selectedOrderPathao?.is_sent_via_pathao && selectedOrderPathao?.pathao_consignment_id ? (
+                          <span className="text-xs text-gray-600 dark:text-gray-300">
+                            Consignment: <span className="font-semibold">{selectedOrderPathao.pathao_consignment_id}</span>
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {selectedOrderPathao?.is_sent_via_pathao ? (
+                        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-gray-500 dark:text-gray-400">Pathao Status</span>
+                            <span className="font-medium text-black dark:text-white">
+                              {selectedOrderPathao.pathao_status ? titleCase(selectedOrderPathao.pathao_status) : '—'}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-gray-500 dark:text-gray-400">Shipment Status</span>
+                            <span className="font-medium text-black dark:text-white">
+                              {selectedOrderPathao.shipment_status ? titleCase(selectedOrderPathao.shipment_status) : '—'}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                          {selectedOrderPathao ? 'This order was not sent via Pathao.' : 'Checking Pathao status...'}
+                        </p>
+                      )}
+                    </div>
+
+                    {selectedOrderPathao?.is_sent_via_pathao && selectedOrderPathao?.pathao_consignment_id ? (
+                      <div className="flex flex-col sm:flex-row items-stretch gap-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(selectedOrderPathao.pathao_consignment_id || '');
+                              alert('Consignment ID copied');
+                            } catch {
+                              // ignore
+                            }
+                          }}
+                          className="px-3 py-2 text-xs font-semibold border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors flex items-center gap-2"
+                        >
+                          <Copy className="h-4 w-4" />
+                          Copy ID
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = buildPathaoTrackingUrl(
+                              selectedOrderPathao.pathao_consignment_id || '',
+                              selectedOrder.customer?.phone
+                            );
+                            window.open(url, '_blank', 'noopener,noreferrer');
+                          }}
+                          className="px-3 py-2 text-xs font-semibold bg-black text-white dark:bg-white dark:text-black rounded-lg hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors flex items-center gap-2"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                          Track
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -3378,6 +4102,69 @@ const derivePaymentStatus = (order: any) => {
                     </div>
                   )}
                 </div>
+
+
+                {selectedOrder.services && selectedOrder.services.length > 0 && (
+                  <div>
+                    <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Services</h3>
+                    <div className="border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
+                      <div className="overflow-x-auto">
+                        <table className="w-full min-w-[520px]">
+                          <thead className="bg-gray-50 dark:bg-gray-800">
+                            <tr>
+                              <th className="px-4 py-2 text-left text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                Service
+                              </th>
+                              <th className="px-4 py-2 text-center text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                Qty
+                              </th>
+                              <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                Price
+                              </th>
+                              <th className="px-4 py-2 text-right text-xs font-semibold text-gray-700 dark:text-gray-300">
+                                Total
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                            {selectedOrder.services.map((svc) => (
+                              <tr key={svc.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 rounded-md overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex items-center justify-center flex-shrink-0">
+                                      <Wrench className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                                    </div>
+                                    <div>
+                                      <p className="text-sm font-medium text-black dark:text-white">{svc.name}</p>
+                                      {svc.category && (
+                                        <p className="text-xs text-gray-500 dark:text-gray-500">Category: {titleCase(String(svc.category))}</p>
+                                      )}
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 text-sm font-medium text-black dark:text-white">
+                                    {svc.quantity}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <p className="text-sm text-black dark:text-white">৳{svc.price.toFixed(2)}</p>
+                                  {svc.discount > 0 && <p className="text-xs text-red-500">-৳{svc.discount.toFixed(2)}</p>}
+                                </td>
+                                <td className="px-4 py-3 text-right">
+                                  <p className="text-sm font-medium text-black dark:text-white">
+                                    ৳{((svc.price - svc.discount) * svc.quantity).toFixed(2)}
+                                  </p>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
 
                 <div>
                   <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Summary</h3>
@@ -3619,88 +4406,132 @@ const derivePaymentStatus = (order: any) => {
                           </div>
                         </div>
                       ) : (
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">City (Pathao)*</label>
-                            <select
-                              value={pathaoCityId}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setPathaoCityId(v);
-                                setPathaoZoneId('');
-                                setPathaoAreaId('');
-                                setPathaoZones([]);
-                                setPathaoAreas([]);
-                              }}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm"
-                            >
-                              <option value="">Select City</option>
-                              {pathaoCities.map((c) => (
-                                <option key={c.city_id} value={String(c.city_id)}>
-                                  {c.city_name}
-                                </option>
-                              ))}
-                            </select>
+                        <div className="space-y-3">
+                          {/* ✅ Auto-detect toggle (recommended) */}
+                          <div className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/20 p-3">
+                            <div>
+                              <p className="text-xs font-semibold text-gray-900 dark:text-white">Auto-detect Pathao location</p>
+                              <p className="mt-0.5 text-[11px] text-gray-600 dark:text-gray-300">
+                                When ON, City/Zone/Area are not required. Pathao will infer the location from the full address text.
+                              </p>
+                            </div>
+                            <label className="inline-flex items-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={scUsePathaoAutoLocation}
+                                onChange={(e) => setScUsePathaoAutoLocation(e.target.checked)}
+                                className="h-4 w-4"
+                              />
+                            </label>
                           </div>
 
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Zone (Pathao)*</label>
-                            <select
-                              value={pathaoZoneId}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setPathaoZoneId(v);
-                                setPathaoAreaId('');
-                                setPathaoAreas([]);
-                              }}
-                              disabled={!pathaoCityId}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm disabled:opacity-60"
-                            >
-                              <option value="">{pathaoCityId ? 'Select Zone' : 'Select City first'}</option>
-                              {pathaoZones.map((z) => (
-                                <option key={z.zone_id} value={String(z.zone_id)}>
-                                  {z.zone_name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                          {!scUsePathaoAutoLocation && (
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">City (Pathao)*</label>
+                                <select
+                                  value={pathaoCityId}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    setPathaoCityId(v);
+                                    setPathaoZoneId('');
+                                    setPathaoAreaId('');
+                                    setPathaoZones([]);
+                                    setPathaoAreas([]);
+                                  }}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm"
+                                >
+                                  <option value="">Select City</option>
+                                  {pathaoCities.map((c) => (
+                                    <option key={c.city_id} value={String(c.city_id)}>
+                                      {c.city_name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Zone (Pathao)*</label>
+                                <select
+                                  value={pathaoZoneId}
+                                  onChange={(e) => {
+                                    const v = e.target.value;
+                                    setPathaoZoneId(v);
+                                    setPathaoAreaId('');
+                                    setPathaoAreas([]);
+                                  }}
+                                  disabled={!pathaoCityId}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm disabled:opacity-60"
+                                >
+                                  <option value="">{pathaoCityId ? 'Select Zone' : 'Select City first'}</option>
+                                  {pathaoZones.map((z) => (
+                                    <option key={z.zone_id} value={String(z.zone_id)}>
+                                      {z.zone_name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Area (Pathao)*</label>
+                                <select
+                                  value={pathaoAreaId}
+                                  onChange={(e) => setPathaoAreaId(e.target.value)}
+                                  disabled={!pathaoZoneId}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm disabled:opacity-60"
+                                >
+                                  <option value="">{pathaoZoneId ? 'Select Area' : 'Select Zone first'}</option>
+                                  {pathaoAreas.map((a) => (
+                                    <option key={a.area_id} value={String(a.area_id)}>
+                                      {a.area_name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Postal Code</label>
+                                <input
+                                  type="text"
+                                  value={scPostalCode}
+                                  onChange={(e) => setScPostalCode(e.target.value)}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm"
+                                  placeholder="e.g., 1212"
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {scUsePathaoAutoLocation && (
+                            <div className="grid grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Postal Code</label>
+                                <input
+                                  type="text"
+                                  value={scPostalCode}
+                                  onChange={(e) => setScPostalCode(e.target.value)}
+                                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm"
+                                  placeholder="e.g., 1212"
+                                />
+                              </div>
+                              <div className="text-[11px] text-gray-600 dark:text-gray-300 flex items-end">
+                                Tip: include area + city (e.g., <span className="font-semibold">Uttara, Dhaka</span>) in the address.
+                              </div>
+                            </div>
+                          )}
 
                           <div>
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Area (Pathao)*</label>
-                            <select
-                              value={pathaoAreaId}
-                              onChange={(e) => setPathaoAreaId(e.target.value)}
-                              disabled={!pathaoZoneId}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm disabled:opacity-60"
-                            >
-                              <option value="">{pathaoZoneId ? 'Select Area' : 'Select Zone first'}</option>
-                              {pathaoAreas.map((a) => (
-                                <option key={a.area_id} value={String(a.area_id)}>
-                                  {a.area_name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Postal Code</label>
-                            <input
-                              type="text"
-                              value={scPostalCode}
-                              onChange={(e) => setScPostalCode(e.target.value)}
-                              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm"
-                              placeholder="e.g., 1212"
-                            />
-                          </div>
-
-                          <div className="col-span-2">
-                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Street Address*</label>
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                              {scUsePathaoAutoLocation ? 'Full Address*' : 'Street Address*'}
+                            </label>
                             <textarea
-                              rows={2}
+                              rows={scUsePathaoAutoLocation ? 3 : 2}
                               value={scStreetAddress}
                               onChange={(e) => setScStreetAddress(e.target.value)}
                               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm"
-                              placeholder="House 12, Road 5, etc."
+                              placeholder={
+                                scUsePathaoAutoLocation ? 'House 71, Road 15, Sector 11, Uttara, Dhaka' : 'House 12, Road 5, etc.'
+                              }
                             />
                           </div>
                         </div>
@@ -3861,6 +4692,119 @@ const derivePaymentStatus = (order: any) => {
                   </button>
                 </div>
 
+
+                {/* Order Services */}
+                <div>
+                  <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Services</h3>
+
+                  {editableOrder.services && editableOrder.services.length > 0 ? (
+                    <div className="space-y-3">
+                      {editableOrder.services.map((svc, index) => (
+                        <div
+                          key={svc.id}
+                          className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700"
+                        >
+                          <div className="w-12 h-12 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex items-center justify-center">
+                            <Wrench className="w-5 h-5 text-gray-600 dark:text-gray-300" />
+                          </div>
+
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-black dark:text-white">{svc.name}</p>
+                            {svc.category ? (
+                              <p className="text-xs text-gray-500 dark:text-gray-500">Category: {titleCase(String(svc.category))}</p>
+                            ) : (
+                              <p className="text-xs text-gray-500 dark:text-gray-500">Service</p>
+                            )}
+                          </div>
+
+                          <div className="w-24">
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Qty</label>
+                            <input
+                              type="number"
+                              value={svc.quantity}
+                              min={1}
+                              onChange={(e) => {
+                                const val = Math.max(1, Number(e.target.value || 1));
+                                setEditableOrder((prev) => {
+                                  if (!prev) return prev;
+                                  const next = [...prev.services];
+                                  next[index] = { ...next[index], quantity: val };
+                                  return recalcOrderTotals({ ...prev, services: next });
+                                });
+                                setServicesTouched(true);
+                              }}
+                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-black dark:text-white text-sm"
+                            />
+                          </div>
+
+                          <div className="w-32">
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Price</label>
+                            <input
+                              type="number"
+                              value={svc.price}
+                              step="0.01"
+                              onChange={(e) => {
+                                const val = Number(e.target.value || 0);
+                                setEditableOrder((prev) => {
+                                  if (!prev) return prev;
+                                  const next = [...prev.services];
+                                  next[index] = { ...next[index], price: val };
+                                  return recalcOrderTotals({ ...prev, services: next });
+                                });
+                                setServicesTouched(true);
+                              }}
+                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-black dark:text-white text-sm"
+                            />
+                          </div>
+
+                          <div className="w-28">
+                            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Discount</label>
+                            <input
+                              type="number"
+                              value={svc.discount}
+                              step="0.01"
+                              onChange={(e) => {
+                                const val = Math.max(0, Number(e.target.value || 0));
+                                setEditableOrder((prev) => {
+                                  if (!prev) return prev;
+                                  const next = [...prev.services];
+                                  next[index] = { ...next[index], discount: val };
+                                  return recalcOrderTotals({ ...prev, services: next });
+                                });
+                                setServicesTouched(true);
+                              }}
+                              className="w-full px-2 py-1 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-black dark:text-white text-sm"
+                            />
+                          </div>
+
+                          <div className="flex flex-col gap-1 items-end">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveServiceLine(svc.id)}
+                              className="text-xs text-red-600 hover:text-red-700 font-medium"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">No services in this order</p>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowServicePicker(true);
+                      setServiceSearch('');
+                    }}
+                    className="mt-3 inline-flex items-center px-3 py-2 text-xs font-medium rounded-lg border border-dashed border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  >
+                    + Add Service
+                  </button>
+                </div>
+
                 {/* Totals */}
                 <div>
                   <h3 className="text-sm font-bold text-black dark:text-white mb-3">Order Details</h3>
@@ -4005,6 +4949,78 @@ const derivePaymentStatus = (order: any) => {
                             )}
                             <p className="text-[11px] text-gray-600 dark:text-gray-400">Price: {product.price} Tk</p>
                             <p className="text-[11px] text-green-600 dark:text-green-400">Available: {product.available}</p>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* Service Picker Modal */}
+      {showServicePicker && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[75] p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-hidden border border-gray-200 dark:border-gray-800">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800">
+              <h3 className="text-sm font-semibold text-black dark:text-white">Add Service to Order</h3>
+              <button
+                onClick={() => {
+                  setShowServicePicker(false);
+                  setServiceSearch('');
+                }}
+                className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                <X className="h-4 w-4 text-gray-500" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={serviceSearch}
+                  onChange={(e) => setServiceSearch(e.target.value)}
+                  placeholder="Search services..."
+                  className="w-full pl-10 pr-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
+                />
+              </div>
+
+              <div className="border border-gray-200 dark:border-gray-800 rounded-lg max-h-72 overflow-auto p-2">
+                {isServiceLoading ? (
+                  <div className="p-6 text-center">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Loading services...</p>
+                  </div>
+                ) : serviceResults.length === 0 ? (
+                  <div className="p-6 text-center text-xs text-gray-500 dark:text-gray-400">
+                    {availableServices.length === 0 ? 'No services found' : 'No matching services'}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {serviceResults.map((svc: any) => (
+                      <button
+                        type="button"
+                        key={String(svc?.id)}
+                        onClick={() => handleSelectServiceForOrder(svc)}
+                        className="border border-gray-200 dark:border-gray-600 rounded p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-md border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex items-center justify-center flex-shrink-0">
+                            <Wrench className="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-semibold text-black dark:text-white truncate">{svc?.name}</p>
+                            <p className="text-[11px] text-gray-600 dark:text-gray-400 truncate">
+                              {svc?.category ? `Category: ${titleCase(String(svc.category))}` : 'Service'}
+                            </p>
+                            <p className="text-[11px] text-gray-700 dark:text-gray-300">
+                              Base price: ৳{Number(svc?.basePrice ?? svc?.base_price ?? 0) || 0}
+                            </p>
                           </div>
                         </div>
                       </button>

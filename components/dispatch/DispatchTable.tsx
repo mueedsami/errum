@@ -259,12 +259,12 @@ const DispatchTable: React.FC<DispatchTableProps> = ({
                           </>
                         )}
 
-                        {/* BARCODE SCANNING IN TRANSIT */}
-                        {dispatch.status === 'in_transit' && onScanBarcodes && atSource && (
+                        {/* BARCODE SCANNING (SOURCE STORE) */}
+                        {onScanBarcodes && atSource && ['pending', 'pending_approval', 'approved'].includes(dispatch.status) && (
                           <button
                             onClick={() => onScanBarcodes(dispatch, 'send')}
                             className="px-3 py-1 bg-indigo-100 dark:bg-indigo-900/30 hover:bg-indigo-200 dark:hover:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded text-xs font-medium flex items-center gap-1 transition-colors"
-                            title="Scan barcodes at source (sending)"
+                            title="Scan barcodes at source before sending"
                           >
                             <Scan className="w-3 h-3" />
                             Scan to Send

@@ -376,6 +376,8 @@ const CreateDispatchModal: React.FC<CreateDispatchModalProps> = ({
     onSubmit({
       ...formData,
       items,
+      // If you scanned barcodes while creating (quick-add), we will attach those scans to the created dispatch items immediately (DB).
+      draft_scan_history: scanHistory,
     });
   };
 
@@ -546,7 +548,7 @@ const CreateDispatchModal: React.FC<CreateDispatchModalProps> = ({
               </button>
               {addMode === 'barcode' && (
                 <span className="text-xs text-gray-500 dark:text-gray-400">
-                  Each scan adds <b>1 unit</b> to the matching batch.
+                  Each scan adds <b>1 unit</b> to the matching batch. These scans will be attached to the dispatch right after you click <b>Create Dispatch</b>.
                 </span>
               )}
             </div>
@@ -641,6 +643,13 @@ const CreateDispatchModal: React.FC<CreateDispatchModalProps> = ({
                         </div>
                       )}
                     </div>
+                  </div>
+                )}
+
+                {/* Sync hint */}
+                {scanHistory.length > 0 && (
+                  <div className="mt-2 text-[11px] text-gray-600 dark:text-gray-400">
+                    These barcodes will be <b>saved to the dispatch</b> right after you click <b>Create Dispatch</b>.
                   </div>
                 )}
               </div>

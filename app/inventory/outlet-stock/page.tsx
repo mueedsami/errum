@@ -126,6 +126,49 @@ export default function DispatchManagementPage() {
         });
       }
 
+      // If staff scanned barcodes while creating the dispatch (quick-add),
+      // attach those scans to the newly created dispatch items immediately (DB),
+      // so the dispatch cannot be marked "in_transit" until all required barcodes are scanned.
+      if (Array.isArray(data?.draft_scan_history) && data.draft_scan_history.length > 0) {
+        let synced = 0;
+        let failed = 0;
+
+        try {
+          const details = await dispatchService.getDispatch(dispatchId);
+          const fullDispatch = details.data;
+          const fullItems = Array.isArray(fullDispatch?.items) ? fullDispatch.items : [];
+
+          const batchToItemId: Record<string, number> = {};
+          for (const it of fullItems) {
+            const batchId = it?.batch?.id;
+            if (batchId) batchToItemId[String(batchId)] = it.id;
+          }
+
+          for (const s of data.draft_scan_history) {
+            const itemId = batchToItemId[String(s.batch_id)];
+            if (!itemId) {
+              failed += 1;
+              continue;
+            }
+            try {
+              await dispatchService.scanBarcode(dispatchId, itemId, s.barcode);
+              synced += 1;
+            } catch {
+              failed += 1;
+            }
+          }
+        } catch {
+          failed = data.draft_scan_history.length;
+        }
+
+        if (synced > 0) {
+          showToast(`Saved ${synced} barcode scan(s) to this dispatch.`, 'success');
+        }
+        if (failed > 0) {
+          showToast(`${failed} barcode(s) could not be saved. You can re-scan from "Scan to Send".`, 'error');
+        }
+      }
+
       showToast('Dispatch created successfully', 'success');
       setShowCreateModal(false);
       fetchDispatches();
@@ -156,6 +199,49 @@ export default function DispatchManagementPage() {
   const handleMarkDispatched = async (id: number) => {
     try {
       setLoading(true);
+
+      // Load full dispatch details (items + barcode scanning progress)
+      const details = await dispatchService.getDispatch(id);
+      const fullDispatch = details.data;
+      const items = Array.isArray(fullDispatch?.items) ? fullDispatch.items : [];
+
+      // Enforce mandatory barcode scanning BEFORE marking "in_transit"
+      // (matches dispatch workflow documentation).
+      let firstMissing: { name: string; remaining: number } | null = null;
+
+      for (const it of items) {
+        const required = Number(it?.barcode_scanning?.required_quantity ?? it?.quantity ?? 0);
+        let scanned = it?.barcode_scanning?.scanned_count;
+
+        // If backend didn't include barcode_scanning, fall back to scanned-barcodes endpoint
+        if (scanned == null) {
+          try {
+            const r = await dispatchService.getScannedBarcodes(id, it.id);
+            scanned = r?.data?.scanned_count ?? 0;
+          } catch {
+            scanned = 0;
+          }
+        }
+
+        const remaining = Math.max(0, required - Number(scanned || 0));
+        if (required > 0 && remaining > 0) {
+          firstMissing = { name: it?.product?.name || 'this item', remaining };
+          break;
+        }
+      }
+
+      if (firstMissing) {
+        showToast(
+          `Cannot mark dispatched yet. Please scan ${firstMissing.remaining} more barcode(s) for ${firstMissing.name}.`,
+          'error'
+        );
+        // Open scan modal directly in "send" mode to help staff complete scanning
+        setSelectedDispatch(fullDispatch);
+        setBarcodeScanMode('send');
+        setShowBarcodeScanModal(true);
+        return;
+      }
+
       await dispatchService.markDispatched(id);
       showToast('Dispatch marked as in transit', 'success');
       fetchDispatches();
@@ -171,21 +257,9 @@ export default function DispatchManagementPage() {
   const handleMarkDelivered = async (id: number) => {
     try {
       setLoading(true);
-      
-      // Get dispatch details to construct delivery data
-      const dispatchResponse = await dispatchService.getDispatch(id);
-      const dispatch = dispatchResponse.data;
-      
-      const deliveryData = {
-        items: dispatch.items.map((item: any) => ({
-          item_id: item.id,
-          received_quantity: item.quantity,
-          damaged_quantity: 0,
-          missing_quantity: 0,
-        })),
-      };
-      
-      await dispatchService.markDelivered(id, deliveryData);
+      // Per workflow, delivery should be completed after destination scans are done.
+      // Backend should calculate received/missing/damaged based on received barcodes.
+      await dispatchService.markDelivered(id);
       showToast('Dispatch marked as delivered successfully! 🎉', 'success');
       fetchDispatches();
       fetchStatistics();

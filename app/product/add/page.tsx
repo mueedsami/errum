@@ -552,6 +552,12 @@ export default function AddEditProductPage({
     } catch (error) {
       console.error('Failed to fetch SKU group products:', error);
       setSkuGroupProducts([]);
+      // Show a visible hint so it's not silently "empty" when the API call fails
+      setToast({
+        message:
+          'Could not load variations for this SKU group. Please check the sku-group API endpoint and permissions.',
+        type: 'warning',
+      });
     } finally {
       setSkuGroupLoading(false);
     }

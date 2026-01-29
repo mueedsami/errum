@@ -114,6 +114,31 @@ function transformProduct(product: any): Product {
   };
 }
 
+// Unwrap common backend response shapes safely
+function unwrapData(result: any): any {
+  // Typical shapes:
+  // 1) { success: true, data: {...} }
+  // 2) { success: true, data: { data: {...} } }
+  // 3) { data: {...} }
+  // 4) direct payload
+  let cur = result;
+
+  // Strip top-level {success, message}
+  if (cur && typeof cur === 'object' && 'success' in cur && 'data' in cur) {
+    cur = (cur as any).data;
+  }
+
+  // Drill into nested data a couple times if present
+  for (let i = 0; i < 2; i++) {
+    if (cur && typeof cur === 'object' && 'data' in cur && (cur as any).data) {
+      cur = (cur as any).data;
+      continue;
+    }
+    break;
+  }
+  return cur;
+}
+
 export const productService = {
   /** Get all products (with optional filters and pagination) */
   async getAll(params?: {
@@ -210,15 +235,33 @@ export const productService = {
    */
   async getSkuGroup(id: number | string): Promise<SkuGroupResponse> {
     try {
-      const response = await axiosInstance.get(`/employee/products/${id}/sku-group`);
-      const result = response.data;
-      const payload = result?.data ?? result;
+      let response;
+      try {
+        response = await axiosInstance.get(`/employee/products/${id}/sku-group`);
+      } catch (e: any) {
+        // Some deployments may expose this without the /employee prefix
+        if (e?.response?.status === 404) {
+          response = await axiosInstance.get(`/products/${id}/sku-group`);
+        } else {
+          throw e;
+        }
+      }
 
-      const productsRaw: any[] = Array.isArray(payload?.products) ? payload.products : [];
+      const payload = unwrapData(response.data);
+
+      const productsRaw: any[] = Array.isArray(payload?.products)
+        ? payload.products
+        : Array.isArray(payload?.data?.products)
+          ? payload.data.products
+          : [];
+
+      const baseName = payload?.base_name ?? payload?.data?.base_name ?? '';
+      const sku = payload?.sku ?? payload?.data?.sku ?? '';
+      const total = payload?.total_variations ?? payload?.data?.total_variations ?? productsRaw.length ?? 0;
       return {
-        sku: String(payload?.sku || ''),
-        base_name: String(payload?.base_name || ''),
-        total_variations: Number(payload?.total_variations || productsRaw.length || 0),
+        sku: String(sku || ''),
+        base_name: String(baseName || ''),
+        total_variations: Number(total || 0),
         products: productsRaw.map(transformProduct),
       };
     } catch (error: any) {
@@ -233,9 +276,20 @@ export const productService = {
    */
   async updateCommonInfo(id: number | string, data: UpdateCommonInfoRequest): Promise<any> {
     try {
-      const response = await axiosInstance.put(`/employee/products/${id}/common-info`, data, {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      let response;
+      try {
+        response = await axiosInstance.put(`/employee/products/${id}/common-info`, data, {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          response = await axiosInstance.put(`/products/${id}/common-info`, data, {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } else {
+          throw e;
+        }
+      }
       return response.data;
     } catch (error: any) {
       console.error('Update common info error:', error);

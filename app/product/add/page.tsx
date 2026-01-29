@@ -110,6 +110,18 @@ export default function AddEditProductPage({
   // Current product being edited (single variant)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
+  // Edit-mode helpers (for single variant name editing with new schema)
+  const [editVariationSuffix, setEditVariationSuffix] = useState<string>('');
+
+  // Variations tab quick edit (edit multiple variants from one view)
+  const [quickEditMode, setQuickEditMode] = useState<boolean>(false);
+  const [rowEdits, setRowEdits] = useState<Record<number, {
+    variation_suffix: string;
+    description: string;
+  }>>({});
+  const [savingRowIds, setSavingRowIds] = useState<Record<number, boolean>>({});
+  const [savingAll, setSavingAll] = useState<boolean>(false);
+
   // Common Edit (SKU group) state
   const [commonBaseName, setCommonBaseName] = useState<string>('');
   const [commonBrand, setCommonBrand] = useState<string>('');
@@ -347,6 +359,9 @@ export default function AddEditProductPage({
         description: product.description || '',
       });
 
+      // Keep suffix editable in edit mode (so user can update a single variant's name)
+      setEditVariationSuffix(String((product as any).variation_suffix || '').trim());
+
       setSelectedVendorId(String(product.vendor_id));
       setCategorySelection({ level0: String(product.category_id) });
 
@@ -519,6 +534,17 @@ export default function AddEditProductPage({
 
       setSkuGroupProducts(list);
       setCommonBaseName(String(group.base_name || ''));
+
+      // Initialize quick-edit rows so the "old" edit style (edit within variations view) works
+      const initialEdits: Record<number, { variation_suffix: string; description: string }> = {};
+      for (const p of list) {
+        initialEdits[p.id] = {
+          variation_suffix: String((p as any).variation_suffix || '').trim(),
+          description: String((p as any).description || ''),
+        };
+      }
+      setRowEdits(initialEdits);
+
       // Keep UI SKU in sync
       if (String(group.sku || '').trim()) {
         setFormData(prev => ({ ...prev, sku: String(group.sku || '').trim() }));
@@ -582,6 +608,68 @@ export default function AddEditProductPage({
       setToast({ message: error?.message || 'Failed to update common info', type: 'error' });
     } finally {
       setCommonSaving(false);
+    }
+  };
+
+  // -------------------- Variations tab: "old style" quick edit --------------------
+  const normalizeSuffix = (suffix: string): string => {
+    const raw = String(suffix || '').trim();
+    if (!raw) return '';
+    return raw.startsWith('-') ? raw : `-${raw}`;
+  };
+
+  const updateRowEdit = (id: number, patch: Partial<{ variation_suffix: string; description: string }>) => {
+    setRowEdits((prev) => ({
+      ...prev,
+      [id]: {
+        variation_suffix: prev[id]?.variation_suffix ?? '',
+        description: prev[id]?.description ?? '',
+        ...patch,
+      },
+    }));
+  };
+
+  const saveRow = async (id: number) => {
+    const p = skuGroupProducts.find((x) => x.id === id);
+    if (!p) return;
+
+    try {
+      setSavingRowIds((prev) => ({ ...prev, [id]: true }));
+
+      const base_name = String((p as any).base_name || commonBaseName || formData.name || '').trim();
+      const variation_suffix = normalizeSuffix(rowEdits[id]?.variation_suffix ?? String((p as any).variation_suffix || ''));
+
+      const payload: any = {
+        // keep backward compatibility: backend can compute name from base_name + variation_suffix
+        base_name,
+        variation_suffix,
+        name: variation_suffix ? `${base_name}${variation_suffix}` : base_name,
+        description: rowEdits[id]?.description ?? (p.description || ''),
+      };
+
+      await productService.update(id, payload);
+      setToast({ message: `Variation #${id} updated.`, type: 'success' });
+
+      // Refresh list so names/images remain accurate
+      if (productId) await fetchSkuGroupByProductId(productId);
+    } catch (error: any) {
+      console.error('Save row failed:', error);
+      setToast({ message: error?.message || 'Failed to update variation', type: 'error' });
+    } finally {
+      setSavingRowIds((prev) => ({ ...prev, [id]: false }));
+    }
+  };
+
+  const saveAllRows = async () => {
+    if (!productId || skuGroupProducts.length === 0) return;
+    try {
+      setSavingAll(true);
+      for (const p of skuGroupProducts) {
+        // Save sequentially to avoid rate limits
+        await saveRow(p.id);
+      }
+    } finally {
+      setSavingAll(false);
     }
   };
   const openEditProduct = (id: number) => {
@@ -887,7 +975,7 @@ export default function AddEditProductPage({
       const normalizedSku: string | null = String(formData.sku || '').trim() || null;
 
       if (isEditMode) {
-        const suffix = String((editingProduct as any)?.variation_suffix || '').trim();
+        const suffix = normalizeSuffix(editVariationSuffix);
         const baseName = String(formData.name || '').trim();
 
         const updatePayload: any = {
@@ -1330,13 +1418,31 @@ export default function AddEditProductPage({
                             value={formData.name}
                             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                             placeholder="e.g., saree"
-                            disabled={addVariationMode || isEditMode}
+                            disabled={addVariationMode}
                             className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500 focus:border-transparent dark:bg-gray-700 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                           />
                           {isEditMode && (
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                              To rename the base product across all variations, use <strong>Common Edit</strong> in the Product Variations tab.
+                              Editing this will change <strong>only this product</strong>. To rename across all variations, use <strong>Common Edit</strong> in the Product Variations tab.
                             </p>
+                          )}
+
+                          {isEditMode && (
+                            <div className="mt-3">
+                              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                Variation Suffix <span className="text-gray-500 font-normal">(Optional)</span>
+                              </label>
+                              <input
+                                type="text"
+                                value={editVariationSuffix}
+                                onChange={(e) => setEditVariationSuffix(e.target.value)}
+                                placeholder="e.g., -red-30"
+                                className="w-full px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500 focus:border-transparent dark:bg-gray-700 dark:text-white"
+                              />
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                Display name will become: <span className="font-mono">{String(formData.name || '').trim()}{normalizeSuffix(editVariationSuffix)}</span>
+                              </p>
+                            </div>
                           )}
                         </div>
 
@@ -1528,14 +1634,24 @@ export default function AddEditProductPage({
                             These are all products that share the same SKU. You can edit any variant, or add new ones.
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => openAddVariation()}
-                          className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors font-medium shadow-sm"
-                        >
-                          <Plus className="w-4 h-4" />
-                          Add Variation
-                        </button>
+                        <div className="shrink-0 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setQuickEditMode((v) => !v)}
+                            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-white transition-colors font-medium"
+                          >
+                            {quickEditMode ? 'Close Quick Edit' : 'Quick Edit Variations'}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => openAddVariation()}
+                            className="inline-flex items-center gap-2 px-4 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors font-medium shadow-sm"
+                          >
+                            <Plus className="w-4 h-4" />
+                            Add Variation
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -1668,85 +1784,204 @@ export default function AddEditProductPage({
                             )}
                           </div>
 
-                          <div className="overflow-x-auto">
-                            <table className="min-w-full text-sm">
-                              <thead>
-                                <tr className="text-left text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
-                                  <th className="py-3 pr-4">Image</th>
-                                  <th className="py-3 pr-4">Product</th>
-                                  <th className="py-3 pr-4">Color</th>
-                                  <th className="py-3 pr-4">Size</th>
-                                  <th className="py-3">Actions</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {skuGroupProducts.map((p) => {
-                                  const v = getVariantAttr(p);
-                                  const primary = p.images?.find(img => img.is_primary && img.is_active) ||
-                                    p.images?.find(img => img.is_active) ||
-                                    p.images?.[0];
-                                  const imgUrl = primary ? getImageUrl(primary.image_path) : null;
+                          {quickEditMode ? (
+                            <div className="overflow-x-auto">
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="text-sm text-gray-700 dark:text-gray-300">
+                                  Quick edit lets you change <strong>variation suffix</strong> and <strong>description</strong> for each variant from one screen.
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={saveAllRows}
+                                  disabled={savingAll}
+                                  className="px-4 py-2 rounded-lg bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {savingAll ? 'Saving...' : 'Save All'}
+                                </button>
+                              </div>
 
-                                  return (
-                                    <tr key={p.id} className="border-b border-gray-100 dark:border-gray-700/60">
-                                      <td className="py-3 pr-4">
-                                        <div className="w-12 h-12 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-700">
-                                          <img
-                                            src={imgUrl || FALLBACK_IMAGE_URL}
-                                            alt={p.name}
-                                            className="w-full h-full object-cover"
-                                            onError={(e) => {
-                                              e.currentTarget.src = FALLBACK_IMAGE_URL;
-                                            }}
+                              <table className="min-w-full text-sm">
+                                <thead>
+                                  <tr className="text-left text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                                    <th className="py-3 pr-4">Image</th>
+                                    <th className="py-3 pr-4">Name</th>
+                                    <th className="py-3 pr-4">Suffix</th>
+                                    <th className="py-3 pr-4">Description</th>
+                                    <th className="py-3 pr-4">Color</th>
+                                    <th className="py-3 pr-4">Size</th>
+                                    <th className="py-3">Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {skuGroupProducts.map((p) => {
+                                    const v = getVariantAttr(p);
+                                    const primary = p.images?.find(img => img.is_primary && img.is_active) ||
+                                      p.images?.find(img => img.is_active) ||
+                                      p.images?.[0];
+                                    const imgUrl = primary ? getImageUrl(primary.image_path) : null;
+
+                                    const edit = rowEdits[p.id] || { variation_suffix: String((p as any).variation_suffix || ''), description: String(p.description || '') };
+                                    const basePreview = String(commonBaseName || (p as any).base_name || '').trim();
+                                    const suffixPreview = normalizeSuffix(edit.variation_suffix);
+                                    const namePreview = suffixPreview ? `${basePreview}${suffixPreview}` : basePreview;
+
+                                    return (
+                                      <tr key={p.id} className="border-b border-gray-100 dark:border-gray-700/60 align-top">
+                                        <td className="py-3 pr-4">
+                                          <div className="w-12 h-12 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-700">
+                                            <img
+                                              src={imgUrl || FALLBACK_IMAGE_URL}
+                                              alt={p.name}
+                                              className="w-full h-full object-cover"
+                                              onError={(e) => {
+                                                e.currentTarget.src = FALLBACK_IMAGE_URL;
+                                              }}
+                                            />
+                                          </div>
+                                        </td>
+                                        <td className="py-3 pr-4">
+                                          <div className="font-medium text-gray-900 dark:text-white">{namePreview || p.name}</div>
+                                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">ID: {p.id}</div>
+                                        </td>
+                                        <td className="py-3 pr-4 min-w-[180px]">
+                                          <input
+                                            value={edit.variation_suffix}
+                                            onChange={(e) => updateRowEdit(p.id, { variation_suffix: e.target.value })}
+                                            placeholder="-red-30"
+                                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                                           />
-                                        </div>
-                                      </td>
-                                      <td className="py-3 pr-4">
-                                        <div className="font-medium text-gray-900 dark:text-white">
-                                          {p.name}
-                                        </div>
-                                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                                          ID: {p.id}
-                                        </div>
-                                      </td>
-                                      <td className="py-3 pr-4 text-gray-800 dark:text-gray-200">
-                                        {v.color ? String(v.color) : '-'}
-                                      </td>
-                                      <td className="py-3 pr-4 text-gray-800 dark:text-gray-200">
-                                        {v.size ? String(v.size) : 'One Size'}
-                                      </td>
-                                      <td className="py-3">
-                                        <div className="flex gap-2">
-                                          <button
-                                            type="button"
-                                            onClick={() => openEditProduct(p.id)}
-                                            className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-white transition-colors"
-                                          >
-                                            Edit
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => openAddVariation(v.color ? String(v.color) : undefined)}
-                                            className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
-                                            title="Create new size variants for this color"
-                                          >
-                                            Add Sizes
-                                          </button>
-                                          <button
-                                            type="button"
-                                            onClick={() => router.push(`/product/${p.id}`)}
-                                            className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
-                                          >
-                                            View
-                                          </button>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
+                                        </td>
+                                        <td className="py-3 pr-4 min-w-[280px]">
+                                          <input
+                                            value={edit.description}
+                                            onChange={(e) => updateRowEdit(p.id, { description: e.target.value })}
+                                            placeholder="(optional)"
+                                            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                          />
+                                        </td>
+                                        <td className="py-3 pr-4 text-gray-800 dark:text-gray-200">{v.color ? String(v.color) : '-'}</td>
+                                        <td className="py-3 pr-4 text-gray-800 dark:text-gray-200">{v.size ? String(v.size) : 'One Size'}</td>
+                                        <td className="py-3">
+                                          <div className="flex flex-wrap gap-2">
+                                            <button
+                                              type="button"
+                                              onClick={() => saveRow(p.id)}
+                                              disabled={Boolean(savingRowIds[p.id])}
+                                              className="px-3 py-1.5 rounded-lg bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-800 dark:hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                            >
+                                              {savingRowIds[p.id] ? 'Saving...' : 'Save'}
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => openEditProduct(p.id)}
+                                              className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-white transition-colors"
+                                            >
+                                              Full Edit
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => openAddVariation(v.color ? String(v.color) : undefined)}
+                                              className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+                                              title="Create new size variants for this color"
+                                            >
+                                              Add Sizes
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => router.push(`/product/${p.id}`)}
+                                              className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+                                            >
+                                              View
+                                            </button>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="min-w-full text-sm">
+                                <thead>
+                                  <tr className="text-left text-gray-600 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                                    <th className="py-3 pr-4">Image</th>
+                                    <th className="py-3 pr-4">Product</th>
+                                    <th className="py-3 pr-4">Color</th>
+                                    <th className="py-3 pr-4">Size</th>
+                                    <th className="py-3">Actions</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {skuGroupProducts.map((p) => {
+                                    const v = getVariantAttr(p);
+                                    const primary = p.images?.find(img => img.is_primary && img.is_active) ||
+                                      p.images?.find(img => img.is_active) ||
+                                      p.images?.[0];
+                                    const imgUrl = primary ? getImageUrl(primary.image_path) : null;
+
+                                    return (
+                                      <tr key={p.id} className="border-b border-gray-100 dark:border-gray-700/60">
+                                        <td className="py-3 pr-4">
+                                          <div className="w-12 h-12 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-700">
+                                            <img
+                                              src={imgUrl || FALLBACK_IMAGE_URL}
+                                              alt={p.name}
+                                              className="w-full h-full object-cover"
+                                              onError={(e) => {
+                                                e.currentTarget.src = FALLBACK_IMAGE_URL;
+                                              }}
+                                            />
+                                          </div>
+                                        </td>
+                                        <td className="py-3 pr-4">
+                                          <div className="font-medium text-gray-900 dark:text-white">
+                                            {p.name}
+                                          </div>
+                                          <div className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                            ID: {p.id}
+                                          </div>
+                                        </td>
+                                        <td className="py-3 pr-4 text-gray-800 dark:text-gray-200">
+                                          {v.color ? String(v.color) : '-'}
+                                        </td>
+                                        <td className="py-3 pr-4 text-gray-800 dark:text-gray-200">
+                                          {v.size ? String(v.size) : 'One Size'}
+                                        </td>
+                                        <td className="py-3">
+                                          <div className="flex gap-2">
+                                            <button
+                                              type="button"
+                                              onClick={() => openEditProduct(p.id)}
+                                              className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-900 dark:text-white transition-colors"
+                                            >
+                                              Edit
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => openAddVariation(v.color ? String(v.color) : undefined)}
+                                              className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+                                              title="Create new size variants for this color"
+                                            >
+                                              Add Sizes
+                                            </button>
+                                            <button
+                                              type="button"
+                                              onClick={() => router.push(`/product/${p.id}`)}
+                                              className="px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors"
+                                            >
+                                              View
+                                            </button>
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
                         </>
                       )}
 

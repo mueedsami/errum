@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import CustomerTagManager from '@/components/customers/CustomerTagManager';
@@ -160,9 +160,84 @@ export default function LookupPage() {
   const [barcodeLoading, setBarcodeLoading] = useState(false);
   const [barcodeData, setBarcodeData] = useState<BarcodeHistoryData | null>(null);
 
+  // ✅ Barcode scan UX (same behavior as POS): supports physical scanners (rapid key bursts)
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const scannerBufferRef = useRef<string>('');
+  const scannerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   // Purchase info (best effort): which PO this barcode/batch came from
   const [barcodePurchaseInfo, setBarcodePurchaseInfo] = useState<{ poId: number; poNumber?: string; vendorName?: string } | null>(null);
   const [barcodePurchaseLoading, setBarcodePurchaseLoading] = useState(false);
+
+  // Physical scanner detection for the Barcode tab
+  useEffect(() => {
+    if (activeTab !== 'barcode') return;
+
+    const cleanupTimer = () => {
+      if (scannerTimeoutRef.current) {
+        clearTimeout(scannerTimeoutRef.current);
+        scannerTimeoutRef.current = null;
+      }
+    };
+
+    const processScanned = (raw: string) => {
+      const code = String(raw || '').trim();
+      if (!code) return;
+
+      // Reflect scanned code in the input box immediately
+      setBarcodeInput(code);
+      setBarcodeData(null);
+      setBarcodePurchaseInfo(null);
+      setError('');
+
+      // Use override so we don't depend on state timing
+      handleSearchBarcode(code);
+    };
+
+    const handleKeyPress = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+
+      // Ignore keypresses in other input fields
+      if (target.tagName === 'TEXTAREA') return;
+      if (target.tagName === 'SELECT') return;
+      if (target.tagName === 'INPUT' && target !== barcodeInputRef.current) return;
+
+      cleanupTimer();
+
+      // Enter = end-of-scan
+      if (e.key === 'Enter' && scannerBufferRef.current.length > 0) {
+        e.preventDefault();
+        const scanned = scannerBufferRef.current;
+        scannerBufferRef.current = '';
+        processScanned(scanned);
+        return;
+      }
+
+      // Accumulate characters
+      if (e.key.length === 1) {
+        scannerBufferRef.current += e.key;
+
+        // Auto-submit after brief silence (barcode scanners type in a rapid burst)
+        scannerTimeoutRef.current = setTimeout(() => {
+          if (scannerBufferRef.current.length > 3) {
+            const scanned = scannerBufferRef.current;
+            scannerBufferRef.current = '';
+            processScanned(scanned);
+          } else {
+            scannerBufferRef.current = '';
+          }
+        }, 100);
+      }
+    };
+
+    window.addEventListener('keypress', handleKeyPress);
+    return () => {
+      window.removeEventListener('keypress', handleKeyPress);
+      cleanupTimer();
+      scannerBufferRef.current = '';
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
 
   // Cache to resolve order/customer for barcode history + current_location
@@ -488,79 +563,212 @@ export default function LookupPage() {
   // -----------------------
   // QZ single barcode print helper (reprint)
   // -----------------------
-  const printSingleBarcodeLabel = async (params: { barcode: string; productName?: string; price?: string | number }) => {
+  
+const printSingleBarcodeLabel = async (params: { barcode: string; productName?: string; price?: string | number }) => {
     try {
       setError('');
-      await connectQZ();
-
       const qz = (window as any)?.qz;
       if (!qz) throw new Error('QZ Tray not available');
 
-      const printer = await getDefaultPrinter();
-      if (!printer) throw new Error('No default printer found. Set a default printer and try again.');
+      // Connect if needed
+      if (!(await qz.websocket.isActive())) {
+        await qz.websocket.connect();
+      }
 
-      const config = qz.configs.create(printer);
+      // Pick default printer (fallback to first available)
+      let printer: string | null = null;
+      try {
+        printer = await qz.printers.getDefault();
+      } catch (e) {
+        const list = await qz.printers.find();
+        if (Array.isArray(list) && list.length) printer = list[0];
+      }
+      if (!printer) throw new Error('No printer found. Set a default printer and try again.');
 
-      const safeId = params.barcode.replace(/[^a-zA-Z0-9]/g, '');
-      const productName = (params.productName || 'Product').substring(0, 25);
+      const LABEL_W_MM = 39;
+      const LABEL_H_MM = 25;
+      const DPI = 300; // set 203 if your printer is 203dpi
+      const mmToIn = (mm: number) => mm / 25.4;
 
-      const priceNum = safeNum(params.price);
-      const showPrice = Number.isFinite(priceNum) && priceNum > 0;
-      const priceText = showPrice ? `৳${Number(priceNum).toLocaleString('en-BD')}` : '';
+      // Ensure JsBarcode is available (QzTrayLoader loads it globally)
+      const ensureJsBarcode = async () => {
+        if ((window as any).JsBarcode) return;
+        await new Promise<void>((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js';
+          s.async = true;
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error('Failed to load JsBarcode'));
+          document.head.appendChild(s);
+        });
+      };
 
-      const data: any[] = [
-        {
-          type: 'html',
-          format: 'plain',
-          data: `
-            <html>
-              <head>
-                <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
-                <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
-                  @page { size: 40mm 28mm; margin: 0; }
-                  body {
-                    width: 40mm; height: 28mm; margin: 0; padding: 0.5mm 1mm;
-                    font-family: Arial, sans-serif; display: flex; flex-direction: column;
-                    justify-content: space-between; align-items: center;
-                  }
-                  .barcode-container {
-                    width: 100%; text-align: center; display:flex; flex-direction:column;
-                    align-items:center; justify-content:center;
-                  }
-                  .product-name {
-                    font-weight: bold; font-size: 7pt; line-height: 1; margin-bottom: 0.5mm;
-                    max-width: 38mm; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-                  }
-                  .price { font-size: 9pt; font-weight: bold; color: #000; margin-bottom: 0.5mm; line-height: 1; }
-                  svg { max-width: 38mm; height: auto; display: block; }
-                </style>
-              </head>
-              <body>
-                <div class="barcode-container">
-                  <div class="product-name">${productName}</div>
-                  ${showPrice ? `<div class="price">${priceText}</div>` : ``}
-                  <svg id="barcode-${safeId}"></svg>
-                </div>
-                <script>
-                  JsBarcode("#barcode-${safeId}", "${params.barcode}", {
-                    format: "CODE128",
-                    width: 1.3,
-                    height: 30,
-                    displayValue: true,
-                    fontSize: 9,
-                    margin: 0,
-                    marginTop: 1,
-                    marginBottom: 1,
-                    textMargin: 1
-                  });
-                </script>
-              </body>
-            </html>
-          `,
-        },
-      ];
+      const fitText = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
+        const ellipsis = '…';
+        if (ctx.measureText(text).width <= maxWidth) return text;
+        let t = text;
+        while (t.length > 0 && ctx.measureText(t + ellipsis).width > maxWidth) t = t.slice(0, -1);
+        return t.length ? t + ellipsis : '';
+      };
 
+      const wrapTwoLines = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number): [string, string] => {
+        const clean = String(text || '').trim().replace(/\s+/g, ' ');
+        if (!clean) return ['', ''];
+        if (ctx.measureText(clean).width <= maxWidth) return [clean, ''];
+
+        const words = clean.split(' ');
+        if (words.length <= 1) {
+          // No spaces; split by characters
+          let line1 = clean;
+          while (line1.length > 0 && ctx.measureText(line1).width > maxWidth) line1 = line1.slice(0, -1);
+          const rest = clean.slice(line1.length).trim();
+          if (!rest) return [fitText(ctx, clean, maxWidth), ''];
+          return [line1, fitText(ctx, rest, maxWidth)];
+        }
+
+        // Build first line word-by-word
+        let line1 = '';
+        let i = 0;
+        for (; i < words.length; i++) {
+          const test = line1 ? `${line1} ${words[i]}` : words[i];
+          if (ctx.measureText(test).width <= maxWidth) {
+            line1 = test;
+          } else {
+            break;
+          }
+        }
+
+        if (!line1) return [fitText(ctx, clean, maxWidth), ''];
+
+        const line2Raw = words.slice(i).join(' ').trim();
+        const line2 = line2Raw ? fitText(ctx, line2Raw, maxWidth) : '';
+        return [line1, line2];
+      };
+
+
+      const renderLabel = async () => {
+        await ensureJsBarcode();
+
+        const wIn = mmToIn(LABEL_W_MM);
+        const hIn = mmToIn(LABEL_H_MM);
+        const wPx = Math.max(50, Math.round(wIn * DPI));
+        const hPx = Math.max(50, Math.round(hIn * DPI));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = wPx;
+        canvas.height = hPx;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Canvas not supported');
+        ctx.imageSmoothingEnabled = false;
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, wPx, hPx);
+
+        const pad = Math.round(wPx * 0.04);
+        const shiftPx = Math.round((2 / 25.4) * DPI); // shift right by 2mm
+        const cx = wPx / 2 + shiftPx;
+
+        ctx.fillStyle = '#000';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.font = `800 ${Math.round(hPx * 0.11)}px Arial`;
+        ctx.fillText('Deshio', cx, pad);
+
+        // Product name (wrap to 2 lines when long)
+        const nameY = pad + Math.round(hPx * 0.14);
+        const nameMaxW = wPx - pad * 2;
+
+        let nameFont = Math.round(hPx * 0.09);
+        ctx.font = `700 ${nameFont}px Arial`;
+
+        let [name1, name2] = wrapTwoLines(ctx, (params.productName || 'Product').trim(), nameMaxW);
+        if (name2) {
+          nameFont = Math.round(hPx * 0.082);
+          ctx.font = `700 ${nameFont}px Arial`;
+          [name1, name2] = wrapTwoLines(ctx, (params.productName || 'Product').trim(), nameMaxW);
+        }
+
+        ctx.fillText(name1, cx, nameY);
+        const lineGap = Math.max(2, Math.round(hPx * 0.01));
+        let afterNameBottom = nameY + nameFont;
+        if (name2) {
+          ctx.fillText(name2, cx, nameY + nameFont + lineGap);
+          afterNameBottom = nameY + (nameFont + lineGap) * 2;
+        }
+
+        const afterNameY = afterNameBottom + Math.round(hPx * 0.03);
+
+        // Barcode (pixel-perfect): JsBarcode overrides canvas.width/height based on content.
+        // Render it, then center horizontally and scale DOWN only if it would overflow.
+        const JsBarcode = (window as any).JsBarcode;
+
+        // Slightly larger barcode + number (still safe within 39x25mm)
+        const maxBcW = Math.round((wPx - pad * 2) * 0.98);
+        const maxBcH = Math.round(hPx * 0.56);
+        const bcHeight = Math.round(hPx * 0.28);
+        const bcFontSize = Math.round(hPx * 0.09);
+
+        const renderBarcodeCanvas = (barWidth: number) => {
+          const c = document.createElement('canvas');
+          JsBarcode(c, params.barcode, {
+            format: 'CODE128',
+            width: Math.max(1, Math.floor(barWidth)),
+            height: bcHeight,
+            displayValue: true,
+            fontSize: bcFontSize,
+            fontOptions: 'bold',
+            textMargin: 0,
+            margin: 0,
+          });
+          return c;
+        };
+
+        // Pick the largest integer barWidth that fits (keeps prints crisp on thermal printers)
+        let bw = 1;
+        let bcCanvas = renderBarcodeCanvas(bw);
+        while (bw < 6) {
+          const next = renderBarcodeCanvas(bw + 1);
+          if (next.width <= maxBcW && next.height <= maxBcH) {
+            bw += 1;
+            bcCanvas = next;
+            continue;
+          }
+          break;
+        }
+
+        const bcY = Math.max(pad + Math.round(hPx * 0.27), Math.round(afterNameY));
+        const scale = Math.min(1, maxBcW / bcCanvas.width, maxBcH / bcCanvas.height);
+        const drawW = Math.round(bcCanvas.width * scale);
+        const drawH = Math.round(bcCanvas.height * scale);
+        const bcX = Math.round((wPx - drawW) / 2 + shiftPx);
+
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(bcCanvas, bcX, bcY, drawW, drawH);
+
+        const priceNum = safeNum(params.price);
+        const showPrice = Number.isFinite(priceNum) && priceNum > 0;
+        if (showPrice) {
+          ctx.textBaseline = 'bottom';
+          ctx.font = `800 ${Math.round(hPx * 0.085)}px Arial`;
+          const priceText = `Price (VAT Inclusive): ৳${Number(priceNum).toLocaleString('en-BD')}`;
+          ctx.fillText(fitText(ctx, priceText, wPx - pad * 2), cx, hPx - pad);
+        }
+
+        return canvas.toDataURL('image/png').split(',')[1];
+      };
+
+      const base64 = await renderLabel();
+
+      const config = qz.configs.create(printer, {
+        units: 'in',
+        size: { width: mmToIn(LABEL_W_MM), height: mmToIn(LABEL_H_MM) },
+        margins: { top: 0, right: 0, bottom: 0, left: 0 },
+        density: DPI,
+        colorType: 'blackwhite',
+        interpolation: 'nearest-neighbor',
+        scaleContent: false,
+      });
+
+      const data: any[] = [{ type: 'pixel', format: 'image', flavor: 'base64', data: base64 }];
       await qz.print(config, data);
     } catch (err: any) {
       setError(err?.message || 'Failed to print barcode');
@@ -1157,8 +1365,8 @@ export default function LookupPage() {
     }
   };
 
-  const handleSearchBarcode = async () => {
-    const code = barcodeInput.trim();
+  const handleSearchBarcode = async (codeOverride?: string) => {
+    const code = (codeOverride ?? barcodeInput).trim();
     if (!code) {
       setError('Please enter a barcode');
       return;
@@ -1884,6 +2092,7 @@ export default function LookupPage() {
                     <div className="relative max-w-xl mx-auto">
                       <div className="relative">
                         <input
+                          ref={barcodeInputRef}
                           type="text"
                           value={barcodeInput}
                           onChange={(e) => setBarcodeInput(e.target.value)}
@@ -1892,15 +2101,19 @@ export default function LookupPage() {
                           }}
                           placeholder="Type barcode..."
                           className="w-full pl-3 pr-24 py-2.5 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-900 text-black dark:text-white text-sm placeholder-gray-400 focus:outline-none focus:border-black dark:focus:border-white transition-colors"
+                          autoFocus
                         />
                         <button
-                          onClick={handleSearchBarcode}
+                          onClick={() => handleSearchBarcode()}
                           disabled={barcodeLoading}
                           className="absolute right-1.5 top-1/2 transform -translate-y-1/2 px-4 py-1.5 bg-black dark:bg-white text-white dark:text-black rounded hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium text-xs"
                         >
                           {barcodeLoading ? 'Loading...' : 'Search'}
                         </button>
                       </div>
+                      <p className="mt-2 text-[10px] text-gray-500 dark:text-gray-400 text-center">
+                        Tip: You can scan a barcode here using the same scanner behavior as POS (no need to type).
+                      </p>
                     </div>
                   </div>
 

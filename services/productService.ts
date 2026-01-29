@@ -3,8 +3,10 @@ import axiosInstance from '@/lib/axios';
 
 export interface Product {
   id: number;
-  name: string;
+  name: string; // display name (auto-computed server-side)
   sku: string;
+  base_name?: string; // editable base name
+  variation_suffix?: string; // e.g. "-red-30"
   description?: string;
   category_id: number;
   vendor_id: number;
@@ -53,9 +55,13 @@ export interface Field {
 }
 
 export interface CreateProductData {
-  name: string;
+  // Backward compatible: you may send `name` only.
+  // Recommended for variations: send `base_name` + `variation_suffix` and the backend computes `name`.
+  name?: string;
   /** Optional: backend will auto-generate (9-digit) if omitted/null/empty */
   sku?: string | null;
+  base_name?: string;
+  variation_suffix?: string;
   description?: string;
   category_id: number;
   vendor_id: number;
@@ -63,6 +69,21 @@ export interface CreateProductData {
     field_id: number;
     value: any;
   }[];
+}
+
+export interface SkuGroupResponse {
+  sku: string;
+  base_name: string;
+  total_variations: number;
+  products: Product[];
+}
+
+export interface UpdateCommonInfoRequest {
+  base_name: string;
+  description?: string;
+  category_id?: number;
+  vendor_id?: number;
+  brand?: string;
 }
 
 export interface CreateProductWithVariantsData extends CreateProductData {
@@ -77,6 +98,8 @@ function transformProduct(product: any): Product {
     id: product.id,
     name: product.name,
     sku: product.sku,
+    base_name: product.base_name,
+    variation_suffix: product.variation_suffix,
     description: product.description,
     category_id: product.category_id,
     vendor_id: product.vendor_id,
@@ -102,7 +125,17 @@ export const productService = {
     is_archived?: boolean;
   }): Promise<{ data: Product[]; total: number; current_page: number; last_page: number }> {
     try {
-      const response = await axiosInstance.get('/products', { params });
+      // Prefer employee-scoped endpoints when available; fallback keeps backward compatibility.
+      let response;
+      try {
+        response = await axiosInstance.get('/employee/products', { params });
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          response = await axiosInstance.get('/products', { params });
+        } else {
+          throw e;
+        }
+      }
       const result = response.data;
 
       if (!result?.success) {
@@ -152,7 +185,16 @@ export const productService = {
   /** Get single product by ID */
   async getById(id: number | string): Promise<Product> {
     try {
-      const response = await axiosInstance.get(`/products/${id}`);
+      let response;
+      try {
+        response = await axiosInstance.get(`/employee/products/${id}`);
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          response = await axiosInstance.get(`/products/${id}`);
+        } else {
+          throw e;
+        }
+      }
       const result = response.data;
       const product = result.data || result;
       return transformProduct(product);
@@ -162,12 +204,62 @@ export const productService = {
     }
   },
 
+  /**
+   * Get all products that share the same SKU as this product (SKU group / variations group)
+   * API: GET /api/employee/products/{id}/sku-group
+   */
+  async getSkuGroup(id: number | string): Promise<SkuGroupResponse> {
+    try {
+      const response = await axiosInstance.get(`/employee/products/${id}/sku-group`);
+      const result = response.data;
+      const payload = result?.data ?? result;
+
+      const productsRaw: any[] = Array.isArray(payload?.products) ? payload.products : [];
+      return {
+        sku: String(payload?.sku || ''),
+        base_name: String(payload?.base_name || ''),
+        total_variations: Number(payload?.total_variations || productsRaw.length || 0),
+        products: productsRaw.map(transformProduct),
+      };
+    } catch (error: any) {
+      console.error('Get SKU group error:', error);
+      throw new Error(error.response?.data?.message || 'Failed to fetch SKU group');
+    }
+  },
+
+  /**
+   * Magic common edit: update base_name (and optional common fields) for ALL products in a SKU group
+   * API: PUT /api/employee/products/{id}/common-info
+   */
+  async updateCommonInfo(id: number | string, data: UpdateCommonInfoRequest): Promise<any> {
+    try {
+      const response = await axiosInstance.put(`/employee/products/${id}/common-info`, data, {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('Update common info error:', error);
+      throw new Error(error.response?.data?.message || 'Failed to update common info');
+    }
+  },
+
   /** Create product (simple or with variants) */
   async create(data: CreateProductData | CreateProductWithVariantsData): Promise<Product> {
     try {
-      const response = await axiosInstance.post('/products', data, {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      let response;
+      try {
+        response = await axiosInstance.post('/employee/products', data, {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          response = await axiosInstance.post('/products', data, {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } else {
+          throw e;
+        }
+      }
       const result = response.data;
       return transformProduct(result.data || result);
     } catch (error: any) {
@@ -206,9 +298,20 @@ export const productService = {
   /** Update product by ID */
   async update(id: number | string, data: Partial<CreateProductData>): Promise<Product> {
     try {
-      const response = await axiosInstance.put(`/products/${id}`, data, {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      let response;
+      try {
+        response = await axiosInstance.put(`/employee/products/${id}`, data, {
+          headers: { 'Content-Type': 'application/json' },
+        });
+      } catch (e: any) {
+        if (e?.response?.status === 404) {
+          response = await axiosInstance.put(`/products/${id}`, data, {
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } else {
+          throw e;
+        }
+      }
       const result = response.data;
       return transformProduct(result.data || result);
     } catch (error: any) {

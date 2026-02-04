@@ -1449,7 +1449,9 @@ export default function CheckoutPage() {
                         alt={item.name}
                         className="w-16 h-16 object-cover rounded"
                         onError={(e) => {
-                          e.currentTarget.src = '/placeholder-product.png';
+                          if (!e.currentTarget.src.includes('/placeholder-product.png')) {
+                        e.currentTarget.src = '/placeholder-product.png';
+                      }
                         }}
                       />
                       <div className="flex-1">

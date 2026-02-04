@@ -775,7 +775,9 @@ export default function PurchaseOrdersPage() {
                   alt={imagePreview.name}
                   className="w-full max-h-[70vh] object-contain rounded-lg bg-white dark:bg-black"
                   onError={(e) => {
-                    e.currentTarget.src = '/placeholder-product.png';
+                    if (!e.currentTarget.src.includes('/placeholder-product.png')) {
+                        e.currentTarget.src = '/placeholder-product.png';
+                      }
                   }}
                 />
               </div>
@@ -1038,7 +1040,9 @@ export default function PurchaseOrdersPage() {
                                           alt={item.product_name || 'Product'}
                                           className="w-full h-full object-cover"
                                           onError={(e) => {
-                                            e.currentTarget.src = '/placeholder-product.png';
+                                            if (!e.currentTarget.src.includes('/placeholder-product.png')) {
+                        e.currentTarget.src = '/placeholder-product.png';
+                      }
                                           }}
                                         />
                                       </button>
@@ -1221,7 +1225,9 @@ export default function PurchaseOrdersPage() {
                               alt={item.product_name || 'Product'}
                               className="w-full h-full object-cover"
                               onError={(e) => {
-                                e.currentTarget.src = '/placeholder-product.png';
+                                if (!e.currentTarget.src.includes('/placeholder-product.png')) {
+                        e.currentTarget.src = '/placeholder-product.png';
+                      }
                               }}
                             />
                           </button>
@@ -1390,7 +1396,9 @@ export default function PurchaseOrdersPage() {
                                   alt={p.name}
                                   className="w-full h-full object-cover"
                                   onError={(e) => {
-                                    e.currentTarget.src = '/placeholder-product.png';
+                                    if (!e.currentTarget.src.includes('/placeholder-product.png')) {
+                        e.currentTarget.src = '/placeholder-product.png';
+                      }
                                   }}
                                 />
                               </button>

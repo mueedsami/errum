@@ -104,7 +104,7 @@ export default function NewArrivals() {
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                     onError={(e) => {
                       const target = e.target as HTMLImageElement;
-                      target.src = '/placeholder-product.jpg';
+                      if (!target.src.includes('/placeholder-product.jpg')) { target.src = '/placeholder-product.jpg'; }
                     }}
                   />
 

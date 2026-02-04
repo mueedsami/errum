@@ -457,7 +457,9 @@ export default function ImageGalleryManager({
                     className="w-full h-full object-cover"
                     onError={(e) => {
                       console.error('Image failed to load:', image.preview);
-                      e.currentTarget.src = '/placeholder-image.jpg';
+                      if (!e.currentTarget.src.includes('/placeholder-image.jpg')) {
+                        e.currentTarget.src = '/placeholder-image.jpg';
+                      }
                     }}
                   />
                 </div>

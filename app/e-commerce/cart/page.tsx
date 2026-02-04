@@ -387,7 +387,9 @@ export default function CartPage() {
                           alt={item.product.name}
                           className="w-24 h-24 object-cover rounded"
                           onError={(e) => {
-                            e.currentTarget.src = '/placeholder-product.png';
+                            if (!e.currentTarget.src.includes('/placeholder-product.png')) {
+                        e.currentTarget.src = '/placeholder-product.png';
+                      }
                           }}
                         />
                         <button

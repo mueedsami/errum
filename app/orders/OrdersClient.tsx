@@ -3767,7 +3767,9 @@ const derivePaymentStatus = (order: any) => {
                 alt={imagePreview.name}
                 className="w-full max-h-[70vh] object-contain rounded-lg bg-white dark:bg-black"
                 onError={(e) => {
-                  e.currentTarget.src = '/placeholder-product.png';
+                  if (!e.currentTarget.src.includes('/placeholder-product.png')) {
+                        e.currentTarget.src = '/placeholder-product.png';
+                      }
                 }}
               />
             </div>
@@ -4065,7 +4067,9 @@ const derivePaymentStatus = (order: any) => {
                                       alt={item.name}
                                       className="w-full h-full object-cover"
                                       onError={(e) => {
-                                        e.currentTarget.src = '/placeholder-product.png';
+                                        if (!e.currentTarget.src.includes('/placeholder-product.png')) {
+                        e.currentTarget.src = '/placeholder-product.png';
+                      }
                                       }}
                                     />
                                   </button>
@@ -4614,7 +4618,9 @@ const derivePaymentStatus = (order: any) => {
                             alt={item.name}
                             className="w-12 h-12 rounded-md object-cover border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
                             onError={(e) => {
-                              e.currentTarget.src = '/placeholder-product.png';
+                              if (!e.currentTarget.src.includes('/placeholder-product.png')) {
+                        e.currentTarget.src = '/placeholder-product.png';
+                      }
                             }}
                           />
                           <div className="flex-1">
@@ -4937,7 +4943,9 @@ const derivePaymentStatus = (order: any) => {
                             alt={product.name}
                             className="w-10 h-10 rounded-md object-cover border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
                             onError={(e) => {
-                              e.currentTarget.src = '/placeholder-product.png';
+                              if (!e.currentTarget.src.includes('/placeholder-product.png')) {
+                        e.currentTarget.src = '/placeholder-product.png';
+                      }
                             }}
                           />
                           <div className="min-w-0 flex-1">

@@ -214,7 +214,9 @@ export default function OrderConfirmationPage() {
                       alt={item.product_name}
                       className="w-20 h-20 object-cover rounded"
                       onError={(e) => {
+                        if (!e.currentTarget.src.includes('/placeholder-product.png')) {
                         e.currentTarget.src = '/placeholder-product.png';
+                      }
                       }}
                     />
                   )}

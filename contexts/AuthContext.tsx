@@ -6,8 +6,13 @@ import authService, { LoginCredentials, Employee } from '@/services/authService'
 
 interface AuthContextType {
   user: Employee | null;
+  permissions: string[];
   isLoading: boolean;
   isAuthenticated: boolean;
+  isSuperAdmin: boolean;
+  hasPermission: (permission: string) => boolean;
+  hasAnyPermission: (permissions: string[]) => boolean;
+  hasAllPermissions: (permissions: string[]) => boolean;
   login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -21,6 +26,7 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<Employee | null>(null);
+  const [permissions, setPermissions] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
@@ -67,15 +73,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const employee = await authService.getCurrentUser();
         setUser(employee);
         authService.setUserData(employee);
+
+        const perms = employee?.role?.permissions?.map((p) => p.slug) || [];
+        setPermissions(perms);
       } else {
         // Token is expired or invalid
         authService.clearAuth();
         setUser(null);
+        setPermissions([]);
       }
     } catch (error) {
       console.error('Auth check failed:', error);
       authService.clearAuth();
       setUser(null);
+      setPermissions([]);
     } finally {
       setIsLoading(false);
     }
@@ -87,6 +98,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       await authService.login(credentials);
       const employee = await authService.getCurrentUser();
       setUser(employee);
+      const perms = employee?.role?.permissions?.map((p) => p.slug) || [];
+      setPermissions(perms);
     } catch (error) {
       console.error('Login failed:', error);
       throw error;
@@ -100,6 +113,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       console.error('Logout error:', error);
     } finally {
       setUser(null);
+      setPermissions([]);
       authService.clearAuth();
       router.push('/login');
     }
@@ -110,16 +124,41 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const employee = await authService.getCurrentUser();
       setUser(employee);
       authService.setUserData(employee);
+      const perms = employee?.role?.permissions?.map((p) => p.slug) || [];
+      setPermissions(perms);
     } catch (error) {
       console.error('Refresh user error:', error);
       throw error;
     }
   };
 
+  const roleSlug = user?.role?.slug;
+  const isSuperAdmin = !!roleSlug && ['super-admin', 'super_admin', 'superadmin'].includes(roleSlug);
+
+  const hasPermission = (permission: string) => {
+    if (isSuperAdmin) return true;
+    return permissions.includes(permission);
+  };
+
+  const hasAnyPermission = (perms: string[]) => {
+    if (isSuperAdmin) return true;
+    return perms.some((p) => permissions.includes(p));
+  };
+
+  const hasAllPermissions = (perms: string[]) => {
+    if (isSuperAdmin) return true;
+    return perms.every((p) => permissions.includes(p));
+  };
+
   const value: AuthContextType = {
     user,
+    permissions,
     isLoading,
     isAuthenticated: !!user,
+    isSuperAdmin,
+    hasPermission,
+    hasAnyPermission,
+    hasAllPermissions,
     login,
     logout,
     refreshUser,

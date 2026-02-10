@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import QZTrayLoader from "@/components/QzTrayLoader";
 import ReceiptPreviewModalHost from "@/components/ReceiptPreviewModalHost";
+import GlobalToastHost from "@/components/GlobalToastHost";
 import { CartProvider } from "./e-commerce/CartContext";
 import { AuthProvider } from '@/contexts/AuthContext';
 import "./globals.css";
@@ -33,6 +34,7 @@ export default function RootLayout({
           <CartProvider>
             <QZTrayLoader />
             <ReceiptPreviewModalHost />
+            <GlobalToastHost />
             {children}
           </CartProvider>
         </AuthProvider>

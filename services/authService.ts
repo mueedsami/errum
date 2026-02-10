@@ -49,6 +49,14 @@ export interface Employee {
   is_active: boolean;
   hire_date?: string;
   last_login_at?: string;
+
+  // Permission system (returned by GET /me)
+  role?: {
+    id?: number;
+    title?: string;
+    slug?: string;
+    permissions?: Array<{ id?: number; slug: string; title?: string }>;
+  };
 }
 
 class AuthService {
@@ -228,6 +236,8 @@ class AuthService {
       localStorage.removeItem('authToken');
       localStorage.removeItem('tokenExpiresAt');
       localStorage.removeItem('userRole');
+      localStorage.removeItem('userRoleSlug');
+      localStorage.removeItem('userPermissions');
       localStorage.removeItem('userId');
       localStorage.removeItem('userName');
       localStorage.removeItem('userEmail');
@@ -246,7 +256,18 @@ class AuthService {
       localStorage.setItem('userId', employee.id.toString());
       localStorage.setItem('userName', employee.name);
       localStorage.setItem('userEmail', employee.email);
-      localStorage.setItem('userRole', employee.role_id);
+
+      // Backward compatibility: some UI reads role_id from localStorage
+      // NOTE: role_id is NOT the permission role slug.
+      // @ts-expect-error signup payload may not have role_id or role
+      localStorage.setItem('userRole', (employee as any).role_id ?? '');
+
+      // New permission system: role slug + permission slugs
+      const roleSlug = (employee as any)?.role?.slug;
+      if (roleSlug) localStorage.setItem('userRoleSlug', roleSlug);
+
+      const perms = (employee as any)?.role?.permissions?.map((p: any) => p.slug) || [];
+      localStorage.setItem('userPermissions', JSON.stringify(perms));
       
       if (employee.store_id) {
         localStorage.setItem('storeId', employee.store_id);

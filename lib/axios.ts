@@ -102,6 +102,37 @@ axiosInstance.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
+    // -----------------------------
+    // 403 Forbidden (Permission denied)
+    // Backend now enforces role-based permissions.
+    // We surface a friendly toast globally and still reject for local handlers.
+    // -----------------------------
+    if (error.response?.status === 403) {
+      const message =
+        error.response?.data?.message ||
+        'You do not have permission to perform this action';
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('global-toast', {
+            detail: {
+              message,
+              type: 'error',
+              meta: {
+                required_permissions: error.response?.data?.required_permissions || [],
+              },
+            },
+          })
+        );
+      }
+
+      if (error.response?.data?.required_permissions) {
+        console.warn('Required permissions:', error.response.data.required_permissions);
+      }
+
+      return Promise.reject(error);
+    }
+
     // Don't handle public route errors
     if (isPublicRoute(originalRequest?.url)) {
       if (error.response?.status === 401) {

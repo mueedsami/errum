@@ -17,6 +17,7 @@ import {
   Truck,
   Search,
   History,
+  ShieldCheck,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -72,6 +73,8 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     { prefix: '/transaction', anyOf: ['transactions.view', 'transactions.create', 'transactions.edit'] },
     { prefix: '/accounting', anyOf: ['accounting.view', 'accounting.manage', 'accounts.view', 'transactions.view'] },
     { prefix: '/employees', anyOf: ['employees.view', 'employees.create', 'employees.edit', 'employees.delete', 'employees.manage_roles'] },
+    { prefix: '/roles', anyOf: ['roles.view', 'roles.create', 'roles.edit', 'roles.delete'] },
+    { prefix: '/permissions', anyOf: ['permissions.manage'] },
   ];
 
   const canAccessHref = (href: string) => {
@@ -149,6 +152,15 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     { icon: CreditCard, label: 'Transaction', href: '/transaction' },
     { icon: CreditCard, label: 'Accounting', href: '/accounting' },
     { icon: CreditCard, label: 'Employee Management', href: '/employees' },
+
+    {
+      icon: ShieldCheck,
+      label: 'Access Control',
+      subMenu: [
+        { label: 'Roles', href: '/roles' },
+        { label: 'Permissions', href: '/permissions' },
+      ],
+    },
   ];
 
   // Filter menu items based on permissions

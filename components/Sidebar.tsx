@@ -47,7 +47,7 @@ interface SidebarProps {
 export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const pathname = usePathname();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
-  const { hasAnyPermission, isSuperAdmin, isLoading } = useAuth();
+  const { hasAnyPermission, isSuperAdmin, isLoading, permissionsResolved } = useAuth();
 
   // Map route prefixes to permission slugs (ANY of these grants access)
   // This keeps the sidebar aligned with backend middleware while staying flexible.
@@ -79,7 +79,8 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
 
   const canAccessHref = (href: string) => {
     if (isSuperAdmin) return true;
-    if (isLoading) return true; // avoid flicker on initial load
+    // Avoid hiding everything if permissions aren't available (backend will still enforce 403).
+    if (isLoading || !permissionsResolved) return true;
     const clean = href.split('?')[0];
     const match = ROUTE_PERMISSION_MAP.find((m) => clean === m.prefix || clean.startsWith(m.prefix + '/'));
     if (!match) return true; // no mapping = treat as accessible

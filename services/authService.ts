@@ -50,6 +50,15 @@ export interface Employee {
   hire_date?: string;
   last_login_at?: string;
 
+  // Store relation (loaded by /me in updated backend)
+  store?: {
+    id?: number;
+    name?: string;
+    address?: string;
+    type?: string;
+    is_active?: boolean;
+  };
+
   // Permission system (returned by GET /me)
   role?: {
     id?: number;

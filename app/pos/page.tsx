@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
+import { useAuth } from '@/contexts/AuthContext';
 
 // Services
 import orderService from '@/services/orderService';
@@ -78,6 +79,7 @@ export interface ExtendedCartItem extends CartItem {
 }
 
 export default function POSPage() {
+  const { user, scopedStoreId, canSelectStore } = useAuth();
   // UI State
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -1089,8 +1091,15 @@ export default function POSPage() {
     }
   };
 
-  const fetchOutlets = async (role: string, storeId: string) => {
+  const fetchOutlets = async () => {
     try {
+      // If user is scoped to a single store, avoid fetching all stores.
+      if (scopedStoreId && user?.store) {
+        setOutlets([user.store as any]);
+        setSelectedOutlet(String(scopedStoreId));
+        return;
+      }
+
       const response = await storeService.getStores({ is_active: true });
 
       // ✅ FIXED: Handle response type correctly
@@ -1117,13 +1126,9 @@ export default function POSPage() {
 
       setOutlets(stores);
 
-      if (storeId && stores.length > 0) {
-        const userStore = stores.find(
-          (store: Store) => String(store.id) === String(storeId)
-        );
-        if (userStore) {
-          setSelectedOutlet(String(userStore.id));
-        }
+      if (scopedStoreId && stores.length > 0) {
+        const userStore = stores.find((store: Store) => Number(store.id) === Number(scopedStoreId));
+        if (userStore) setSelectedOutlet(String(userStore.id));
       }
     } catch (error) {
       console.error('Error fetching outlets:', error);
@@ -1304,17 +1309,14 @@ export default function POSPage() {
   // ============ EFFECTS ============
 
   useEffect(() => {
-    const role = localStorage.getItem('userRole') || '';
-    const storeId = localStorage.getItem('storeId') || '';
-    const name = localStorage.getItem('userName') || '';
+    // Keep legacy state fields for UI text, but source them from the auth context.
+    setUserRole(user?.role?.slug || '');
+    setUserName(user?.name || '');
 
-    setUserRole(role);
-    setUserName(name);
-
-    fetchOutlets(role, storeId);
+    fetchOutlets();
     fetchEmployees();
     fetchPaymentMethods();
-  }, []); // ✅ Only run once on mount
+  }, [user?.id]); // run after user loads
 
   // ✅ FIXED: Only fetch products when outlet changes, not on every render
   useEffect(() => {
@@ -1444,7 +1446,11 @@ export default function POSPage() {
                   </label>
                   <select
                     value={selectedOutlet}
-                    onChange={(e) => setSelectedOutlet(e.target.value)}
+                    onChange={(e) => {
+                      if (!canSelectStore && scopedStoreId) return;
+                      setSelectedOutlet(e.target.value);
+                    }}
+                    disabled={!canSelectStore && !!scopedStoreId}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   >
                     <option value="">Choose an Outlet</option>

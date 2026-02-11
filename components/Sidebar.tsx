@@ -79,11 +79,13 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
 
   const canAccessHref = (href: string) => {
     if (isSuperAdmin) return true;
-    // Avoid hiding everything if permissions aren't available (backend will still enforce 403).
-    if (isLoading || !permissionsResolved) return true;
+    // While loading, don't aggressively hide to avoid a flash of empty sidebar.
+    if (isLoading) return true;
     const clean = href.split('?')[0];
     const match = ROUTE_PERMISSION_MAP.find((m) => clean === m.prefix || clean.startsWith(m.prefix + '/'));
     if (!match) return true; // no mapping = treat as accessible
+    // If we couldn't resolve permissions, hide mapped routes (safer default).
+    if (!permissionsResolved) return false;
     return hasAnyPermission(match.anyOf);
   };
 

@@ -8,6 +8,12 @@ import roleService from '@/services/roleService';
 interface AuthContextType {
   user: Employee | null;
   permissions: string[];
+  /** The employee's assigned store (single store in backend Employee model) */
+  storeId?: number;
+  /** If user is restricted to only their store, this equals storeId; otherwise undefined */
+  scopedStoreId?: number;
+  /** True if the user can switch between multiple stores in UI */
+  canSelectStore: boolean;
   /**
    * True when we were able to resolve permissions from the API (or from cache).
    * If false, we avoid hiding the whole sidebar (backend will still enforce 403).
@@ -231,9 +237,17 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return perms.every((p) => permissions.includes(p));
   };
 
+  const storeId = user?.store_id ? Number(user.store_id) : undefined;
+  // Multi-store access heuristic: super admin or has stores.view
+  const canSelectStore = isSuperAdmin || hasPermission('stores.view');
+  const scopedStoreId = canSelectStore ? undefined : storeId;
+
   const value: AuthContextType = {
     user,
     permissions,
+    storeId,
+    scopedStoreId,
+    canSelectStore,
     permissionsResolved,
     isLoading,
     isAuthenticated: !!user,

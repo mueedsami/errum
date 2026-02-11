@@ -263,8 +263,15 @@ class AuthService {
       localStorage.setItem('userRole', (employee as any).role_id ?? '');
 
       // New permission system: role slug + permission slugs
+      // IMPORTANT:
+      // /me may NOT include role/permissions for non-admin users in current backend.
+      // We must NOT keep previous user's cached role/permissions.
       const roleSlug = (employee as any)?.role?.slug;
-      if (roleSlug) localStorage.setItem('userRoleSlug', roleSlug);
+      if (roleSlug) {
+        localStorage.setItem('userRoleSlug', roleSlug);
+      } else {
+        localStorage.removeItem('userRoleSlug');
+      }
 
       const perms = (employee as any)?.role?.permissions?.map((p: any) => p.slug) || [];
       localStorage.setItem('userPermissions', JSON.stringify(perms));

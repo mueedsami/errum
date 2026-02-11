@@ -3,10 +3,16 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import authService, { LoginCredentials, Employee } from '@/services/authService';
+import roleService from '@/services/roleService';
 
 interface AuthContextType {
   user: Employee | null;
   permissions: string[];
+  /**
+   * True when we were able to resolve permissions from the API (or from cache).
+   * If false, we avoid hiding the whole sidebar (backend will still enforce 403).
+   */
+  permissionsResolved: boolean;
   isLoading: boolean;
   isAuthenticated: boolean;
   isSuperAdmin: boolean;
@@ -27,9 +33,85 @@ interface AuthProviderProps {
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<Employee | null>(null);
   const [permissions, setPermissions] = useState<string[]>([]);
+  const [permissionsResolved, setPermissionsResolved] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname();
+
+  const SUPER_ADMIN_SLUGS = ['super-admin', 'super_admin', 'superadmin'];
+
+  const readCachedRoleAndPermissions = () => {
+    if (typeof window === 'undefined') return { roleSlug: undefined as string | undefined, perms: [] as string[] };
+
+    const roleSlug = localStorage.getItem('userRoleSlug') || undefined;
+    let perms: string[] = [];
+    try {
+      const raw = localStorage.getItem('userPermissions');
+      perms = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(perms)) perms = [];
+    } catch {
+      perms = [];
+    }
+    return { roleSlug, perms };
+  };
+
+  /**
+   * Backend reality (from the provided backend zip): GET /me returns Employee model only
+   * (usually without role + permissions). We'll try to resolve role by role_id when possible.
+   *
+   * - Super Admin can always call /roles/{id} due to backend bypass.
+   * - Other users may NOT have roles.view, so the call can 403; in that case we keep sidebar visible
+   *   and rely on backend 403 for protected pages/actions.
+   */
+  const resolveRoleAndPermissions = async (employee: Employee) => {
+    // 1) If /me already contains role + permissions, use it.
+    const apiRoleSlug = employee?.role?.slug;
+    const apiPerms = employee?.role?.permissions?.map((p) => p.slug).filter(Boolean) || [];
+    if (apiRoleSlug) {
+      setPermissions(apiPerms);
+      setPermissionsResolved(true);
+      authService.setUserData(employee);
+      return;
+    }
+
+    // 2) Use cached role/permissions if available
+    const cached = readCachedRoleAndPermissions();
+    if (cached.roleSlug) {
+      setPermissions(cached.perms);
+      setPermissionsResolved(true);
+    }
+
+    // 3) Try resolving via /roles/{role_id} (works at least for super-admin)
+    const roleId = Number((employee as any)?.role_id);
+    if (!Number.isFinite(roleId) || roleId <= 0) {
+      return;
+    }
+
+    try {
+      const res = await roleService.getRole(roleId);
+      const role = res?.data;
+      const roleSlug = role?.slug;
+      const rolePerms = role?.permissions?.map((p) => p.slug).filter(Boolean) || [];
+
+      const merged: Employee = {
+        ...employee,
+        role: {
+          id: role?.id,
+          title: role?.title,
+          slug: roleSlug,
+          permissions: role?.permissions?.map((p) => ({ id: p.id, slug: p.slug, title: p.title })) || [],
+        },
+      };
+
+      setUser(merged);
+      setPermissions(rolePerms);
+      setPermissionsResolved(true);
+      authService.setUserData(merged);
+    } catch (e) {
+      // If user lacks roles.view this can be 403. That's okay.
+      // We keep sidebar visible by not hard-filtering when permissionsResolved is false.
+    }
+  };
 
   // Check if user is authenticated on mount and initialize token refresh
   useEffect(() => {
@@ -72,21 +154,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (authService.isAuthenticated()) {
         const employee = await authService.getCurrentUser();
         setUser(employee);
-        authService.setUserData(employee);
 
-        const perms = employee?.role?.permissions?.map((p) => p.slug) || [];
-        setPermissions(perms);
+        // Resolve role/permissions safely (see resolveRoleAndPermissions)
+        await resolveRoleAndPermissions(employee);
       } else {
         // Token is expired or invalid
         authService.clearAuth();
         setUser(null);
         setPermissions([]);
+        setPermissionsResolved(false);
       }
     } catch (error) {
       console.error('Auth check failed:', error);
       authService.clearAuth();
       setUser(null);
       setPermissions([]);
+      setPermissionsResolved(false);
     } finally {
       setIsLoading(false);
     }
@@ -98,8 +181,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       await authService.login(credentials);
       const employee = await authService.getCurrentUser();
       setUser(employee);
-      const perms = employee?.role?.permissions?.map((p) => p.slug) || [];
-      setPermissions(perms);
+      await resolveRoleAndPermissions(employee);
     } catch (error) {
       console.error('Login failed:', error);
       throw error;
@@ -114,6 +196,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } finally {
       setUser(null);
       setPermissions([]);
+      setPermissionsResolved(false);
       authService.clearAuth();
       router.push('/login');
     }
@@ -123,17 +206,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       const employee = await authService.getCurrentUser();
       setUser(employee);
-      authService.setUserData(employee);
-      const perms = employee?.role?.permissions?.map((p) => p.slug) || [];
-      setPermissions(perms);
+      await resolveRoleAndPermissions(employee);
     } catch (error) {
       console.error('Refresh user error:', error);
       throw error;
     }
   };
 
-  const roleSlug = user?.role?.slug;
-  const isSuperAdmin = !!roleSlug && ['super-admin', 'super_admin', 'superadmin'].includes(roleSlug);
+  const roleSlug = user?.role?.slug || readCachedRoleAndPermissions().roleSlug;
+  const isSuperAdmin = !!roleSlug && SUPER_ADMIN_SLUGS.includes(roleSlug);
 
   const hasPermission = (permission: string) => {
     if (isSuperAdmin) return true;
@@ -153,6 +234,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const value: AuthContextType = {
     user,
     permissions,
+    permissionsResolved,
     isLoading,
     isAuthenticated: !!user,
     isSuperAdmin,

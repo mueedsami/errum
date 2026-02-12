@@ -1094,10 +1094,19 @@ export default function POSPage() {
   const fetchOutlets = async () => {
     try {
       // If user is scoped to a single store, avoid fetching all stores.
-      if (scopedStoreId && user?.store) {
-        setOutlets([user.store as any]);
-        setSelectedOutlet(String(scopedStoreId));
-        return;
+      // Do NOT rely on `user.store` being present (backend may not embed it).
+      if (scopedStoreId) {
+        try {
+          const res: any = await storeService.getStore(Number(scopedStoreId));
+          const storeObj = res?.data ?? res;
+          if (storeObj) {
+            setOutlets([storeObj]);
+            setSelectedOutlet(String(scopedStoreId));
+            return;
+          }
+        } catch {
+          // If the store fetch fails, we'll fall back to filtering the full list below.
+        }
       }
 
       const response = await storeService.getStores({ is_active: true });
@@ -1129,6 +1138,15 @@ export default function POSPage() {
       if (scopedStoreId && stores.length > 0) {
         const userStore = stores.find((store: Store) => Number(store.id) === Number(scopedStoreId));
         if (userStore) setSelectedOutlet(String(userStore.id));
+      }
+
+      // Extra safety: if scoped, force single-store list even if API returned many stores.
+      if (scopedStoreId && stores.length > 0) {
+        const only = stores.filter((s: any) => Number(s.id) === Number(scopedStoreId));
+        if (only.length > 0) {
+          setOutlets(only as any);
+          setSelectedOutlet(String(scopedStoreId));
+        }
       }
     } catch (error) {
       console.error('Error fetching outlets:', error);

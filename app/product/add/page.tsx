@@ -6,6 +6,8 @@ import { ArrowLeft, Plus, Loader2 } from 'lucide-react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import Toast from '@/components/Toast';
+import AccessDenied from '@/components/AccessDenied';
+import { useAuth } from '@/contexts/AuthContext';
 import FieldsSidebar from '@/components/product/FieldsSidebar';
 import DynamicFieldInput from '@/components/product/DynamicFieldInput';
 import VariationCard from '@/components/product/VariationCard';
@@ -43,6 +45,9 @@ export default function AddEditProductPage({
   onSuccess,
 }: AddEditProductPageProps) {
   const router = useRouter();
+  const { hasAnyPermission, hasPermission } = useAuth();
+  const canViewProducts = hasAnyPermission(['products.view', 'products.create', 'products.edit', 'products.delete']);
+  const [modeResolved, setModeResolved] = useState(false);
   
   // Read from sessionStorage if props not provided
   const [productId, setProductId] = useState<string | undefined>(propProductId);
@@ -91,6 +96,7 @@ export default function AddEditProductPage({
         sessionStorage.removeItem('vendorId');
       }
     }
+    setModeResolved(true);
   }, [propProductId]);
 
   const isEditMode = mode === 'edit';
@@ -1346,6 +1352,36 @@ export default function AddEditProductPage({
   const showVariationsTab = isEditMode
     ? Boolean(String(formData.sku || '').trim())
     : hasVariations;
+
+  // Permission gate (UI) — backend still enforces permissions.
+  if (!modeResolved) {
+    return (
+      <div className={`${darkMode ? 'dark' : ''} flex h-screen`}>
+        <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
+        <div className="flex-1 flex flex-col">
+          <Header darkMode={darkMode} setDarkMode={setDarkMode} toggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
+          <main className="flex-1 bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+            <div className="text-center">
+              <div className="w-12 h-12 border-4 border-gray-200 dark:border-gray-700 border-t-gray-900 dark:border-t-white rounded-full animate-spin mx-auto mb-4"></div>
+              <p className="text-gray-600 dark:text-gray-400">Loading...</p>
+            </div>
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  if (!canViewProducts) {
+    return <AccessDenied />;
+  }
+
+  if (isEditMode && !hasPermission('products.edit')) {
+    return <AccessDenied title="You don't have access to edit products" />;
+  }
+
+  if (!isEditMode && !hasPermission('products.create')) {
+    return <AccessDenied title="You don't have access to create products" />;
+  }
 
   return (
     <div className={`${darkMode ? 'dark' : ''} flex h-screen`}>

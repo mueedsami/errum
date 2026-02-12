@@ -238,8 +238,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const storeId = user?.store_id ? Number(user.store_id) : undefined;
-  // Multi-store access heuristic: super admin or has stores.view
-  const canSelectStore = isSuperAdmin || hasPermission('stores.view');
+  /**
+   * Multi-store selection is an ADMIN capability.
+   *
+   * IMPORTANT: Do NOT use `stores.view` to decide multi-store access.
+   * Many store/branch roles legitimately need to view their own store, but must
+   * not be able to switch to other stores in operational pages (POS/Orders/etc).
+   *
+   * Heuristic:
+   * - Super Admin: can select any store
+   * - Roles that can manage stores (create/edit/delete): can select any store
+   * - Everyone else: scoped to their assigned store_id
+   */
+  const canSelectStore = isSuperAdmin || hasAnyPermission(['stores.create', 'stores.edit', 'stores.delete']);
   const scopedStoreId = canSelectStore ? undefined : storeId;
 
   const value: AuthContextType = {

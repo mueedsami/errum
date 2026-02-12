@@ -11,10 +11,10 @@ const ERROR_IMG_SRC =
 
 interface ProductListItemProps {
   productGroup: ProductGroup;
-  onDelete: (id: number) => void;
+  onDelete?: (id: number) => void;
   onEdit?: (id: number) => void;
   onView: (id: number) => void;
-  onAddVariation: (group: ProductGroup) => void;
+  onAddVariation?: (group: ProductGroup) => void;
   onSelect?: (variant: ProductVariant) => void;
   selectable?: boolean;
 }
@@ -28,6 +28,9 @@ export default function ProductListItem({
   onSelect,
   selectable,
 }: ProductListItemProps) {
+  const canEdit = typeof onEdit === 'function';
+  const canDelete = typeof onDelete === 'function';
+  const canAddVariation = typeof onAddVariation === 'function';
   const [showDropdown, setShowDropdown] = useState(false);
   const [showVariations, setShowVariations] = useState(false);
   const [isDropdownMounted, setIsDropdownMounted] = useState(false);
@@ -214,7 +217,7 @@ export default function ProductListItem({
                 >
                   View Details
                 </button>
-                {onEdit && (
+                {canEdit && (
                   <button
                     onClick={() => {
                       onEdit(firstVariant.id);
@@ -226,19 +229,21 @@ export default function ProductListItem({
                     Edit Product
                   </button>
                 )}
-                <div className="my-1 border-t border-gray-200 dark:border-gray-700"></div>
-                <button
-                  onClick={() => {
-                    if (confirm(`Delete ${hasMultipleVariants ? 'all variants of' : ''} "${productGroup.baseName}"?${hasMultipleVariants ? ` This will delete ${productGroup.totalVariants} products.` : ''}`)) {
-                      productGroup.variants.forEach(v => onDelete(v.id));
-                    }
-                    setShowDropdown(false);
-                    setTimeout(() => setIsDropdownMounted(false), 200);
-                  }}
-                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                >
-                  Delete {hasMultipleVariants ? `All (${productGroup.totalVariants})` : ''}
-                </button>
+                {(canDelete) && <div className="my-1 border-t border-gray-200 dark:border-gray-700"></div>}
+                {canDelete && (
+                  <button
+                    onClick={() => {
+                      if (confirm(`Delete ${hasMultipleVariants ? 'all variants of' : ''} "${productGroup.baseName}"?${hasMultipleVariants ? ` This will delete ${productGroup.totalVariants} products.` : ''}`)) {
+                        productGroup.variants.forEach((v) => onDelete?.(v.id));
+                      }
+                      setShowDropdown(false);
+                      setTimeout(() => setIsDropdownMounted(false), 200);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  >
+                    Delete {hasMultipleVariants ? `All (${productGroup.totalVariants})` : ''}
+                  </button>
+                )}
               </div>,
               document.body
             )}
@@ -252,13 +257,15 @@ export default function ProductListItem({
             <h4 className="text-sm font-semibold text-gray-900 dark:text-white">
               Available Variations ({productGroup.totalVariants})
             </h4>
+            {canAddVariation && (
             <button
-              onClick={() => onAddVariation(productGroup)}
+              onClick={() => onAddVariation?.(productGroup)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 transition-colors"
             >
               <Plus className="w-3.5 h-3.5" />
               Add Variation
             </button>
+            )}
           </div>
           
           <div className="space-y-3">
@@ -295,22 +302,26 @@ export default function ProductListItem({
                         {variant.size || 'One Size'}
                       </span>
                       <div className="flex gap-1 ml-auto">
-                        <button
-                          onClick={() => onEdit && onEdit(variant.id)}
-                          className="text-xs text-gray-600 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 font-medium px-2 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
-                        >
-                          <Edit className="w-3 h-3" />
-                        </button>
-                        <button
-                          onClick={() => {
-                            if (confirm(`Delete "${variant.name}"?`)) {
-                              onDelete(variant.id);
-                            }
-                          }}
-                          className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-medium px-2 py-0.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
+                        {canEdit && (
+                          <button
+                            onClick={() => onEdit?.(variant.id)}
+                            className="text-xs text-gray-600 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300 font-medium px-2 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-600 rounded"
+                          >
+                            <Edit className="w-3 h-3" />
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button
+                            onClick={() => {
+                              if (confirm(`Delete "${variant.name}"?`)) {
+                                onDelete?.(variant.id);
+                              }
+                            }}
+                            className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 font-medium px-2 py-0.5 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
                         {onSelect && (
                           <button
                             onClick={() => onSelect(variant)}

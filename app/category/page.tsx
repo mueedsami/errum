@@ -8,9 +8,16 @@ import Sidebar from "@/components/Sidebar";
 import CategoryListItem from "@/components/CategoryListItem";
 import AddCategoryDialog from "@/components/AddCategoryDialog";
 import Toast from "@/components/Toast";
+import AccessDenied from "@/components/AccessDenied";
 import categoryService, { Category } from "@/services/categoryService";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function CategoryPageWrapper() {
+  const { hasAnyPermission, hasPermission } = useAuth();
+  const canView = hasAnyPermission(['categories.view', 'categories.create', 'categories.edit', 'categories.delete']);
+  const canCreate = hasPermission('categories.create');
+  const canEdit = hasPermission('categories.edit');
+  const canDelete = hasPermission('categories.delete');
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -27,6 +34,10 @@ export default function CategoryPageWrapper() {
   useEffect(() => {
     loadCategories();
   }, []);
+
+  if (!canView) {
+    return <AccessDenied />;
+  }
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' | 'warning' = 'success') => {
     setToast({ message, type });
@@ -58,6 +69,10 @@ export default function CategoryPageWrapper() {
   };
 
   const handleDelete = async (id: number) => {
+    if (!canDelete) {
+      showToast("You don't have permission to delete categories", 'warning');
+      return;
+    }
     if (!confirm('Are you sure you want to delete this category?')) return;
     
     try {
@@ -71,6 +86,10 @@ export default function CategoryPageWrapper() {
   };
 
   const handleHardDelete = async (id: number, title: string) => {
+    if (!canDelete) {
+      showToast("You don't have permission to delete categories", 'warning');
+      return;
+    }
     // Extra safety for permanent delete
     const firstConfirm = confirm(
       `Permanently delete "${title}"?\n\nThis cannot be undone.`
@@ -94,12 +113,20 @@ export default function CategoryPageWrapper() {
   };
 
   const handleEdit = (category: Category) => {
+    if (!canEdit) {
+      showToast("You don't have permission to edit categories", 'warning');
+      return;
+    }
     setEditCategory(category);
     setParentId(category.parent_id || null);
     setDialogOpen(true);
   };
 
   const handleAddSubcategory = (parentId: number) => {
+    if (!canCreate) {
+      showToast("You don't have permission to create categories", 'warning');
+      return;
+    }
     setParentId(parentId);
     setEditCategory(null);
     setDialogOpen(true);
@@ -107,6 +134,14 @@ export default function CategoryPageWrapper() {
 
   const handleSave = async (formData: FormData) => {
     try {
+      if (editCategory && !canEdit) {
+        showToast("You don't have permission to edit categories", 'warning');
+        return;
+      }
+      if (!editCategory && !canCreate) {
+        showToast("You don't have permission to create categories", 'warning');
+        return;
+      }
       if (editCategory) {
         await categoryService.update(editCategory.id, formData);
         showToast('Category updated successfully!', 'success');
@@ -171,17 +206,19 @@ export default function CategoryPageWrapper() {
                     Manage your product categories and subcategories
                   </p>
                 </div>
-                <button
-                  onClick={() => {
-                    setEditCategory(null);
-                    setParentId(null);
-                    setDialogOpen(true);
-                  }}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors text-sm font-medium"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add Category
-                </button>
+                {canCreate && (
+                  <button
+                    onClick={() => {
+                      setEditCategory(null);
+                      setParentId(null);
+                      setDialogOpen(true);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors text-sm font-medium"
+                  >
+                    <Plus className="w-4 h-4" />
+                    Add Category
+                  </button>
+                )}
               </div>
 
               <div className="flex items-center gap-3">
@@ -214,10 +251,10 @@ export default function CategoryPageWrapper() {
                   <CategoryListItem
                     key={category.id}
                     category={category}
-                    onDelete={handleDelete}
-                    onHardDelete={handleHardDelete}
-                    onEdit={handleEdit}
-                    onAddSubcategory={handleAddSubcategory}
+                    onDelete={canDelete ? handleDelete : undefined}
+                    onHardDelete={canDelete ? handleHardDelete : undefined}
+                    onEdit={canEdit ? handleEdit : undefined}
+                    onAddSubcategory={canCreate ? handleAddSubcategory : undefined}
                   />
                 ))}
               </div>

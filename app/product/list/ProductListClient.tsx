@@ -11,6 +11,8 @@ import categoryService, { Category } from '@/services/categoryService';
 import { vendorService, Vendor } from '@/services/vendorService';
 import catalogService from '@/services/catalogService';
 import Toast from '@/components/Toast';
+import AccessDenied from '@/components/AccessDenied';
+import { useAuth } from '@/contexts/AuthContext';
 
 import {
   ProductVariant,
@@ -18,6 +20,11 @@ import {
 } from '@/types/product';
 
 export default function ProductPage() {
+  const { hasAnyPermission, hasPermission } = useAuth();
+  const canViewProducts = hasAnyPermission(['products.view', 'products.create', 'products.edit', 'products.delete']);
+  const canCreateProducts = hasPermission('products.create');
+  const canEditProducts = hasPermission('products.edit');
+  const canDeleteProducts = hasPermission('products.delete');
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -46,6 +53,10 @@ export default function ProductPage() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const itemsPerPage = 10;
+
+  if (!canViewProducts) {
+    return <AccessDenied />;
+  }
 
   const updateQueryParams = useCallback(
     (updates: Record<string, string | null | undefined>) => {
@@ -547,6 +558,10 @@ const goToPage = useCallback(
   }, [paginatedGroups, catalogMetaById]);
 
   const handleDelete = async (id: number) => {
+    if (!canDeleteProducts) {
+      setToast({ message: "You don't have permission to delete products", type: 'warning' });
+      return;
+    }
     try {
       await productService.delete(id);
       setProducts((prev) => prev.filter((p) => p.id !== id));
@@ -561,6 +576,10 @@ const goToPage = useCallback(
   };
 
   const handleEdit = (id: number) => {
+    if (!canEditProducts) {
+      setToast({ message: "You don't have permission to edit products", type: 'warning' });
+      return;
+    }
     // Clear any existing session data
     sessionStorage.removeItem('editProductId');
     sessionStorage.removeItem('productMode');
@@ -580,6 +599,10 @@ const goToPage = useCallback(
   };
 
   const handleAdd = () => {
+    if (!canCreateProducts) {
+      setToast({ message: "You don't have permission to create products", type: 'warning' });
+      return;
+    }
     // Clear any stored data to ensure create mode
     sessionStorage.removeItem('editProductId');
     sessionStorage.removeItem('productMode');
@@ -591,6 +614,10 @@ const goToPage = useCallback(
   };
 
   const handleAddVariation = (group: ProductGroup) => {
+    if (!canCreateProducts) {
+      setToast({ message: "You don't have permission to create product variations", type: 'warning' });
+      return;
+    }
     // Clear any existing session data
     sessionStorage.removeItem('editProductId');
     sessionStorage.removeItem('productMode');
@@ -708,7 +735,7 @@ const goToPage = useCallback(
                     )}
 
                     {/* Add Product Button */}
-                    {!selectMode && (
+                    {!selectMode && canCreateProducts && (
                       <button
                         onClick={handleAdd}
                         className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors font-medium shadow-sm"
@@ -915,7 +942,7 @@ const goToPage = useCallback(
                     >
                       Clear Filters
                     </button>
-                  ) : !selectMode && (
+                  ) : (!selectMode && canCreateProducts) && (
                     <button
                       onClick={handleAdd}
                       className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors font-medium"
@@ -936,10 +963,10 @@ const goToPage = useCallback(
                         inStock: group.variants?.[0]?.id ? catalogMetaById[group.variants[0].id]?.in_stock ?? null : null,
                         stockQuantity: group.variants?.[0]?.id ? catalogMetaById[group.variants[0].id]?.stock_quantity ?? null : null,
                       }}
-                      onDelete={handleDelete}
-                      onEdit={handleEdit}
+                      onDelete={canDeleteProducts ? handleDelete : undefined}
+                      onEdit={canEditProducts ? handleEdit : undefined}
                       onView={handleView}
-                      onAddVariation={handleAddVariation}
+                      onAddVariation={canCreateProducts ? handleAddVariation : undefined}
                       {...(selectMode && { onSelect: handleSelect })}
                       selectable={selectMode}
                     />

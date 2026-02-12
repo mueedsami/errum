@@ -71,6 +71,79 @@ axiosInstance.interceptors.request.use(
           console.log('🔒 Admin route, adding admin auth:', config.url);
         }
       }
+
+      // -----------------------------
+      // Store-scoped access
+      // -----------------------------
+      // Branch roles should only operate within their assigned store_id.
+      // Admin/Super Admin can see all stores.
+      // We enforce this by automatically injecting `store_id` into requests
+      // for store-scoped resources when the user is scoped.
+      try {
+        const url = String(config.url || '');
+        const method = String(config.method || 'get').toLowerCase();
+
+        // Only apply to admin/store routes (NOT customer routes) and non-public routes.
+        if (!isCustomerRoute(url) && !isPublicRoute(url)) {
+          const roleSlug = localStorage.getItem('userRoleSlug') || '';
+
+          // Super admin + admin are global (can see all stores)
+          const GLOBAL_ROLE_SLUGS = ['super-admin', 'super_admin', 'superadmin', 'admin', 'administrator'];
+          const isGlobalRole = GLOBAL_ROLE_SLUGS.includes(roleSlug);
+
+          // If role slug missing, fall back to permissions heuristic.
+          let perms: string[] = [];
+          try {
+            const raw = localStorage.getItem('userPermissions');
+            perms = raw ? JSON.parse(raw) : [];
+            if (!Array.isArray(perms)) perms = [];
+          } catch {
+            perms = [];
+          }
+
+          const hasAny = (p: string[]) => p.some((x) => perms.includes(x));
+          const canSelectStore = isGlobalRole || hasAny(['stores.create', 'stores.edit', 'stores.delete']);
+          const storeIdRaw = localStorage.getItem('storeId');
+          const storeId = storeIdRaw ? Number(storeIdRaw) : undefined;
+          const scopedStoreId = (!canSelectStore && storeId && Number.isFinite(storeId)) ? storeId : undefined;
+
+          // Only inject into these store-scoped resources.
+          const STORE_SCOPED_PREFIXES = [
+            '/orders',
+            '/purchase-orders',
+            '/transactions',
+            '/accounts',
+            '/expenses',
+            '/business-history',
+          ];
+
+          const isStoreScopedEndpoint = STORE_SCOPED_PREFIXES.some((p) => url.startsWith(p));
+
+          if (scopedStoreId && isStoreScopedEndpoint) {
+            // GET/DELETE: inject via query params
+            if (method === 'get' || method === 'delete') {
+              config.params = { ...(config.params || {}), store_id: scopedStoreId };
+            }
+
+            // POST/PATCH/PUT: inject into body (also keep params for safety)
+            if (method === 'post' || method === 'put' || method === 'patch') {
+              const data: any = config.data && typeof config.data === 'string'
+                ? (() => {
+                    try { return JSON.parse(config.data as any); } catch { return {}; }
+                  })()
+                : (config.data || {});
+
+              // Never allow branch users to override store_id to another store.
+              data.store_id = scopedStoreId;
+
+              config.data = typeof config.data === 'string' ? JSON.stringify(data) : data;
+              config.params = { ...(config.params || {}), store_id: scopedStoreId };
+            }
+          }
+        }
+      } catch {
+        // no-op
+      }
     }
     return config;
   },

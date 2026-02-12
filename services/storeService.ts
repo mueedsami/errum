@@ -56,6 +56,40 @@ class StoreService {
     sort_direction?: string;
     per_page?: number;
   }) {
+    // Store-scoped users should only ever see their assigned store.
+    // We resolve the assigned store_id from localStorage (set on login).
+    try {
+      if (typeof window !== 'undefined') {
+        const roleSlug = localStorage.getItem('userRoleSlug') || '';
+        const GLOBAL_ROLE_SLUGS = ['super-admin', 'super_admin', 'superadmin', 'admin', 'administrator'];
+        const isGlobalRole = GLOBAL_ROLE_SLUGS.includes(roleSlug);
+
+        let perms: string[] = [];
+        try {
+          const raw = localStorage.getItem('userPermissions');
+          perms = raw ? JSON.parse(raw) : [];
+          if (!Array.isArray(perms)) perms = [];
+        } catch {
+          perms = [];
+        }
+
+        const hasAny = (p: string[]) => p.some((x) => perms.includes(x));
+        const canSelectStore = isGlobalRole || hasAny(['stores.create', 'stores.edit', 'stores.delete']);
+        const storeIdRaw = localStorage.getItem('storeId');
+        const storeId = storeIdRaw ? Number(storeIdRaw) : undefined;
+        const scopedStoreId = (!canSelectStore && storeId && Number.isFinite(storeId)) ? storeId : undefined;
+
+        if (scopedStoreId) {
+          const single = await axios.get(`/stores/${scopedStoreId}`);
+          const store = single.data?.data || single.data;
+          // Normalize to list shape used by store dropdowns.
+          return { success: true, data: [store] };
+        }
+      }
+    } catch {
+      // fall through
+    }
+
     const response = await axios.get('/stores', { params });
     return response.data;
   }

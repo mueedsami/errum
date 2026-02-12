@@ -48,6 +48,7 @@ import refundService, { type CreateRefundRequest } from '@/services/refundServic
 
 import shipmentService from '@/services/shipmentService';
 import { checkQZStatus, printReceipt, printBulkReceipts, getPrinters, savePreferredPrinter } from '@/lib/qz-tray';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Order {
   id: number;
@@ -291,6 +292,7 @@ type PathaoZone = { zone_id: number; zone_name: string };
 type PathaoArea = { area_id: number; area_name: string };
 
 export default function OrdersDashboard() {
+  const { scopedStoreId } = useAuth();
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -1055,6 +1057,7 @@ const derivePaymentStatus = (order: any) => {
           sort_by: 'created_at',
           sort_order: 'desc',
           per_page: 1000,
+          ...(scopedStoreId ? { store_id: scopedStoreId } : {}),
         });
 
         allOrders = inst.data || [];
@@ -1065,12 +1068,14 @@ const derivePaymentStatus = (order: any) => {
             sort_by: 'created_at',
             sort_order: 'desc',
             per_page: 1000,
+            ...(scopedStoreId ? { store_id: scopedStoreId } : {}),
           }),
           orderService.getAll({
             order_type: 'ecommerce',
             sort_by: 'created_at',
             sort_order: 'desc',
             per_page: 1000,
+            ...(scopedStoreId ? { store_id: scopedStoreId } : {}),
           }),
         ]);
 

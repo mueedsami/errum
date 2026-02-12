@@ -1462,22 +1462,31 @@ export default function POSPage() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Outlet <span className="text-red-500">*</span>
                   </label>
-                  <select
-                    value={selectedOutlet}
-                    onChange={(e) => {
-                      if (!canSelectStore && scopedStoreId) return;
-                      setSelectedOutlet(e.target.value);
-                    }}
-                    disabled={!canSelectStore && !!scopedStoreId}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  >
-                    <option value="">Choose an Outlet</option>
-                    {outlets.map((outlet) => (
-                      <option key={outlet.id} value={outlet.id}>
-                        {outlet.name} - {outlet.address}
-                      </option>
-                    ))}
-                  </select>
+                  {!canSelectStore && scopedStoreId ? (
+                    <input
+                      type="text"
+                      readOnly
+                      value={
+                        outlets.find((o) => String(o.id) === String(selectedOutlet))
+                          ? `${outlets.find((o) => String(o.id) === String(selectedOutlet))?.name ?? ''} - ${outlets.find((o) => String(o.id) === String(selectedOutlet))?.address ?? ''}`
+                          : 'Outlet'
+                      }
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  ) : (
+                    <select
+                      value={selectedOutlet}
+                      onChange={(e) => setSelectedOutlet(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    >
+                      <option value="">Choose an Outlet</option>
+                      {outlets.map((outlet) => (
+                        <option key={outlet.id} value={outlet.id}>
+                          {outlet.name} - {outlet.address}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                 </div>
 
                 <div>

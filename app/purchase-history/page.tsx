@@ -12,6 +12,8 @@ import ReturnProductModal from '@/components/sales/ReturnProductModal';
 import ExchangeProductModal from '@/components/sales/ExchangeProductModal';
 import axiosInstance from '@/lib/axios';
 import { checkQZStatus, printReceipt } from '@/lib/qz-tray';
+import { useAuth } from '@/contexts/AuthContext';
+import storeService from '@/services/storeService';
 
 interface OrderItem {
   id: number;
@@ -83,6 +85,7 @@ interface Store {
 }
 
 export default function PurchaseHistoryPage() {
+  const { user, scopedStoreId, canSelectStore } = useAuth();
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -95,6 +98,7 @@ export default function PurchaseHistoryPage() {
   const [loadingDetails, setLoadingDetails] = useState<number | null>(null);
   const [errorDetails, setErrorDetails] = useState<{ [key: number]: string }>({});
   const [loading, setLoading] = useState(true);
+  // Legacy state kept for minimal refactor
   const [userRole, setUserRole] = useState<string>('');
   const [userStoreId, setUserStoreId] = useState<string>('');
   const [activeMenu, setActiveMenu] = useState<number | null>(null);
@@ -106,33 +110,32 @@ export default function PurchaseHistoryPage() {
   const [selectedOrderForAction, setSelectedOrderForAction] = useState<Order | null>(null);
 
   useEffect(() => {
-    const role = localStorage.getItem('userRole') || '';
-    const storeId = localStorage.getItem('storeId') || '';
-    setUserRole(role);
+    const roleSlug = user?.role?.slug || '';
+    const storeId = scopedStoreId ? String(scopedStoreId) : (user?.store_id || '');
+    setUserRole(roleSlug);
     setUserStoreId(storeId);
-    
-    if (role === 'store_manager' && storeId) {
+
+    if (storeId && !canSelectStore) {
       setSelectedStore(storeId);
     }
-    
-    fetchOrders(role, storeId);
-    fetchStores(role, storeId);
-  }, []);
 
-  const fetchOrders = async (role?: string, storeId?: string) => {
+    fetchOrders();
+    fetchStores();
+  }, [user?.id, scopedStoreId, selectedStore]);
+
+  const fetchOrders = async () => {
     try {
       setLoading(true);
-      
-      const resolvedRole = (role ?? localStorage.getItem('userRole')) || '';
-      const resolvedStoreId = (storeId ?? localStorage.getItem('storeId')) || '';
-      
       const filters: OrderFilters = {
         order_type: 'counter',
         per_page: 50,
       };
-      
-      if (resolvedRole === 'store_manager' && resolvedStoreId) {
-        filters.store_id = parseInt(resolvedStoreId);
+      // Enforce store scoping for branch/store roles
+      if (scopedStoreId) {
+        filters.store_id = scopedStoreId;
+      } else if (selectedStore) {
+        // Admins can optionally filter by store from the dropdown
+        filters.store_id = Number(selectedStore);
       }
       
       const result = await orderService.getAll(filters);
@@ -146,29 +149,45 @@ export default function PurchaseHistoryPage() {
     }
   };
 
-  const fetchStores = async (role?: string, storeId?: string) => {
+  const fetchStores = async () => {
     try {
-      const resolvedRole = (role ?? localStorage.getItem('userRole')) || '';
-      const resolvedStoreId = (storeId ?? localStorage.getItem('storeId')) || '';
-      
+      // If store-scoped, only show user's assigned store in dropdown.
+      if (scopedStoreId) {
+        try {
+          const res: any = await storeService.getStore(Number(scopedStoreId));
+          const storeObj = res?.data ?? res;
+          if (storeObj) {
+            setStores([
+              {
+                id: storeObj.id,
+                name: storeObj.name,
+                location: storeObj.address || storeObj.location || '',
+              },
+            ]);
+            return;
+          }
+        } catch {
+          // fallback below
+        }
+      }
+
+      // If user can't select stores, don't show any store dropdown options.
+      if (!canSelectStore) {
+        setStores([]);
+        return;
+      }
+
       const response = await axiosInstance.get('/stores');
       const result = response.data;
-      
+
       let storesData: Store[] = [];
-      if (result.success && Array.isArray(result.data)) {
+      if (result?.success && Array.isArray(result.data)) {
         storesData = result.data;
       } else if (Array.isArray(result)) {
         storesData = result;
       }
-      
-      if (resolvedRole === 'store_manager' && resolvedStoreId) {
-        const userStore = storesData.find(store => 
-          store.id === parseInt(resolvedStoreId)
-        );
-        setStores(userStore ? [userStore] : []);
-      } else {
-        setStores(storesData);
-      }
+
+      setStores(storesData);
     } catch (error) {
       console.error('Failed to fetch stores:', error);
       setStores([]);
@@ -665,19 +684,31 @@ export default function PurchaseHistoryPage() {
                     />
                   </div>
                   
-                  <select
-                    value={selectedStore}
-                    onChange={(e) => setSelectedStore(e.target.value)}
-                    disabled={userRole === 'store_manager'}
-                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:dark:bg-gray-600"
-                  >
-                    <option value="">All Stores</option>
-                    {stores.map((store) => (
-                      <option key={store.id} value={store.id}>
-                        {store.name} - {store.location}
-                      </option>
-                    ))}
-                  </select>
+                  {!canSelectStore && scopedStoreId ? (
+                    <input
+                      type="text"
+                      readOnly
+                      value={
+                        stores.find((s) => String(s.id) === String(selectedStore))
+                          ? `${stores.find((s) => String(s.id) === String(selectedStore))?.name ?? ''} - ${stores.find((s) => String(s.id) === String(selectedStore))?.location ?? ''}`
+                          : 'My Store'
+                      }
+                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white text-sm"
+                    />
+                  ) : (
+                    <select
+                      value={selectedStore}
+                      onChange={(e) => setSelectedStore(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="">All Stores</option>
+                      {stores.map((store) => (
+                        <option key={store.id} value={store.id}>
+                          {store.name} - {store.location}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   
                   <input
                     type="date"

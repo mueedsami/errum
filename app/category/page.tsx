@@ -13,7 +13,7 @@ import categoryService, { Category } from "@/services/categoryService";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function CategoryPageWrapper() {
-  const { hasAnyPermission, hasPermission } = useAuth();
+  const { hasAnyPermission, hasPermission, permissionsResolved } = useAuth();
   const canView = hasAnyPermission(['categories.view', 'categories.create', 'categories.edit', 'categories.delete']);
   const canCreate = hasPermission('categories.create');
   const canEdit = hasPermission('categories.edit');
@@ -35,7 +35,9 @@ export default function CategoryPageWrapper() {
     loadCategories();
   }, []);
 
-  if (!canView) {
+  // If permissions are not yet reliably resolved (e.g. /me missing role.permissions),
+  // do NOT block the page. Backend will still enforce 403 on actions.
+  if (permissionsResolved && !canView) {
     return <AccessDenied />;
   }
 

@@ -20,7 +20,7 @@ import {
 } from '@/types/product';
 
 export default function ProductPage() {
-  const { hasAnyPermission, hasPermission } = useAuth();
+  const { hasAnyPermission, hasPermission, permissionsResolved } = useAuth();
   const canViewProducts = hasAnyPermission(['products.view', 'products.create', 'products.edit', 'products.delete']);
   const canCreateProducts = hasPermission('products.create');
   const canEditProducts = hasPermission('products.edit');
@@ -54,7 +54,9 @@ export default function ProductPage() {
   const [showFilters, setShowFilters] = useState(false);
   const itemsPerPage = 10;
 
-  if (!canViewProducts) {
+  // If permissions are not yet reliably resolved from the API (common when /me does not
+  // include role.permissions), do NOT block the page. Backend will still enforce 403.
+  if (permissionsResolved && !canViewProducts) {
     return <AccessDenied />;
   }
 

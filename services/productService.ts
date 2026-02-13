@@ -153,7 +153,7 @@ export const productService = {
       // Prefer employee-scoped endpoints when available; fallback keeps backward compatibility.
       let response;
       try {
-        response = await axiosInstance.get('/employee/products', { params });
+        response = await axiosInstance.get('/products', { params });
       } catch (e: any) {
         if (e?.response?.status === 404) {
           response = await axiosInstance.get('/products', { params });
@@ -212,7 +212,7 @@ export const productService = {
     try {
       let response;
       try {
-        response = await axiosInstance.get(`/employee/products/${id}`);
+        response = await axiosInstance.get(`/products/${id}`);
       } catch (e: any) {
         if (e?.response?.status === 404) {
           response = await axiosInstance.get(`/products/${id}`);
@@ -231,13 +231,13 @@ export const productService = {
 
   /**
    * Get all products that share the same SKU as this product (SKU group / variations group)
-   * API: GET /api/employee/products/{id}/sku-group
+   * API: GET /api/products/{id}/sku-group
    */
   async getSkuGroup(id: number | string): Promise<SkuGroupResponse> {
     try {
       let response;
       try {
-        response = await axiosInstance.get(`/employee/products/${id}/sku-group`);
+        response = await axiosInstance.get(`/products/${id}/sku-group`);
       } catch (e: any) {
         // Some deployments may expose this without the /employee prefix
         if (e?.response?.status === 404) {
@@ -272,13 +272,13 @@ export const productService = {
 
   /**
    * Magic common edit: update base_name (and optional common fields) for ALL products in a SKU group
-   * API: PUT /api/employee/products/{id}/common-info
+   * API: PUT /api/products/{id}/common-info
    */
   async updateCommonInfo(id: number | string, data: UpdateCommonInfoRequest): Promise<any> {
     try {
       let response;
       try {
-        response = await axiosInstance.put(`/employee/products/${id}/common-info`, data, {
+        response = await axiosInstance.put(`/products/${id}/common-info`, data, {
           headers: { 'Content-Type': 'application/json' },
         });
       } catch (e: any) {
@@ -302,7 +302,7 @@ export const productService = {
     try {
       let response;
       try {
-        response = await axiosInstance.post('/employee/products', data, {
+        response = await axiosInstance.post('/products', data, {
           headers: { 'Content-Type': 'application/json' },
         });
       } catch (e: any) {
@@ -354,7 +354,7 @@ export const productService = {
     try {
       let response;
       try {
-        response = await axiosInstance.put(`/employee/products/${id}`, data, {
+        response = await axiosInstance.put(`/products/${id}`, data, {
           headers: { 'Content-Type': 'application/json' },
         });
       } catch (e: any) {

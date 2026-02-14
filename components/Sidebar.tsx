@@ -56,6 +56,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     { prefix: '/vendor', anyOf: ['vendors.view', 'vendor_payments.view', 'vendor_payments.manage'] },
     { prefix: '/purchase-order', anyOf: ['purchase_orders.view', 'purchase_orders.create', 'purchase_orders.edit', 'purchase_orders.approve', 'purchase_orders.receive'] },
     { prefix: '/store', anyOf: ['stores.view', 'stores.create', 'stores.edit', 'stores.delete'] },
+    { prefix: '/store-assingment', anyOf: ['stores.view', 'stores.create', 'stores.edit', 'stores.delete'] },
     { prefix: '/category', anyOf: ['categories.view', 'categories.create', 'categories.edit', 'categories.delete'] },
     { prefix: '/gallery', anyOf: ['products.view', 'products.manage_images'] },
     { prefix: '/product', anyOf: ['products.view', 'products.create', 'products.edit', 'products.delete', 'fields.view', 'product_batches.view', 'products.manage_barcodes'] },
@@ -111,6 +112,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       ],
     },
     { icon: Store, label: 'Store', href: '/store' },
+    { icon: Store, label: 'Store Assignment', href: '/store-assingment' },
     { icon: FolderTree, label: 'Category', href: '/category' },
     { icon: Image, label: 'Gallery', href: '/gallery' },
     {
@@ -148,7 +150,6 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     { icon: Package, label: 'Orders', href: '/orders' },
     { icon: CreditCard, label: 'Installments', href: '/orders?view=installments' },
     { icon: Package, label: 'Online Order Packing', href: '/social-commerce/package' },
-    { icon: Package, label: 'Store assignment', href: '/store-assignment' },
     { icon: Package, label: 'PreOrders', href: '/preorders' },
     { icon: AlertTriangle, label: 'Extra Panel', href: '/extra' },
     { icon: Search, label: 'Lookup', href: '/lookup' },

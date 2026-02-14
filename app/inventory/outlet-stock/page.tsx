@@ -18,6 +18,13 @@ interface Toast {
   type: 'success' | 'error';
 }
 
+function parseAmount(value: unknown): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  const normalized = String(value ?? '').replace(/[^\d.-]/g, '');
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
 export default function DispatchManagementPage() {
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -564,7 +571,7 @@ export default function DispatchManagementPage() {
                               )}
                             </td>
                             <td className="px-4 py-2 text-gray-900 dark:text-white">
-                              ৳{parseFloat(item.total_value).toLocaleString()}
+                              ৳{parseAmount(item.total_value).toLocaleString()}
                             </td>
                           </tr>
                         ))}

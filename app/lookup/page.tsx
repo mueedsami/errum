@@ -9,10 +9,256 @@ import customerService, { Customer, CustomerOrder } from '@/services/customerSer
 import orderService from '@/services/orderService';
 import batchService, { Batch } from '@/services/batchService';
 import barcodeTrackingService from '@/services/barcodeTrackingService';
-import lookupService from '@/services/lookupService';
+import lookupService, { LookupProductData } from '@/services/lookupService';
 import purchaseOrderService from '@/services/purchase-order.service';
+import productImageService from '@/services/productImageService';
 import storeService, { Store } from '@/services/storeService';
 import { connectQZ, getDefaultPrinter } from '@/lib/qz-tray';
+import BatchPrinter from "@/components/BatchPrinter";
+
+// -----------------------
+// QZ + barcode label rendering (same configuration as BatchPrinter)
+// -----------------------
+
+// Global QZ connection state to prevent multiple connection attempts
+let qzConnectionPromise: Promise<void> | null = null;
+let qzConnected = false;
+
+async function ensureQZConnection() {
+  const qz = (window as any).qz;
+  if (!qz) {
+    throw new Error("QZ Tray not available");
+  }
+
+  // If already connected, return immediately
+  if (qzConnected && (await qz.websocket.isActive())) {
+    return;
+  }
+
+  // If connection is in progress, wait for it
+  if (qzConnectionPromise) {
+    return qzConnectionPromise;
+  }
+
+  // Start new connection
+  qzConnectionPromise = (async () => {
+    try {
+      if (!(await qz.websocket.isActive())) {
+        await qz.websocket.connect();
+        qzConnected = true;
+        console.log("✅ QZ Tray connected");
+      }
+    } catch (error) {
+      console.error("❌ QZ Tray connection failed:", error);
+      throw error;
+    } finally {
+      qzConnectionPromise = null;
+    }
+  })();
+
+  return qzConnectionPromise;
+}
+
+// Label geometry (match BatchPrinter)
+const LABEL_WIDTH_MM = 39;
+const LABEL_HEIGHT_MM = 25;
+const DEFAULT_DPI = 300; // set to 203 for 203dpi printers
+const TOP_GAP_MM = 1; // extra blank gap at the very top
+const SHIFT_X_MM = 0; // keep 0 for perfect centering
+
+function mmToIn(mm: number) {
+  return mm / 25.4;
+}
+
+async function ensureJsBarcode() {
+  // QzTrayLoader loads JsBarcode globally, but keep a fallback for safety.
+  if (typeof window === "undefined") return;
+  if ((window as any).JsBarcode) return;
+
+  await new Promise<void>((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js";
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error("Failed to load JsBarcode"));
+    document.head.appendChild(s);
+  });
+}
+
+function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+  const ellipsis = "…";
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let t = text;
+  while (t.length > 0 && ctx.measureText(t + ellipsis).width > maxWidth) t = t.slice(0, -1);
+  return t.length ? t + ellipsis : "";
+}
+
+function wrapTwoLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): [string, string] {
+  const clean = String(text || "").trim().replace(/\s+/g, " ");
+  if (!clean) return ["", ""];
+  if (ctx.measureText(clean).width <= maxWidth) return [clean, ""];
+
+  const words = clean.split(" ");
+  if (words.length <= 1) {
+    // No spaces; split by characters
+    let line1 = clean;
+    while (line1.length > 0 && ctx.measureText(line1).width > maxWidth) line1 = line1.slice(0, -1);
+    const rest = clean.slice(line1.length).trim();
+    if (!rest) return [fitText(ctx, clean, maxWidth), ""];
+    return [line1, fitText(ctx, rest, maxWidth)];
+  }
+
+  // Build first line word-by-word
+  let line1 = "";
+  let i = 0;
+  for (; i < words.length; i++) {
+    const test = line1 ? `${line1} ${words[i]}` : words[i];
+    if (ctx.measureText(test).width <= maxWidth) {
+      line1 = test;
+    } else {
+      break;
+    }
+  }
+
+  if (!line1) return [fitText(ctx, clean, maxWidth), ""];
+
+  const line2Raw = words.slice(i).join(" ").trim();
+  const line2 = line2Raw ? fitText(ctx, line2Raw, maxWidth) : "";
+  return [line1, line2];
+}
+
+function normalizeLabelName(text: string) {
+  const clean = (text || "").trim().replace(/\s+/g, " ");
+  if (!clean) return "";
+
+  // Normalize separators so wrap logic can break naturally on spaces
+  // Example: "Mueed-ta-40" -> "Mueed - ta - 40"
+  return clean.replace(/\s*[-–—]\s*/g, " - ");
+}
+
+async function renderLabelBase64(opts: { code: string; productName: string; price: number; dpi?: number }) {
+  await ensureJsBarcode();
+
+  const dpi = opts.dpi ?? DEFAULT_DPI;
+  const wIn = mmToIn(LABEL_WIDTH_MM);
+  const hIn = mmToIn(LABEL_HEIGHT_MM);
+  const wPx = Math.max(50, Math.round(wIn * dpi));
+  const hPx = Math.max(50, Math.round(hIn * dpi));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = wPx;
+  canvas.height = hPx;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas not supported");
+
+  ctx.imageSmoothingEnabled = false;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, wPx, hPx);
+
+  const pad = Math.round(wPx * 0.04);
+  const topGapPx = Math.round((TOP_GAP_MM / 25.4) * dpi);
+  const shiftPx = Math.round((SHIFT_X_MM / 25.4) * dpi);
+
+  const centerX = wPx / 2 + shiftPx;
+  const topPad = pad + topGapPx;
+
+  // Brand
+  ctx.fillStyle = "#000";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  ctx.font = `800 ${Math.round(hPx * 0.11)}px Arial`;
+  ctx.fillText("Deshio", centerX, topPad);
+
+  // Product name (match BatchPrinter)
+  const nameY = topPad + Math.round(hPx * 0.14);
+  const nameMaxW = wPx - pad * 2;
+  const lineGap = Math.max(2, Math.round(hPx * 0.01));
+  const fullName = normalizeLabelName(opts.productName || "Product");
+
+  let name1 = "";
+  let name2 = "";
+  let afterNameY = 0;
+
+  let nameFont = Math.round(hPx * 0.095);
+  ctx.font = `700 ${nameFont}px Arial`;
+
+  [name1, name2] = wrapTwoLines(ctx, fullName, nameMaxW);
+
+  // If it needs 2 lines, shrink a bit for safety
+  if (name2) {
+    nameFont = Math.round(hPx * 0.082);
+    ctx.font = `700 ${nameFont}px Arial`;
+    [name1, name2] = wrapTwoLines(ctx, fullName, nameMaxW);
+  }
+
+  ctx.fillText(name1, centerX, nameY);
+  let afterBottom = nameY + nameFont;
+
+  if (name2) {
+    ctx.fillText(name2, centerX, nameY + nameFont + lineGap);
+    afterBottom = nameY + (nameFont + lineGap) * 2;
+  }
+
+  afterNameY = afterBottom + Math.round(hPx * 0.03);
+
+  // Barcode
+  const JsBarcode = (window as any).JsBarcode;
+  const maxBcW = Math.round((wPx - pad * 2) * 0.98);
+  const maxBcH = Math.round(hPx * 0.56);
+  const bcHeight = Math.round(hPx * 0.28);
+  const bcFontSize = Math.round(hPx * 0.09);
+
+  const renderBarcodeCanvas = (barWidth: number) => {
+    const c = document.createElement("canvas");
+    JsBarcode(c, opts.code, {
+      format: "CODE128",
+      width: Math.max(1, Math.floor(barWidth)),
+      height: bcHeight,
+      displayValue: true,
+      fontSize: bcFontSize,
+      fontOptions: "bold",
+      textMargin: 0,
+      margin: 0,
+    });
+    return c;
+  };
+
+  // Pick the largest integer barWidth that fits
+  let bw = 1;
+  let bcCanvas = renderBarcodeCanvas(bw);
+  while (bw < 6) {
+    const next = renderBarcodeCanvas(bw + 1);
+    if (next.width <= maxBcW && next.height <= maxBcH) {
+      bw += 1;
+      bcCanvas = next;
+      continue;
+    }
+    break;
+  }
+
+  const bcY = Math.max(topPad + Math.round(hPx * 0.27), Math.round(afterNameY));
+  const scale = Math.min(1, maxBcW / bcCanvas.width, maxBcH / bcCanvas.height);
+  const drawW = Math.round(bcCanvas.width * scale);
+  const drawH = Math.round(bcCanvas.height * scale);
+  const bcX = Math.round((wPx - drawW) / 2 + shiftPx);
+
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(bcCanvas, bcX, bcY, drawW, drawH);
+
+  // Price
+  const priceText = `Price (VAT inc.): ৳${Number(opts.price || 0).toLocaleString("en-BD")}`;
+  ctx.textBaseline = "bottom";
+  const priceFontSize = Math.round(hPx * 0.082);
+  // Use a mono-style numeric font stack for clearer digit differentiation (e.g., 6 vs 8)
+  ctx.font = `700 ${priceFontSize}px "Consolas", "Lucida Console", "DejaVu Sans Mono", "Courier New", monospace`;
+  const priceY = hPx - pad;
+  ctx.fillText(fitText(ctx, priceText, wPx - pad * 2), centerX, priceY);
+
+  const dataUrl = canvas.toDataURL("image/png");
+  return dataUrl.split(",")[1];
+}
+
 
 type LookupTab = 'customer' | 'order' | 'barcode' | 'batch';
 
@@ -79,6 +325,20 @@ type BatchLookupData = {
     metadata?: any;
     meta?: any;
   }>;
+};
+
+type PrinterProduct = {
+  id: number;
+  name: string;
+};
+
+type PrinterBatch = {
+  id: number;
+  productId: number;
+  quantity: number;
+  costPrice: number;
+  sellingPrice: number;
+  baseCode: string;
 };
 
 export default function LookupPage() {
@@ -165,9 +425,33 @@ export default function LookupPage() {
   const scannerBufferRef = useRef<string>('');
   const scannerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Purchase info (best effort): which PO this barcode/batch came from
-  const [barcodePurchaseInfo, setBarcodePurchaseInfo] = useState<{ poId: number; poNumber?: string; vendorName?: string } | null>(null);
+  // Purchase info (lookup/product + fallback): PO & vendor details for this barcode
+  const [barcodePurchaseInfo, setBarcodePurchaseInfo] = useState<{ poId?: number; poNumber?: string; vendorName?: string } | null>(null);
+  const [barcodeLookupData, setBarcodeLookupData] = useState<LookupProductData | null>(null);
   const [barcodePurchaseLoading, setBarcodePurchaseLoading] = useState(false);
+  const [barcodeProductImageUrl, setBarcodeProductImageUrl] = useState<string | null>(null);
+  const [barcodeImagePreviewOpen, setBarcodeImagePreviewOpen] = useState(false);
+  const [barcodeImagePreviewUrl, setBarcodeImagePreviewUrl] = useState<string | null>(null);
+
+  const closeBarcodeImagePreview = () => {
+    setBarcodeImagePreviewOpen(false);
+    setBarcodeImagePreviewUrl(null);
+  };
+
+  const openBarcodeImagePreview = (url: string) => {
+    if (!url) return;
+    setBarcodeImagePreviewUrl(url);
+    setBarcodeImagePreviewOpen(true);
+  };
+
+  useEffect(() => {
+    if (!barcodeImagePreviewOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeBarcodeImagePreview();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [barcodeImagePreviewOpen]);
 
   // Physical scanner detection for the Barcode tab
   useEffect(() => {
@@ -188,6 +472,9 @@ export default function LookupPage() {
       setBarcodeInput(code);
       setBarcodeData(null);
       setBarcodePurchaseInfo(null);
+      setBarcodeLookupData(null);
+      setBarcodeProductImageUrl(null);
+      closeBarcodeImagePreview();
       setError('');
 
       // Use override so we don't depend on state timing
@@ -349,6 +636,60 @@ export default function LookupPage() {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const parseId = (v: any): number | null => {
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v;
+    if (typeof v === 'string' && v.trim()) {
+      const n = Number(v);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return null;
+  };
+
+  const apiOrigin = (() => {
+    const base = (process.env.NEXT_PUBLIC_API_URL || '').trim();
+    if (!base) return '';
+    return base.replace(/\/api\/?$/, '');
+  })();
+
+  const toAbsoluteAssetUrl = (raw: any): string | null => {
+    if (!raw || typeof raw !== 'string') return null;
+    const v = raw.trim();
+    if (!v) return null;
+    if (/^https?:\/\//i.test(v)) return v;
+    if (v.startsWith('//')) return `https:${v}`;
+    if (!apiOrigin) return v;
+    if (v.startsWith('/')) return `${apiOrigin}${v}`;
+    return `${apiOrigin}/${v}`;
+  };
+
+  const extractProductImageFromLookup = (lk: any): string | null => {
+    const p = lk?.product || {};
+    const primary = p?.primary_image || p?.primaryImage || lk?.primary_image || lk?.primaryImage || {};
+    const images =
+      (Array.isArray(p?.images) ? p.images : null) ||
+      (Array.isArray(lk?.images) ? lk.images : null) ||
+      (Array.isArray(p?.product_images) ? p.product_images : null) ||
+      [];
+
+    const candidate =
+      p?.image_url ||
+      p?.imageUrl ||
+      p?.thumbnail ||
+      p?.thumbnail_url ||
+      p?.photo ||
+      p?.picture ||
+      primary?.image_url ||
+      primary?.imageUrl ||
+      primary?.url ||
+      images?.[0]?.image_url ||
+      images?.[0]?.imageUrl ||
+      images?.[0]?.url ||
+      images?.[0]?.path ||
+      null;
+
+    return toAbsoluteAssetUrl(candidate);
   };
 
   const formatOrderType = (order: CustomerOrder) => {
@@ -562,207 +903,41 @@ export default function LookupPage() {
 
   // -----------------------
   // QZ single barcode print helper (reprint)
+    // -----------------------
+  // QZ single barcode print helper (reprint) - same config as BatchPrinter
   // -----------------------
-  
-const printSingleBarcodeLabel = async (params: { barcode: string; productName?: string; price?: string | number }) => {
+  const printSingleBarcodeLabel = async (params: { barcode: string; productName?: string; price?: string | number }) => {
     try {
       setError('');
       const qz = (window as any)?.qz;
       if (!qz) throw new Error('QZ Tray not available');
 
-      // Connect if needed
-      if (!(await qz.websocket.isActive())) {
-        await qz.websocket.connect();
-      }
+      await ensureQZConnection();
 
       // Pick default printer (fallback to first available)
       let printer: string | null = null;
       try {
         printer = await qz.printers.getDefault();
-      } catch (e) {
+      } catch (_e) {
         const list = await qz.printers.find();
         if (Array.isArray(list) && list.length) printer = list[0];
       }
       if (!printer) throw new Error('No printer found. Set a default printer and try again.');
 
-      const LABEL_W_MM = 39;
-      const LABEL_H_MM = 25;
-      const DPI = 300; // set 203 if your printer is 203dpi
-      const mmToIn = (mm: number) => mm / 25.4;
+      const dpi = DEFAULT_DPI;
 
-      // Ensure JsBarcode is available (QzTrayLoader loads it globally)
-      const ensureJsBarcode = async () => {
-        if ((window as any).JsBarcode) return;
-        await new Promise<void>((resolve, reject) => {
-          const s = document.createElement('script');
-          s.src = 'https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js';
-          s.async = true;
-          s.onload = () => resolve();
-          s.onerror = () => reject(new Error('Failed to load JsBarcode'));
-          document.head.appendChild(s);
-        });
-      };
-
-      const fitText = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number) => {
-        const ellipsis = '…';
-        if (ctx.measureText(text).width <= maxWidth) return text;
-        let t = text;
-        while (t.length > 0 && ctx.measureText(t + ellipsis).width > maxWidth) t = t.slice(0, -1);
-        return t.length ? t + ellipsis : '';
-      };
-
-      const wrapTwoLines = (ctx: CanvasRenderingContext2D, text: string, maxWidth: number): [string, string] => {
-        const clean = String(text || '').trim().replace(/\s+/g, ' ');
-        if (!clean) return ['', ''];
-        if (ctx.measureText(clean).width <= maxWidth) return [clean, ''];
-
-        const words = clean.split(' ');
-        if (words.length <= 1) {
-          // No spaces; split by characters
-          let line1 = clean;
-          while (line1.length > 0 && ctx.measureText(line1).width > maxWidth) line1 = line1.slice(0, -1);
-          const rest = clean.slice(line1.length).trim();
-          if (!rest) return [fitText(ctx, clean, maxWidth), ''];
-          return [line1, fitText(ctx, rest, maxWidth)];
-        }
-
-        // Build first line word-by-word
-        let line1 = '';
-        let i = 0;
-        for (; i < words.length; i++) {
-          const test = line1 ? `${line1} ${words[i]}` : words[i];
-          if (ctx.measureText(test).width <= maxWidth) {
-            line1 = test;
-          } else {
-            break;
-          }
-        }
-
-        if (!line1) return [fitText(ctx, clean, maxWidth), ''];
-
-        const line2Raw = words.slice(i).join(' ').trim();
-        const line2 = line2Raw ? fitText(ctx, line2Raw, maxWidth) : '';
-        return [line1, line2];
-      };
-
-
-      const renderLabel = async () => {
-        await ensureJsBarcode();
-
-        const wIn = mmToIn(LABEL_W_MM);
-        const hIn = mmToIn(LABEL_H_MM);
-        const wPx = Math.max(50, Math.round(wIn * DPI));
-        const hPx = Math.max(50, Math.round(hIn * DPI));
-
-        const canvas = document.createElement('canvas');
-        canvas.width = wPx;
-        canvas.height = hPx;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('Canvas not supported');
-        ctx.imageSmoothingEnabled = false;
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(0, 0, wPx, hPx);
-
-        const pad = Math.round(wPx * 0.04);
-        const shiftPx = Math.round((2 / 25.4) * DPI); // shift right by 2mm
-        const cx = wPx / 2 + shiftPx;
-
-        ctx.fillStyle = '#000';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        ctx.font = `800 ${Math.round(hPx * 0.11)}px Arial`;
-        ctx.fillText('Deshio', cx, pad);
-
-        // Product name (wrap to 2 lines when long)
-        const nameY = pad + Math.round(hPx * 0.14);
-        const nameMaxW = wPx - pad * 2;
-
-        let nameFont = Math.round(hPx * 0.09);
-        ctx.font = `700 ${nameFont}px Arial`;
-
-        let [name1, name2] = wrapTwoLines(ctx, (params.productName || 'Product').trim(), nameMaxW);
-        if (name2) {
-          nameFont = Math.round(hPx * 0.082);
-          ctx.font = `700 ${nameFont}px Arial`;
-          [name1, name2] = wrapTwoLines(ctx, (params.productName || 'Product').trim(), nameMaxW);
-        }
-
-        ctx.fillText(name1, cx, nameY);
-        const lineGap = Math.max(2, Math.round(hPx * 0.01));
-        let afterNameBottom = nameY + nameFont;
-        if (name2) {
-          ctx.fillText(name2, cx, nameY + nameFont + lineGap);
-          afterNameBottom = nameY + (nameFont + lineGap) * 2;
-        }
-
-        const afterNameY = afterNameBottom + Math.round(hPx * 0.03);
-
-        // Barcode (pixel-perfect): JsBarcode overrides canvas.width/height based on content.
-        // Render it, then center horizontally and scale DOWN only if it would overflow.
-        const JsBarcode = (window as any).JsBarcode;
-
-        // Slightly larger barcode + number (still safe within 39x25mm)
-        const maxBcW = Math.round((wPx - pad * 2) * 0.98);
-        const maxBcH = Math.round(hPx * 0.56);
-        const bcHeight = Math.round(hPx * 0.28);
-        const bcFontSize = Math.round(hPx * 0.09);
-
-        const renderBarcodeCanvas = (barWidth: number) => {
-          const c = document.createElement('canvas');
-          JsBarcode(c, params.barcode, {
-            format: 'CODE128',
-            width: Math.max(1, Math.floor(barWidth)),
-            height: bcHeight,
-            displayValue: true,
-            fontSize: bcFontSize,
-            fontOptions: 'bold',
-            textMargin: 0,
-            margin: 0,
-          });
-          return c;
-        };
-
-        // Pick the largest integer barWidth that fits (keeps prints crisp on thermal printers)
-        let bw = 1;
-        let bcCanvas = renderBarcodeCanvas(bw);
-        while (bw < 6) {
-          const next = renderBarcodeCanvas(bw + 1);
-          if (next.width <= maxBcW && next.height <= maxBcH) {
-            bw += 1;
-            bcCanvas = next;
-            continue;
-          }
-          break;
-        }
-
-        const bcY = Math.max(pad + Math.round(hPx * 0.27), Math.round(afterNameY));
-        const scale = Math.min(1, maxBcW / bcCanvas.width, maxBcH / bcCanvas.height);
-        const drawW = Math.round(bcCanvas.width * scale);
-        const drawH = Math.round(bcCanvas.height * scale);
-        const bcX = Math.round((wPx - drawW) / 2 + shiftPx);
-
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(bcCanvas, bcX, bcY, drawW, drawH);
-
-        const priceNum = safeNum(params.price);
-        const showPrice = Number.isFinite(priceNum) && priceNum > 0;
-        if (showPrice) {
-          ctx.textBaseline = 'bottom';
-          ctx.font = `800 ${Math.round(hPx * 0.085)}px Arial`;
-          const priceText = `Price (VAT Inclusive): ৳${Number(priceNum).toLocaleString('en-BD')}`;
-          ctx.fillText(fitText(ctx, priceText, wPx - pad * 2), cx, hPx - pad);
-        }
-
-        return canvas.toDataURL('image/png').split(',')[1];
-      };
-
-      const base64 = await renderLabel();
+      const base64 = await renderLabelBase64({
+        code: params.barcode,
+        productName: (params.productName || 'Product').trim(),
+        price: safeNum(params.price),
+        dpi,
+      });
 
       const config = qz.configs.create(printer, {
         units: 'in',
-        size: { width: mmToIn(LABEL_W_MM), height: mmToIn(LABEL_H_MM) },
+        size: { width: mmToIn(LABEL_WIDTH_MM), height: mmToIn(LABEL_HEIGHT_MM) },
         margins: { top: 0, right: 0, bottom: 0, left: 0 },
-        density: DPI,
+        density: dpi,
         colorType: 'blackwhite',
         interpolation: 'nearest-neighbor',
         scaleContent: false,
@@ -771,7 +946,15 @@ const printSingleBarcodeLabel = async (params: { barcode: string; productName?: 
       const data: any[] = [{ type: 'pixel', format: 'image', flavor: 'base64', data: base64 }];
       await qz.print(config, data);
     } catch (err: any) {
-      setError(err?.message || 'Failed to print barcode');
+      console.error('❌ Print error:', err);
+
+      if (err?.message && err.message.includes('Unable to establish connection')) {
+        setError('QZ Tray is not running. Please start QZ Tray and try again.');
+      } else if (err?.message && err.message.includes('printer must be specified')) {
+        setError('Printer not properly configured. Please set a default printer and try again.');
+      } else {
+        setError(err?.message || 'Failed to print barcode');
+      }
     }
   };
 
@@ -1344,25 +1527,221 @@ const printSingleBarcodeLabel = async (params: { barcode: string; productName?: 
     return m2;
   };
 
-  const resolveBarcodePurchaseInfo = async (data: any) => {
-    const poId = extractPurchaseOrderIdFromBarcode(data);
-    if (!poId) {
-      setBarcodePurchaseInfo(null);
-      return;
+  const resolveBarcodePurchaseInfo = async (barcode: string, historyData?: any) => {
+    setBarcodePurchaseLoading(true);
+
+    let mergedLookup: any = null;
+    let po: any = null;
+    let vendor: any = null;
+    let poOrigin: any = null;
+    let poId: number | null = null;
+    let poNumber: string | undefined;
+    let vendorName: string | undefined;
+    let resolvedImageUrl: string | null = null;
+
+    try {
+      // Primary source: enhanced lookup endpoint (includes purchase_order + vendor)
+      const lookupRes = await lookupService.getProductByBarcode(barcode);
+      const lkRaw: any = lookupRes?.data || null;
+      const lk: any = lkRaw?.data && typeof lkRaw?.data === 'object' ? lkRaw.data : lkRaw;
+
+      if (lookupRes?.success && lk && typeof lk === 'object') {
+        mergedLookup = lk;
+        setBarcodeLookupData(lk);
+
+        resolvedImageUrl = extractProductImageFromLookup(lk);
+
+        po =
+          lk?.purchase_order ||
+          lk?.purchaseOrder ||
+          lk?.po ||
+          lk?.procurement?.purchase_order ||
+          lk?.procurement?.purchaseOrder ||
+          null;
+
+        vendor =
+          lk?.vendor ||
+          lk?.vendor_info ||
+          lk?.vendorInfo ||
+          lk?.procurement?.vendor ||
+          lk?.procurement?.vendor_info ||
+          lk?.product?.vendor ||
+          po?.vendor ||
+          null;
+
+        poOrigin = lk?.purchase_order_origin || lk?.purchaseOrderOrigin || lk?.po_origin || null;
+
+        poId =
+          parseId(po?.id) ||
+          parseId(po?.purchase_order_id) ||
+          parseId(lk?.purchase_order_id) ||
+          parseId(lk?.purchaseOrderId) ||
+          parseId(poOrigin?.id) ||
+          parseId(poOrigin?.po_id) ||
+          parseId(poOrigin?.purchase_order_id) ||
+          null;
+
+        poNumber =
+          po?.po_number ||
+          po?.poNumber ||
+          po?.order_number ||
+          po?.orderNumber ||
+          poOrigin?.po_number ||
+          poOrigin?.poNumber ||
+          undefined;
+
+        vendorName =
+          vendor?.company_name ||
+          vendor?.companyName ||
+          vendor?.name ||
+          po?.vendor?.company_name ||
+          po?.vendor?.companyName ||
+          po?.vendor?.name ||
+          undefined;
+      }
+    } catch {
+      // continue to fallback path
     }
 
-    setBarcodePurchaseLoading(true);
-    try {
-      const res = await purchaseOrderService.getById(poId);
-      const po: any = res?.data || res; // api wrapper differences
-      const poNumber = po?.po_number || po?.poNumber || po?.order_number || po?.orderNumber;
-      const vendorName = po?.vendor?.name || po?.vendor_name || po?.vendorName;
-      setBarcodePurchaseInfo({ poId, poNumber, vendorName });
-    } catch {
-      setBarcodePurchaseInfo({ poId });
-    } finally {
-      setBarcodePurchaseLoading(false);
+    // Fallback 1: infer PO from barcode history, then fetch PO detail
+    if (!poId && historyData) {
+      poId = extractPurchaseOrderIdFromBarcode(historyData);
     }
+
+    // Fallback 2: infer PO from /batches/{id} when barcode history doesn't expose PO fields
+    if (!poId && historyData) {
+      try {
+        const batchId =
+          parseId(historyData?.current_location?.batch?.id) ||
+          parseId(historyData?.current_location?.batch_id) ||
+          parseId(historyData?.batch?.id) ||
+          null;
+
+        if (batchId) {
+          const br = await batchService.getBatch(batchId);
+          const b: any = br?.data;
+          const batchPo = b?.purchase_order || b?.purchaseOrder || b?.po || null;
+          const batchVendor = b?.vendor || b?.vendor_info || batchPo?.vendor || null;
+
+          poId =
+            parseId(batchPo?.id) ||
+            parseId(b?.purchase_order_id) ||
+            parseId(b?.purchaseOrderId) ||
+            parseId(b?.po_id) ||
+            poId;
+
+          if (!po && batchPo) po = batchPo;
+          if (!vendor && batchVendor) vendor = batchVendor;
+
+          if (!poNumber) {
+            poNumber = batchPo?.po_number || batchPo?.poNumber || undefined;
+          }
+          if (!vendorName) {
+            vendorName =
+              batchVendor?.company_name || batchVendor?.companyName || batchVendor?.name || vendorName;
+          }
+        }
+      } catch {
+        // non-blocking
+      }
+    }
+
+    // Fallback 3: fetch PO by ID for richer details + vendor
+    if (poId && (!po || !vendor || !poNumber || !vendorName)) {
+      try {
+        const res = await purchaseOrderService.getById(poId);
+        const fullPo: any = res?.data || res;
+        if (fullPo) {
+          po = po || fullPo;
+          vendor = vendor || fullPo?.vendor || null;
+          poNumber = poNumber || fullPo?.po_number || fullPo?.poNumber || fullPo?.order_number || fullPo?.orderNumber;
+          vendorName =
+            vendorName ||
+            fullPo?.vendor?.company_name ||
+            fullPo?.vendor?.companyName ||
+            fullPo?.vendor?.name ||
+            fullPo?.vendor_name ||
+            fullPo?.vendorName;
+        }
+      } catch {
+        // non-blocking
+      }
+    }
+
+    // Merge enhanced procurement details into lookup payload for UI section
+    if (mergedLookup || po || vendor) {
+      const base = mergedLookup || {};
+      const summary = {
+        ...(base?.summary || {}),
+        has_purchase_order: Boolean(base?.summary?.has_purchase_order ?? po ?? poId ?? poNumber),
+        has_vendor_info: Boolean(base?.summary?.has_vendor_info ?? vendor ?? vendorName),
+      };
+
+      const merged = {
+        ...base,
+        ...(po ? { purchase_order: po } : {}),
+        ...(vendor ? { vendor } : {}),
+        ...(poOrigin ? { purchase_order_origin: poOrigin } : {}),
+        summary,
+      };
+
+      setBarcodeLookupData(merged);
+    }
+
+    // Resolve product image (lookup payload first, then dedicated image endpoints)
+    if (!resolvedImageUrl) {
+      const productId =
+        parseId(mergedLookup?.product?.id) ||
+        parseId(historyData?.product?.id) ||
+        parseId(historyData?.current_location?.product_id) ||
+        null;
+
+      if (productId) {
+        try {
+          const imgRes: any = await productImageService.getPrimaryImage(productId);
+          const primary = imgRes?.data || imgRes?.image || imgRes;
+          const img =
+            primary?.image_url ||
+            primary?.imageUrl ||
+            primary?.url ||
+            primary?.path ||
+            null;
+          resolvedImageUrl = toAbsoluteAssetUrl(img);
+        } catch {
+          // ignore
+        }
+
+        if (!resolvedImageUrl) {
+          try {
+            const listRes: any = await productImageService.getProductImages(productId);
+            const list =
+              listRes?.data?.images ||
+              listRes?.data ||
+              listRes?.images ||
+              (Array.isArray(listRes) ? listRes : []);
+            const first = Array.isArray(list) && list.length > 0 ? list[0] : null;
+            const img = first?.image_url || first?.imageUrl || first?.url || first?.path || null;
+            resolvedImageUrl = toAbsoluteAssetUrl(img);
+          } catch {
+            // ignore
+          }
+        }
+      }
+    }
+
+    setBarcodeProductImageUrl(resolvedImageUrl || null);
+
+    if (po || vendor || poId || poNumber || vendorName) {
+      setBarcodePurchaseInfo({
+        ...(poId ? { poId } : {}),
+        ...(poNumber ? { poNumber } : {}),
+        ...(vendorName ? { vendorName } : {}),
+      });
+    } else {
+      setBarcodePurchaseInfo(null);
+    }
+
+    setBarcodePurchaseLoading(false);
   };
 
   const handleSearchBarcode = async (codeOverride?: string) => {
@@ -1376,6 +1755,9 @@ const printSingleBarcodeLabel = async (params: { barcode: string; productName?: 
     setError('');
     setBarcodeData(null);
     setBarcodePurchaseInfo(null);
+    setBarcodeLookupData(null);
+    setBarcodeProductImageUrl(null);
+    closeBarcodeImagePreview();
 
     try {
       const res = await barcodeTrackingService.getBarcodeHistory(code);
@@ -1385,7 +1767,7 @@ const printSingleBarcodeLabel = async (params: { barcode: string; productName?: 
       }
       const enriched = await enrichBarcodeHistoryWithBatchPrices(res.data as any);
       setBarcodeData(enriched as any);
-      await resolveBarcodePurchaseInfo(enriched as any);
+      await resolveBarcodePurchaseInfo(code, enriched as any);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch barcode history');
     } finally {
@@ -1577,7 +1959,10 @@ const printSingleBarcodeLabel = async (params: { barcode: string; productName?: 
     }
     if (tab === 'barcode') {
       setBarcodeData(null);
-    setBarcodePurchaseInfo(null);
+      setBarcodePurchaseInfo(null);
+      setBarcodeLookupData(null);
+      setBarcodeProductImageUrl(null);
+      closeBarcodeImagePreview();
     }
     if (tab === 'batch') {
       setBatchData(null);
@@ -1620,6 +2005,25 @@ const printSingleBarcodeLabel = async (params: { barcode: string; productName?: 
   };
 
   const barcodeSaleInfo = getBarcodeSaleInfo(barcodeData);
+  const barcodePO: any =
+    barcodeLookupData?.purchase_order ||
+    (barcodeLookupData as any)?.purchaseOrder ||
+    (barcodeLookupData as any)?.po ||
+    (barcodeLookupData as any)?.procurement?.purchase_order ||
+    null;
+  const barcodeVendor: any =
+    barcodeLookupData?.vendor ||
+    (barcodeLookupData as any)?.vendor_info ||
+    (barcodeLookupData as any)?.vendorInfo ||
+    barcodeLookupData?.product?.vendor ||
+    barcodePO?.vendor ||
+    null;
+  const barcodePOOrigin: any =
+    barcodeLookupData?.purchase_order_origin ||
+    (barcodeLookupData as any)?.purchaseOrderOrigin ||
+    (barcodeLookupData as any)?.po_origin ||
+    null;
+  const barcodeSummary: any = barcodeLookupData?.summary || null;
 
   return (
     <div className={darkMode ? 'dark' : ''}>
@@ -2032,7 +2436,10 @@ const printSingleBarcodeLabel = async (params: { barcode: string; productName?: 
                                                   setActiveTab('barcode');
                                                   setBarcodeInput(code);
                                                   setBarcodeData(null);
-    setBarcodePurchaseInfo(null);
+                                                  setBarcodePurchaseInfo(null);
+                                                  setBarcodeLookupData(null);
+                                                  setBarcodeProductImageUrl(null);
+                                                  closeBarcodeImagePreview();
                                                   setError('');
                                                   setTimeout(() => handleSearchBarcode(), 0);
                                                 }}
@@ -2130,9 +2537,42 @@ const printSingleBarcodeLabel = async (params: { barcode: string; productName?: 
                               Barcode: <span className="font-semibold">{barcodeData.barcode}</span>
                             </p>
                           </div>
-                          <span className="text-[10px] px-2 py-1 rounded bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-300">
-                            {barcodeData.total_movements} movements
-                          </span>
+                          <div className="flex items-start gap-2">
+                            {(() => {
+                              const fallbackFromHistory =
+                                toAbsoluteAssetUrl((barcodeData as any)?.product?.image_url) ||
+                                toAbsoluteAssetUrl((barcodeData as any)?.product?.imageUrl) ||
+                                toAbsoluteAssetUrl((barcodeData as any)?.product?.thumbnail) ||
+                                null;
+                              const finalImage = barcodeProductImageUrl || fallbackFromHistory;
+
+                              return finalImage ? (
+                              <button
+                                type="button"
+                                onClick={() => openBarcodeImagePreview(finalImage)}
+                                className="group relative"
+                                title="Click to preview image"
+                              >
+                                <img
+                                  src={finalImage}
+                                  alt={barcodeData?.product?.name || 'Product image'}
+                                  className="w-12 h-12 rounded border border-gray-200 dark:border-gray-700 object-cover"
+                                  loading="lazy"
+                                />
+                                <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[8px] text-gray-500 dark:text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+                                  View
+                                </span>
+                              </button>
+                              ) : (
+                              <div className="w-12 h-12 rounded border border-dashed border-gray-200 dark:border-gray-700 flex items-center justify-center text-[9px] text-gray-400 dark:text-gray-500">
+                                No image
+                              </div>
+                              );
+                            })()}
+                            <span className="text-[10px] px-2 py-1 rounded bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-300">
+                              {barcodeData.total_movements} movements
+                            </span>
+                          </div>
                         </div>
 
                         {/* Current location */}
@@ -2178,25 +2618,167 @@ const printSingleBarcodeLabel = async (params: { barcode: string; productName?: 
                           </div>
                         )}
 
-                        {/* PURCHASE ORDER / VENDOR (NEW) */}
+                        {/* PURCHASE ORDER / VENDOR */}
                         <div className="mt-3 border border-gray-200 dark:border-gray-800 rounded p-2 bg-white dark:bg-gray-900/20">
                           <div className="flex items-center justify-between gap-2">
-                            <p className="text-[9px] text-gray-500 uppercase font-medium">Purchase</p>
+                            <p className="text-[9px] text-gray-500 uppercase font-medium">Procurement</p>
                             {barcodePurchaseLoading && (
                               <span className="text-[9px] text-gray-500 dark:text-gray-400">loading…</span>
                             )}
                           </div>
-                          <p className="text-[10px] text-black dark:text-white mt-1">
-                            Purchase Order:{' '}
-                            <span className="font-semibold">
-                              {barcodePurchaseInfo?.poNumber ||
-                                (barcodePurchaseInfo?.poId ? `#${barcodePurchaseInfo.poId}` : '—')}
-                            </span>
-                          </p>
-                          <p className="text-[10px] text-black dark:text-white">
-                            Vendor:{' '}
-                            <span className="font-semibold">{barcodePurchaseInfo?.vendorName || '—'}</span>
-                          </p>
+
+                          <div className="mt-1 grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                              <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Purchase Order</p>
+                              <p className="text-[10px] text-black dark:text-white">
+                                <span className="font-semibold">
+                                  {barcodePO?.po_number ||
+                                    barcodePOOrigin?.po_number ||
+                                    barcodePurchaseInfo?.poNumber ||
+                                    (barcodePO?.id ? `#${barcodePO.id}` : barcodePurchaseInfo?.poId ? `#${barcodePurchaseInfo.poId}` : '—')}
+                                </span>
+                              </p>
+                              <div className="mt-1 text-[10px] text-black dark:text-white space-y-0.5">
+                                <p>
+                                  Status:{' '}
+                                  <span className="font-semibold">
+                                    {barcodePO?.status || (barcodeSummary?.has_purchase_order ? 'Linked' : '—')}
+                                  </span>
+                                </p>
+                                <p>
+                                  Payment:{' '}
+                                  <span className="font-semibold">{barcodePO?.payment_status || '—'}</span>
+                                </p>
+                                <p>
+                                  Order Date:{' '}
+                                  <span className="font-semibold">{formatDate(barcodePO?.order_date)}</span>
+                                </p>
+                                <p>
+                                  Expected Delivery:{' '}
+                                  <span className="font-semibold">{formatDate(barcodePO?.expected_delivery_date)}</span>
+                                </p>
+                                <p>
+                                  Received Store:{' '}
+                                  <span className="font-semibold">{barcodePO?.store?.name || '—'}</span>
+                                </p>
+                                <p>
+                                  Created By:{' '}
+                                  <span className="font-semibold">{barcodePO?.created_by?.name || barcodePO?.createdBy?.name || '—'}</span>
+                                </p>
+                              </div>
+                            </div>
+
+                            <div className="border border-gray-200 dark:border-gray-800 rounded p-2">
+                              <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">Vendor</p>
+                              <p className="text-[10px] text-black dark:text-white">
+                                <span className="font-semibold">
+                                  {barcodeVendor?.company_name || barcodeVendor?.companyName || barcodeVendor?.name || barcodePurchaseInfo?.vendorName || '—'}
+                                </span>
+                              </p>
+                              <div className="mt-1 text-[10px] text-black dark:text-white space-y-0.5">
+                                <p>
+                                  Contact:{' '}
+                                  <span className="font-semibold">{barcodeVendor?.name || '—'}</span>
+                                </p>
+                                <p>
+                                  Phone:{' '}
+                                  <span className="font-semibold">{barcodeVendor?.phone || '—'}</span>
+                                </p>
+                                <p>
+                                  Email:{' '}
+                                  <span className="font-semibold">{barcodeVendor?.email || '—'}</span>
+                                </p>
+                                <p>
+                                  Payment Terms:{' '}
+                                  <span className="font-semibold">{barcodeVendor?.payment_terms || barcodeVendor?.paymentTerms || '—'}</span>
+                                </p>
+                                <p>
+                                  Status:{' '}
+                                  <span className="font-semibold">{barcodeVendor?.status || (barcodeSummary?.has_vendor_info ? 'Linked' : '—')}</span>
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {(barcodePO || barcodeSummary?.has_purchase_order) && (
+                            <div className="mt-2 border border-gray-200 dark:border-gray-800 rounded p-2">
+                              <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">PO Financials</p>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[10px] text-black dark:text-white">
+                                <p>
+                                  Total:{' '}
+                                  <span className="font-semibold">{barcodePO?.total_amount != null ? formatCurrency(barcodePO.total_amount) : '—'}</span>
+                                </p>
+                                <p>
+                                  Paid:{' '}
+                                  <span className="font-semibold">{barcodePO?.paid_amount != null ? formatCurrency(barcodePO.paid_amount) : '—'}</span>
+                                </p>
+                                <p>
+                                  Outstanding:{' '}
+                                  <span className="font-semibold">
+                                    {barcodePO?.outstanding_amount != null ? formatCurrency(barcodePO.outstanding_amount) : '—'}
+                                  </span>
+                                </p>
+                              </div>
+                            </div>
+                          )}
+
+                          {(barcodePO?.item_details || barcodePO?.itemDetails) && (
+                            <div className="mt-2 border border-gray-200 dark:border-gray-800 rounded p-2">
+                              <p className="text-[9px] text-gray-500 uppercase font-medium mb-1">This Product In PO</p>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[10px] text-black dark:text-white">
+                                <p>
+                                  Ordered:{' '}
+                                  <span className="font-semibold">
+                                    {(barcodePO?.item_details?.quantity_ordered ?? barcodePO?.itemDetails?.quantity_ordered ?? barcodePO?.itemDetails?.quantityOrdered) ?? '—'}
+                                  </span>
+                                </p>
+                                <p>
+                                  Received:{' '}
+                                  <span className="font-semibold">
+                                    {(barcodePO?.item_details?.quantity_received ?? barcodePO?.itemDetails?.quantity_received ?? barcodePO?.itemDetails?.quantityReceived) ?? '—'}
+                                  </span>
+                                </p>
+                                <p>
+                                  Receive Status:{' '}
+                                  <span className="font-semibold">
+                                    {barcodePO?.item_details?.receive_status || barcodePO?.itemDetails?.receive_status || barcodePO?.itemDetails?.receiveStatus || '—'}
+                                  </span>
+                                </p>
+                                <p>
+                                  Unit Cost:{' '}
+                                  <span className="font-semibold">
+                                    {(barcodePO?.item_details?.unit_cost ?? barcodePO?.itemDetails?.unit_cost ?? barcodePO?.itemDetails?.unitCost) != null
+                                      ? formatCurrency(barcodePO?.item_details?.unit_cost ?? barcodePO?.itemDetails?.unit_cost ?? barcodePO?.itemDetails?.unitCost)
+                                      : '—'}
+                                  </span>
+                                </p>
+                                <p>
+                                  Unit Sell:{' '}
+                                  <span className="font-semibold">
+                                    {(barcodePO?.item_details?.unit_sell_price ?? barcodePO?.itemDetails?.unit_sell_price ?? barcodePO?.itemDetails?.unitSellPrice) != null
+                                      ? formatCurrency(
+                                          barcodePO?.item_details?.unit_sell_price ?? barcodePO?.itemDetails?.unit_sell_price ?? barcodePO?.itemDetails?.unitSellPrice
+                                        )
+                                      : '—'}
+                                  </span>
+                                </p>
+                                <p>
+                                  Total Cost:{' '}
+                                  <span className="font-semibold">
+                                    {(barcodePO?.item_details?.total_cost ?? barcodePO?.itemDetails?.total_cost ?? barcodePO?.itemDetails?.totalCost) != null
+                                      ? formatCurrency(barcodePO?.item_details?.total_cost ?? barcodePO?.itemDetails?.total_cost ?? barcodePO?.itemDetails?.totalCost)
+                                      : '—'}
+                                  </span>
+                                </p>
+                              </div>
+                            </div>
+                          )}
+
+                          {!barcodePO && !barcodeVendor && !barcodeSummary?.has_purchase_order && !barcodeSummary?.has_vendor_info && !barcodePurchaseInfo && (
+                            <p className="mt-2 text-[10px] text-gray-500 dark:text-gray-400">
+                              No purchase order/vendor info linked to this barcode.
+                            </p>
+                          )}
                         </div>
 
                         {/* SOLD / ORDER INFO (works even if movement history is empty, if backend sends meta) */}
@@ -2474,6 +3056,41 @@ const printSingleBarcodeLabel = async (params: { barcode: string; productName?: 
                         })()}
                       </div>
 
+
+                      {/* Print (BatchPrinter) */}
+                      <div className="mt-4">
+                        {(() => {
+                          const prices = extractBatchPrices(batchData.batch);
+
+                          const printerBatch: PrinterBatch = {
+                            id: batchData.batch.id,
+                            productId: batchData.batch.product.id,
+                            quantity: Number(
+                              batchData.batch.quantity ??
+                                batchData.batch.original_quantity ??
+                                batchData.summary?.total_units ??
+                                0
+                            ),
+                            costPrice: Number(prices.cost ?? 0),
+                            sellingPrice: Number(prices.sell ?? 0),
+                            baseCode: batchData.batch.base_code,
+                          };
+
+                          const printerProduct: PrinterProduct = {
+                            id: printerBatch.productId,
+                            name: batchData.batch.product.name ?? "Product",
+                          };
+
+                          const activeCodes = (batchData.barcodes || [])
+                            .filter((b) => b.is_active)
+                            .map((b) => b.barcode);
+
+                          return (
+                            <BatchPrinter batch={printerBatch} product={printerProduct} barcodes={activeCodes} />
+                          );
+                        })()}
+                      </div>
+
                       {/* Barcodes Table */}
                       <div className="border border-gray-200 dark:border-gray-800 rounded-md overflow-hidden">
                         <div className="bg-gray-50 dark:bg-gray-900 px-3 py-2 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
@@ -2714,6 +3331,36 @@ const printSingleBarcodeLabel = async (params: { barcode: string; productName?: 
                 </>
               )}
             </div>
+
+            {/* Barcode Product Image Preview Modal */}
+            {barcodeImagePreviewOpen && barcodeImagePreviewUrl && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                <div className="absolute inset-0 bg-black/70" onClick={closeBarcodeImagePreview} />
+                <div className="relative w-full max-w-4xl bg-white dark:bg-black border border-gray-200 dark:border-gray-800 rounded-lg shadow-xl overflow-hidden">
+                  <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-black dark:text-white">Product Image</p>
+                      <p className="text-[10px] text-gray-600 dark:text-gray-400">{barcodeData?.product?.name || 'Barcode product'}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={closeBarcodeImagePreview}
+                      className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-300 hover:opacity-90"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="p-3 bg-gray-50 dark:bg-gray-950 flex items-center justify-center max-h-[80vh] overflow-auto">
+                    <img
+                      src={barcodeImagePreviewUrl}
+                      alt={barcodeData?.product?.name || 'Product image'}
+                      className="max-w-full max-h-[72vh] object-contain rounded"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
           </main>
         </div>
       </div>

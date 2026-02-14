@@ -64,6 +64,9 @@ export default function Footer() {
               <Link href="/e-commerce/contact" className="text-gray-400 hover:text-white transition">
                 Contact
               </Link>
+              <Link href="/e-commerce/order-tracking" className="text-gray-400 hover:text-white transition">
+                Order Tracking
+              </Link>
             </div>
 
             {/* Social icons */}
@@ -172,6 +175,12 @@ export default function Footer() {
             © {year} {BRAND}. All rights reserved.
           </p>
           <div className="flex items-center gap-3 text-xs text-gray-500">
+            <Link
+              href="/e-commerce/order-tracking"
+              className="text-xs text-white rounded-md bg-red-700 hover:bg-red-800 border border-red-600 px-3 py-1.5 transition"
+            >
+              Track Order
+            </Link>
             <span className="rounded-md bg-white/5 border border-white/10 px-2.5 py-1">
               bKash
             </span>

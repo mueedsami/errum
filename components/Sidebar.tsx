@@ -148,6 +148,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     { icon: Package, label: 'Orders', href: '/orders' },
     { icon: CreditCard, label: 'Installments', href: '/orders?view=installments' },
     { icon: Package, label: 'Online Order Packing', href: '/social-commerce/package' },
+    { icon: Package, label: 'Store assignment', href: '/store-assignment' },
     { icon: Package, label: 'PreOrders', href: '/preorders' },
     { icon: AlertTriangle, label: 'Extra Panel', href: '/extra' },
     { icon: Search, label: 'Lookup', href: '/lookup' },

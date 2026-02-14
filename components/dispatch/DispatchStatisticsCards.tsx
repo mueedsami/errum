@@ -28,6 +28,13 @@ const DispatchStatisticsCards: React.FC<DispatchStatisticsCardsProps> = ({
 
   if (!statistics) return null;
 
+  const parseAmount = (value: unknown): number => {
+    if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+    const normalized = String(value ?? '').replace(/[^\d.-]/g, '');
+    const amount = Number(normalized);
+    return Number.isFinite(amount) ? amount : 0;
+  };
+
   const cards = [
     {
       label: 'Total',
@@ -87,7 +94,7 @@ const DispatchStatisticsCards: React.FC<DispatchStatisticsCardsProps> = ({
     },
     {
       label: 'Value in Transit',
-      value: `৳${parseFloat(statistics.total_value_in_transit).toLocaleString()}`,
+      value: `৳${parseAmount(statistics.total_value_in_transit).toLocaleString()}`,
       bgColor: 'bg-indigo-50 dark:bg-indigo-900/20',
       borderColor: 'border-indigo-200 dark:border-indigo-800',
       textColor: 'text-indigo-900 dark:text-indigo-300',

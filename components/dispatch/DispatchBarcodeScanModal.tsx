@@ -38,6 +38,36 @@ function toNum(v: any): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+function unpackData(payload: any) {
+  if (payload && typeof payload === 'object' && payload.data && typeof payload.data === 'object') {
+    return payload.data;
+  }
+  return payload && typeof payload === 'object' ? payload : {};
+}
+
+function toArray<T = any>(value: any): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (value == null) return [];
+
+  if (typeof value === 'string') {
+    const raw = value.trim();
+    if (!raw) return [];
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? (parsed as T[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  if (typeof value === 'object') {
+    const values = Object.values(value as Record<string, unknown>);
+    return values.length ? (values as T[]) : [];
+  }
+
+  return [];
+}
+
 export default function DispatchBarcodeScanModal({
   dispatch,
   isOpen,
@@ -47,6 +77,12 @@ export default function DispatchBarcodeScanModal({
   mode,
 }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // Queue scans so staff can scan rapidly even if the API call takes a moment.
+  // This prevents "only first scan registers" issues when scanners send codes back-to-back.
+  const scanQueueRef = useRef<string[]>([]);
+  const scanQueueSetRef = useRef<Set<string>>(new Set());
+  const scanQueueProcessingRef = useRef(false);
+  const [queuedScanCount, setQueuedScanCount] = useState(0);
   const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
   const [barcode, setBarcode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -104,6 +140,16 @@ export default function DispatchBarcodeScanModal({
     return !!(stats && stats.total > 0 && stats.remaining <= 0);
   }, [stats]);
 
+  const scannedBarcodeList = useMemo(
+    () => (progress?.kind === 'send' ? toArray<any>((progress as any).scanned_barcodes) : []),
+    [progress]
+  );
+
+  const receivedBarcodeList = useMemo(
+    () => (progress?.kind === 'receive' ? toArray<any>((progress as any).received_barcodes) : []),
+    [progress]
+  );
+
   // When opening: pick first item and focus input
   useEffect(() => {
     if (!isOpen || !dispatch) return;
@@ -116,6 +162,10 @@ export default function DispatchBarcodeScanModal({
     setBarcode('');
     setError(null);
     setOverall(null);
+    scanQueueRef.current = [];
+    scanQueueSetRef.current = new Set();
+    scanQueueProcessingRef.current = false;
+    setQueuedScanCount(0);
     // focus after paint
     setTimeout(() => inputRef.current?.focus(), 50);
 
@@ -132,6 +182,11 @@ export default function DispatchBarcodeScanModal({
   useEffect(() => {
     if (!isOpen || !dispatch || !selectedItemId) return;
     void fetchProgress(selectedItemId);
+    // item changed => clear queued scans to avoid sending a code to the wrong item
+    scanQueueRef.current = [];
+    scanQueueSetRef.current = new Set();
+    scanQueueProcessingRef.current = false;
+    setQueuedScanCount(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, dispatch?.id, selectedItemId, mode]);
 
@@ -141,10 +196,20 @@ export default function DispatchBarcodeScanModal({
     try {
       if (mode === 'send') {
         const res = await dispatchService.getScannedBarcodes(dispatch.id, itemId);
-        setProgress({ kind: 'send', ...res.data } as AnyProgress);
+        const data: any = unpackData(res);
+        setProgress({
+          kind: 'send',
+          ...data,
+          scanned_barcodes: toArray(data.scanned_barcodes),
+        } as AnyProgress);
       } else {
         const res = await dispatchService.getReceivedBarcodes(dispatch.id, itemId);
-        setProgress({ kind: 'receive', ...res.data } as AnyProgress);
+        const data: any = unpackData(res);
+        setProgress({
+          kind: 'receive',
+          ...data,
+          received_barcodes: toArray(data.received_barcodes),
+        } as AnyProgress);
       }
     } catch (e: any) {
       setError(e?.response?.data?.message || 'Failed to load barcode progress');
@@ -162,7 +227,7 @@ export default function DispatchBarcodeScanModal({
         dispatch.items.map((it) => dispatchService.getReceivedBarcodes(dispatch.id, it.id))
       );
       const pending = results.reduce((sum, r) => {
-        const d: any = r.data || {};
+        const d: any = unpackData(r);
         const total = toNum(d.total_sent ?? d.required_quantity ?? d.total ?? 0);
         const received = toNum(d.received_count ?? d.scanned_count ?? 0);
         const pRaw = d.pending_count ?? d.remaining_count ?? d.remaining;
@@ -177,34 +242,70 @@ export default function DispatchBarcodeScanModal({
     }
   };
 
-  const handleScan = async () => {
+  const scanOneBarcode = async (value: string) => {
     if (!dispatch || !selectedItemId) return;
-    const value = barcode.trim();
-    if (!value) return;
+    const code = value.trim();
+    if (!code) return;
 
+    try {
+      if (mode === 'send') {
+        await dispatchService.scanBarcode(dispatch.id, selectedItemId, code);
+      } else {
+        await dispatchService.receiveBarcode(dispatch.id, selectedItemId, code);
+      }
+    } catch (e: any) {
+      throw new Error(e?.response?.data?.message || 'Scan failed');
+    }
+  };
+
+  const processScanQueue = async () => {
+    if (!dispatch || !selectedItemId) return;
+    if (scanQueueProcessingRef.current) return;
+    if (scanQueueRef.current.length === 0) return;
+    scanQueueProcessingRef.current = true;
     setLoading(true);
     setError(null);
 
     try {
-      if (mode === 'send') {
-        await dispatchService.scanBarcode(dispatch.id, selectedItemId, value);
-      } else {
-        await dispatchService.receiveBarcode(dispatch.id, selectedItemId, value);
+      while (scanQueueRef.current.length > 0) {
+        const next = scanQueueRef.current.shift();
+        if (!next) continue;
+        scanQueueSetRef.current.delete(next);
+        setQueuedScanCount(scanQueueRef.current.length);
+        // eslint-disable-next-line no-await-in-loop
+        await scanOneBarcode(next);
       }
 
       setBarcode('');
       await fetchProgress(selectedItemId);
       onComplete?.();
 
-      // Keep focus for fast scanning
-      setTimeout(() => inputRef.current?.focus(), 0);
+      // In receive mode, auto-refresh overall status after processing a burst
+      if (mode === 'receive') {
+        void checkOverallProgress();
+      }
     } catch (e: any) {
-      setError(e?.response?.data?.message || 'Scan failed');
-      // keep barcode text to let user re-check
+      setError(e?.message || 'Scan failed');
+      // keep focus for quick recovery
       setTimeout(() => inputRef.current?.select(), 0);
     } finally {
+      scanQueueProcessingRef.current = false;
       setLoading(false);
+      setTimeout(() => inputRef.current?.focus(), 0);
     }
+  };
+
+  const enqueueScan = () => {
+    if (!dispatch || !selectedItemId) return;
+    const value = barcode.trim();
+    if (!value) return;
+    if (scanQueueSetRef.current.has(value)) return;
+    scanQueueRef.current.push(value);
+    scanQueueSetRef.current.add(value);
+    setQueuedScanCount(scanQueueRef.current.length);
+    // Clear input immediately so the next scan doesn't overwrite
+    setBarcode('');
+    void processScanQueue();
   };
 
   const handleCompleteDelivery = async () => {
@@ -247,8 +348,8 @@ export default function DispatchBarcodeScanModal({
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-0">
           {/* Left: Items */}
-          <div className="lg:col-span-1 border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700">
-            <div className="p-6">
+          <div className="lg:col-span-1 border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700 min-h-0">
+            <div className="p-6 h-full flex flex-col min-h-0">
               <div className="flex items-center gap-2 text-sm font-semibold text-gray-900 dark:text-white mb-3">
                 <Package className="w-4 h-4" /> Items
               </div>
@@ -257,7 +358,7 @@ export default function DispatchBarcodeScanModal({
                   No items found in this dispatch.
                 </div>
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-2 max-h-[52vh] overflow-y-auto pr-1">
                   {items.map((it) => {
                     const active = it.id === selectedItemId;
                     const hint = mode === 'send'
@@ -388,19 +489,23 @@ export default function DispatchBarcodeScanModal({
                       value={barcode}
                       onChange={(e) => setBarcode(e.target.value)}
                       onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
+                        // Scanners commonly use Enter or Tab as suffix. If Tab is used,
+                        // the browser would move focus away and subsequent scans go to the wrong field.
+                        if (e.key === 'Enter' || e.key === 'Tab') {
                           e.preventDefault();
-                          void handleScan();
+                          enqueueScan();
+                          setTimeout(() => inputRef.current?.focus(), 0);
                         }
                       }}
                       placeholder={mode === 'send' ? 'Scan barcode to send…' : 'Scan received barcode…'}
                       className="w-full pl-10 pr-3 py-3 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      disabled={loading || scanningLocked}
+                      // Keep input enabled even while processing so rapid scans can be queued.
+                      disabled={scanningLocked}
                     />
                   </div>
                   <button
-                    onClick={handleScan}
-                    disabled={loading || scanningLocked || !barcode.trim()}
+                    onClick={enqueueScan}
+                    disabled={scanningLocked || !barcode.trim()}
                     className={`px-4 py-3 rounded-lg text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
                       mode === 'send' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-green-600 hover:bg-green-700'
                     }`}
@@ -409,6 +514,13 @@ export default function DispatchBarcodeScanModal({
                     {mode === 'send' ? 'Add Scan' : 'Receive'}
                   </button>
                 </div>
+
+                {(loading || queuedScanCount > 0) && (
+                  <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    {loading ? 'Processing scans' : 'Scans queued'}
+                    {queuedScanCount > 0 ? ` • queued: ${queuedScanCount}` : ''}
+                  </div>
+                )}
 
                 {error && (
                   <div className="mt-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-sm">
@@ -432,35 +544,35 @@ export default function DispatchBarcodeScanModal({
 
                   <div className="mt-3 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
                     <div className="max-h-64 overflow-y-auto">
-                      {progress && ((progress.kind === 'send' && progress.scanned_barcodes.length === 0) ||
-                        (progress.kind === 'receive' && progress.received_barcodes.length === 0)) ? (
+                      {progress && ((progress.kind === 'send' && scannedBarcodeList.length === 0) ||
+                        (progress.kind === 'receive' && receivedBarcodeList.length === 0)) ? (
                         <div className="p-4 text-sm text-gray-500 dark:text-gray-400">
                           No barcodes scanned yet.
                         </div>
                       ) : (
                         <div className="divide-y divide-gray-200 dark:divide-gray-700">
                           {progress?.kind === 'send' &&
-                            progress.scanned_barcodes.map((b, idx) => (
-                              <div key={b.id} className="p-3 flex items-center justify-between">
+                            scannedBarcodeList.map((b: any, idx) => (
+                              <div key={b?.id ?? `${b?.barcode ?? b ?? 'scan'}-${idx}`} className="p-3 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                   <span className="text-xs text-gray-500 dark:text-gray-400 w-6">{idx + 1}.</span>
-                                  <span className="text-sm font-mono text-gray-900 dark:text-white">{b.barcode}</span>
+                                  <span className="text-sm font-mono text-gray-900 dark:text-white">{String(b?.barcode ?? b ?? '')}</span>
                                 </div>
                                 <div className="text-xs text-gray-500 dark:text-gray-400">
-                                  {fmtTime(b.scanned_at)} • {b.scanned_by}
+                                  {fmtTime(String(b?.scanned_at ?? ''))}{b?.scanned_by ? ` • ${b.scanned_by}` : ''}
                                 </div>
                               </div>
                             ))}
 
                           {progress?.kind === 'receive' &&
-                            progress.received_barcodes.map((b, idx) => (
-                              <div key={b.id} className="p-3 flex items-center justify-between">
+                            receivedBarcodeList.map((b: any, idx) => (
+                              <div key={b?.id ?? `${b?.barcode ?? b ?? 'receive'}-${idx}`} className="p-3 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                   <span className="text-xs text-gray-500 dark:text-gray-400 w-6">{idx + 1}.</span>
-                                  <span className="text-sm font-mono text-gray-900 dark:text-white">{b.barcode}</span>
+                                  <span className="text-sm font-mono text-gray-900 dark:text-white">{String(b?.barcode ?? b ?? '')}</span>
                                 </div>
                                 <div className="text-xs text-gray-500 dark:text-gray-400">
-                                  {fmtTime(b.received_at)}
+                                  {fmtTime(String(b?.received_at ?? ''))}
                                 </div>
                               </div>
                             ))}

@@ -88,7 +88,6 @@ export default function POSPage() {
 
   // Printing
   const [autoPrintReceipt, setAutoPrintReceipt] = useState(true);
-  const [posReceiptStyle, setPosReceiptStyle] = useState<'compact' | 'detailed'>('compact');
   const [lastCompletedOrderId, setLastCompletedOrderId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -99,16 +98,6 @@ export default function POSPage() {
       // ignore
     }
   }, []);
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem('posReceiptStyle');
-      if (saved === 'compact' || saved === 'detailed') setPosReceiptStyle(saved);
-    } catch {
-      // ignore
-    }
-  }, []);
-
-
 
   useEffect(() => {
     try {
@@ -117,15 +106,6 @@ export default function POSPage() {
       // ignore
     }
   }, [autoPrintReceipt]);
-  useEffect(() => {
-    try {
-      localStorage.setItem('posReceiptStyle', posReceiptStyle);
-    } catch {
-      // ignore
-    }
-  }, [posReceiptStyle]);
-
-
 
   // Input Mode
   const [inputMode, setInputMode] = useState<'barcode' | 'manual'>('barcode');
@@ -591,6 +571,13 @@ export default function POSPage() {
   const due = total - totalPaid;
   const change = !isInstallment && totalPaid > total ? totalPaid - total : 0;
 
+  // 🚫 Business rule: POS should not allow due sales from frontend
+  // Small tolerance to avoid floating-point edge cases (e.g., 0.01)
+  const SALE_DUE_TOLERANCE = 0.009;
+  const outstandingAmount = Math.max(0, due);
+  const isUnderpaid = !isInstallment && outstandingAmount > SALE_DUE_TOLERANCE;
+  const canCompleteSale = !isProcessing && cart.length > 0 && !isUnderpaid;
+
   // ============ ORDER SUBMISSION ============
 
   const handleSell = async () => {
@@ -608,14 +595,23 @@ export default function POSPage() {
       return;
     }
 
+    // 🚫 Block due sales on POS (non-installment)
+    if (!isInstallment && isUnderpaid) {
+      showToast(
+        `Full payment required. Please collect at least ৳${total.toFixed(2)} (short by ৳${outstandingAmount.toFixed(2)}).`,
+        'error'
+      );
+      return;
+    }
+
     // ✅ Confirmation
     if (isInstallment) {
       const n = Math.max(2, Math.min(24, Number(installmentCount) || 2));
       const msg = `Installment/EMI: ${n} × ৳${installmentAmount.toFixed(2)}. First installment will be collected now. Continue?`;
       if (!confirm(msg)) return;
     } else {
-      // ✅ FIXED: Only warn if there's actual unpaid balance (not overpayment)
-      if (due > 0 && !confirm(`Outstanding amount: ৳${due.toFixed(2)}. Continue?`)) {
+      // Due sales are blocked; optional confirmation only when change needs to be returned.
+      if (change > 0 && !confirm(`Change to return: ৳${change.toFixed(2)}. Continue?`)) {
         return;
       }
     }
@@ -796,6 +792,14 @@ export default function POSPage() {
       }
 
       // ✅ Payments
+      // Keep a local split summary so the receipt can print exact Cash/Card/Bkash/Nagad values
+      let receiptPaymentBreakdown = {
+        cash: 0,
+        card: 0,
+        bkash: 0,
+        nagad: 0,
+      };
+
       if (isInstallment) {
         // Create installment plan during order creation, then collect 1st installment now
         if (!installmentPaymentMethodId) {
@@ -804,7 +808,7 @@ export default function POSPage() {
 
         if (installmentAmount > 0) {
           console.log('💳 Processing installment/EMI first payment...');
-          
+
           // ✅ FIXED: Remove payment_type field
           await paymentService.addInstallmentPayment(order.id, {
             payment_method_id: installmentPaymentMethodId,
@@ -816,6 +820,12 @@ export default function POSPage() {
               : {},
           });
           console.log('✅ Installment payment processed');
+
+          // Receipt breakdown for installment first payment
+          if (installmentPaymentMode === 'cash') receiptPaymentBreakdown.cash = installmentAmount;
+          if (installmentPaymentMode === 'card') receiptPaymentBreakdown.card = installmentAmount;
+          if (installmentPaymentMode === 'bkash') receiptPaymentBreakdown.bkash = installmentAmount;
+          if (installmentPaymentMode === 'nagad') receiptPaymentBreakdown.nagad = installmentAmount;
         }
       } else {
         // ✅ FIXED: Process payments - only charge the order total, not overpayment
@@ -844,6 +854,14 @@ export default function POSPage() {
               `⚠️ Overpayment detected. Reducing cash from ৳${cashPaid} to ৳${adjustedCashPaid}`
             );
           }
+
+          // Save exact split for receipt printing
+          receiptPaymentBreakdown = {
+            cash: adjustedCashPaid,
+            card: adjustedCardPaid,
+            bkash: adjustedBkashPaid,
+            nagad: adjustedNagadPaid,
+          };
 
           if (adjustedCashPaid > 0) {
             paymentSplits.push({
@@ -883,13 +901,13 @@ export default function POSPage() {
             await paymentService.process(order.id, {
               payment_method_id: paymentSplits[0].payment_method_id,
               amount: paymentSplits[0].amount,
-              payment_type: (due <= 0 ? 'full' : 'partial') as 'full' | 'partial',
+              payment_type: 'full' as 'full' | 'partial',
               auto_complete: true,
             });
           } else if (paymentSplits.length > 1) {
             await paymentService.processSplit(order.id, {
               total_amount: splitsTotal, // ✅ FIXED: Use actual splits total
-              payment_type: due <= 0 ? 'full' : 'partial',
+              payment_type: 'full',
               auto_complete: true,
               splits: paymentSplits,
             });
@@ -917,7 +935,48 @@ export default function POSPage() {
             }
 
             const fullOrder = await orderService.getById(order.id);
-            await printReceipt(fullOrder, undefined, { template: posReceiptStyle === 'detailed' ? 'pos_receipt' : 'receipt' });
+
+            // Fallback: include services from local cart if API detail response doesn't provide them yet
+            const hasServiceInServerOrder =
+              (Array.isArray((fullOrder as any)?.services) && (fullOrder as any).services.length > 0) ||
+              (Array.isArray((fullOrder as any)?.items) &&
+                (fullOrder as any).items.some((it: any) =>
+                  Boolean(
+                    it?.service_id ||
+                      it?.serviceId ||
+                      it?.is_service ||
+                      it?.isService ||
+                      String(it?.item_type || it?.type || '').toLowerCase() === 'service'
+                  )
+                ));
+
+            const serviceFallbackFromCart = cart
+              .filter((c: any) => c?.isService || c?.type === 'service')
+              .map((c: any) => ({
+                id: c.id,
+                service_id: c.serviceId,
+                service_name: c.productName,
+                quantity: c.qty ?? c.quantity ?? 1,
+                unit_price: c.price,
+                discount_amount: c.discount ?? 0,
+                total_amount: c.amount,
+                category: c.serviceCategory ?? c.category,
+              }));
+
+            const printableOrder = {
+              ...(fullOrder as any),
+              payment_breakdown: receiptPaymentBreakdown,
+              change_amount: change,
+              cashPaid: receiptPaymentBreakdown.cash,
+              cardPaid: receiptPaymentBreakdown.card,
+              bkashPaid: receiptPaymentBreakdown.bkash,
+              nagadPaid: receiptPaymentBreakdown.nagad,
+              ...(!hasServiceInServerOrder && serviceFallbackFromCart.length > 0
+                ? { services: serviceFallbackFromCart }
+                : {}),
+            };
+
+            await printReceipt(printableOrder, undefined, { template: 'pos_receipt' });
             showToast('✅ Receipt printed', 'success');
           } catch (e: any) {
             console.error('❌ Receipt auto-print failed:', e);
@@ -1001,7 +1060,7 @@ export default function POSPage() {
         showToast('QZ Tray offline - opening receipt preview (Print → Save as PDF)', 'error');
       }
       const fullOrder = await orderService.getById(lastCompletedOrderId);
-      await printReceipt(fullOrder, undefined, { template: posReceiptStyle === 'detailed' ? 'pos_receipt' : 'receipt' });
+      await printReceipt(fullOrder, undefined, { template: 'pos_receipt' });
       showToast('✅ Receipt printed', 'success');
     } catch (e: any) {
       console.error('❌ Receipt print failed:', e);
@@ -1091,24 +1150,8 @@ export default function POSPage() {
     }
   };
 
-  const fetchOutlets = async () => {
+  const fetchOutlets = async (role: string, storeId: string) => {
     try {
-      // If user is scoped to a single store, avoid fetching all stores.
-      // Do NOT rely on `user.store` being present (backend may not embed it).
-      if (scopedStoreId) {
-        try {
-          const res: any = await storeService.getStore(Number(scopedStoreId));
-          const storeObj = res?.data ?? res;
-          if (storeObj) {
-            setOutlets([storeObj]);
-            setSelectedOutlet(String(scopedStoreId));
-            return;
-          }
-        } catch {
-          // If the store fetch fails, we'll fall back to filtering the full list below.
-        }
-      }
-
       const response = await storeService.getStores({ is_active: true });
 
       // ✅ FIXED: Handle response type correctly
@@ -1135,17 +1178,12 @@ export default function POSPage() {
 
       setOutlets(stores);
 
-      if (scopedStoreId && stores.length > 0) {
-        const userStore = stores.find((store: Store) => Number(store.id) === Number(scopedStoreId));
-        if (userStore) setSelectedOutlet(String(userStore.id));
-      }
-
-      // Extra safety: if scoped, force single-store list even if API returned many stores.
-      if (scopedStoreId && stores.length > 0) {
-        const only = stores.filter((s: any) => Number(s.id) === Number(scopedStoreId));
-        if (only.length > 0) {
-          setOutlets(only as any);
-          setSelectedOutlet(String(scopedStoreId));
+      if (storeId && stores.length > 0) {
+        const userStore = stores.find(
+          (store: Store) => String(store.id) === String(storeId)
+        );
+        if (userStore) {
+          setSelectedOutlet(String(userStore.id));
         }
       }
     } catch (error) {
@@ -1253,19 +1291,12 @@ export default function POSPage() {
 
       console.log('✅ Batches grouped for', batchesByProduct.size, 'products');
 
-      // ✅ Fetch all products
-      const result = await productService.getAll({
-        is_archived: false,
-        per_page: 1000,
-      });
+      // ✅ Fetch all products (page through backend caps)
+      const productsList: Product[] = await productService.getAllAll(
+        { is_archived: false },
+        { max_items: 200000 }
+      );
 
-      let productsList: Product[] = [];
-
-      if (Array.isArray(result)) {
-        productsList = result;
-      } else if (result?.data) {
-        productsList = Array.isArray(result.data) ? result.data : result.data.data || [];
-      }
 
       console.log('✅ Fetched', productsList.length, 'products');
 
@@ -1327,14 +1358,17 @@ export default function POSPage() {
   // ============ EFFECTS ============
 
   useEffect(() => {
-    // Keep legacy state fields for UI text, but source them from the auth context.
-    setUserRole(user?.role?.slug || '');
-    setUserName(user?.name || '');
+    const role = localStorage.getItem('userRole') || '';
+    const storeId = localStorage.getItem('storeId') || '';
+    const name = localStorage.getItem('userName') || '';
 
-    fetchOutlets();
+    setUserRole(role);
+    setUserName(name);
+
+    fetchOutlets(role, storeId);
     fetchEmployees();
     fetchPaymentMethods();
-  }, [user?.id]); // run after user loads
+  }, []); // ✅ Only run once on mount
 
   // ✅ FIXED: Only fetch products when outlet changes, not on every render
   useEffect(() => {
@@ -1462,31 +1496,19 @@ export default function POSPage() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                     Outlet <span className="text-red-500">*</span>
                   </label>
-                  {!canSelectStore && scopedStoreId ? (
-                    <input
-                      type="text"
-                      readOnly
-                      value={
-                        outlets.find((o) => String(o.id) === String(selectedOutlet))
-                          ? `${outlets.find((o) => String(o.id) === String(selectedOutlet))?.name ?? ''} - ${outlets.find((o) => String(o.id) === String(selectedOutlet))?.address ?? ''}`
-                          : 'Outlet'
-                      }
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white"
-                    />
-                  ) : (
-                    <select
-                      value={selectedOutlet}
-                      onChange={(e) => setSelectedOutlet(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    >
-                      <option value="">Choose an Outlet</option>
-                      {outlets.map((outlet) => (
-                        <option key={outlet.id} value={outlet.id}>
-                          {outlet.name} - {outlet.address}
-                        </option>
-                      ))}
-                    </select>
-                  )}
+                  <select
+                    value={selectedOutlet}
+                    onChange={(e) => setSelectedOutlet(e.target.value)}
+                      disabled={!canSelectStore}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  >
+                    <option value="">Choose an Outlet</option>
+                    {outlets.map((outlet) => (
+                      <option key={outlet.id} value={outlet.id}>
+                        {outlet.name} - {outlet.address}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 <div>
@@ -1793,13 +1815,8 @@ export default function POSPage() {
                   </div>
 
                   {/* ✅ NEW: Service Selector */}
-                  <ServiceSelector 
-                    onAddService={addServiceToCart}
-                    darkMode={darkMode}
-                    allowManualPrice={true}
-                  />
-
-                  {/* Cart Table */}
+{/* Service selector hidden in frontend as requested */}
+{/* Cart Table */}
                   <CartTable
                     items={cart}
                     onRemoveItem={removeFromCart}
@@ -2011,6 +2028,12 @@ export default function POSPage() {
                           ৳{Math.max(0, due).toFixed(2)}
                         </span>
                       </div>
+
+                      {!isInstallment && isUnderpaid && (
+                        <p className="mt-2 text-xs font-semibold text-red-600 dark:text-red-400">
+                          Full payment required before sale. Short by ৳{outstandingAmount.toFixed(2)}.
+                        </p>
+                      )}
                     </div>
 
                     <div className="mt-4 flex items-center justify-between gap-3">
@@ -2023,20 +2046,6 @@ export default function POSPage() {
                         />
                         Auto-print receipt
                       </label>
-
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-600 dark:text-gray-400">Receipt style</span>
-                        <select
-                          value={posReceiptStyle}
-                          onChange={(e) => setPosReceiptStyle(e.target.value as any)}
-                          className="text-xs rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-2 py-1 text-gray-800 dark:text-gray-100"
-                          title="Choose receipt print format"
-                        >
-                          <option value="compact">Compact</option>
-                          <option value="detailed">Detailed (RISE-style)</option>
-                        </select>
-                      </div>
-
 
                       {lastCompletedOrderId && (
                         <button
@@ -2051,10 +2060,16 @@ export default function POSPage() {
 
                     <button
                       onClick={handleSell}
-                      disabled={isProcessing || cart.length === 0}
+                      disabled={!canCompleteSale}
                       className="w-full py-2.5 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-100 text-white dark:text-gray-900 rounded-md text-sm font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {isProcessing ? 'Processing...' : isInstallment ? 'Complete Sale (Installment)' : 'Complete Sale'}
+                      {isProcessing
+                        ? 'Processing...'
+                        : isUnderpaid
+                          ? `Pay ৳${outstandingAmount.toFixed(2)} more`
+                          : isInstallment
+                            ? 'Complete Sale (Installment)'
+                            : 'Complete Sale'}
                     </button>
                   </div>
                 </div>

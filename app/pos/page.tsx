@@ -1292,10 +1292,21 @@ export default function POSPage() {
       console.log('✅ Batches grouped for', batchesByProduct.size, 'products');
 
       // ✅ Fetch all products (page through backend caps)
-      const productsList: Product[] = await productService.getAllAll(
-        { is_archived: false },
-        { max_items: 200000 }
-      );
+      const productResponse: any = await productService.getAll({
+        is_archived: false,
+        per_page: 50000,
+      });
+
+      let productsList: Product[] = [];
+      if (Array.isArray(productResponse)) {
+        productsList = productResponse;
+      } else if (Array.isArray(productResponse?.data)) {
+        productsList = productResponse.data;
+      } else if (Array.isArray(productResponse?.data?.data)) {
+        productsList = productResponse.data.data;
+      } else if (Array.isArray(productResponse?.items)) {
+        productsList = productResponse.items;
+      }
 
 
       console.log('✅ Fetched', productsList.length, 'products');

@@ -136,36 +136,67 @@ class OrderManagementService {
    * Assign order to a specific store
    */
   async assignOrderToStore(orderId: number, payload: AssignStorePayload): Promise<any> {
-    try {
-      console.log('📍 Assigning order to store:', { orderId, ...payload });
-      
-      const response = await axiosInstance.post(
-        `/order-management/orders/${orderId}/assign-store`,
-        payload
-      );
+    const normalizedOrderId = Number(orderId);
+    const normalizedStoreId = Number(payload?.store_id);
 
-      console.log('✅ Order assigned successfully:', response.data.data);
-
-      return response.data.data.order;
-    } catch (error: any) {
-      console.error('❌ Failed to assign order:', error);
-      
-      // Handle specific error cases
-      if (error.response?.status === 400) {
-        throw new Error(error.response.data.message || 'Order cannot be assigned');
-      }
-      
-      if (error.response?.data?.data) {
-        // Insufficient inventory error
-        const { product, required, available } = error.response.data.data;
-        throw new Error(
-          `Insufficient inventory for ${product}: Required ${required}, Available ${available}`
-        );
-      }
-      
-      throw new Error(error.response?.data?.message || 'Failed to assign order to store');
+    if (!normalizedOrderId || !normalizedStoreId) {
+      throw new Error('Invalid order/store selection');
     }
+
+    // Try canonical payload first, then a couple of common backend variants.
+    const payloadVariants: Array<Record<string, any>> = [
+      { store_id: normalizedStoreId, notes: payload?.notes },
+      { assigned_store_id: normalizedStoreId, notes: payload?.notes },
+      { storeId: normalizedStoreId, notes: payload?.notes },
+    ];
+
+    let lastError: any = null;
+
+    for (const body of payloadVariants) {
+      try {
+        console.log('📍 Assigning order to store:', { orderId: normalizedOrderId, body });
+
+        const response = await axiosInstance.post(
+          `/order-management/orders/${normalizedOrderId}/assign-store`,
+          body
+        );
+
+        console.log('✅ Order assigned successfully:', response.data?.data || response.data);
+
+        return response.data?.data?.order || response.data?.data || response.data;
+      } catch (error: any) {
+        lastError = error;
+        const status = error?.response?.status;
+        const serverMessage = error?.response?.data?.message;
+        console.error('❌ Assign attempt failed:', {
+          status,
+          serverMessage,
+          responseData: error?.response?.data,
+        });
+
+        // For clear client errors, no need to retry variants.
+        if (status === 400 || status === 404 || status === 422) {
+          if (error.response?.data?.data) {
+            const { product, required, available } = error.response.data.data;
+            if (product && required != null && available != null) {
+              throw new Error(
+                `Insufficient inventory for ${product}: Required ${required}, Available ${available}`
+              );
+            }
+          }
+          throw new Error(serverMessage || 'Order cannot be assigned');
+        }
+      }
+    }
+
+    // If all variants fail, bubble up most useful server message.
+    throw new Error(
+      lastError?.response?.data?.message ||
+      lastError?.message ||
+      'Failed to assign order to store'
+    );
   }
 }
+
 
 export default new OrderManagementService();

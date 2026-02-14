@@ -435,6 +435,8 @@ export default function CheckoutPage() {
           ...(it.variant_options ? { variant_options: it.variant_options } : {}),
         })),
         payment_method: guestPaymentMethod,
+        // Force no pre-assigned branch/store for ecommerce orders
+        store_id: null,
         delivery_address: {
           full_name: guestAddress.full_name,
           ...(guestAddress.phone?.trim() ? { phone: cleanPhone(guestAddress.phone) } : {}),
@@ -531,6 +533,8 @@ export default function CheckoutPage() {
         billing_address_id: sameAsShipping ? selectedShippingAddressId : (selectedBillingAddressId || selectedShippingAddressId),
         notes: orderNotes || '',
         delivery_preference: 'standard' as const,
+        // Keep unassigned; manual assignment from Store Assignment page
+        store_id: null,
       };
 
       if (appliedCoupon && couponCode) {

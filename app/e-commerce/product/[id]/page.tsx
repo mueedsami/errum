@@ -124,38 +124,43 @@ export default function ProductDetailPage() {
         setProduct(mainProduct);
         setRelatedProducts(response.related_products || []);
 
-        // ✅ If SKU is missing, treat this product as standalone (no variations)
-        if (!mainProduct.sku) {
-          const selfVariant: ProductVariant = {
-            id: mainProduct.id,
-            name: mainProduct.name,
-            sku: `product-${mainProduct.id}`,
-            color: getColorLabel(mainProduct.name),
-            size: getSizeLabel(mainProduct.name),
-            selling_price: (mainProduct as any).selling_price ?? null,
-            in_stock: !!(mainProduct as any).in_stock,
-            stock_quantity: (mainProduct as any).stock_quantity ?? 0,
-            images: (mainProduct as any).images ?? [],
-          };
-
-          setAllProducts([]);
-          setProductVariants([selfVariant]);
-          setSelectedVariant(selfVariant);
-          return;
-        }
-
         const allProductsResponse = await catalogService.getProducts({
-          per_page: 100,
+          // Pull a wider range so we can find sibling variations even when each variation has a unique SKU.
+          per_page: 500,
         });
 
         setAllProducts(allProductsResponse.products);
 
+        const mainBaseName = getBaseProductName(
+          mainProduct.name || '',
+          (mainProduct as any).base_name || undefined
+        );
+        const mainCategoryId = mainProduct.category?.id;
+
         const variations: ProductVariant[] = allProductsResponse.products
-          .filter(p => p.sku === mainProduct.sku)
-          .map(p => ({
+          .filter((p) => {
+            const sameSku = !!mainProduct.sku && p.sku === mainProduct.sku;
+
+            const candidateBaseName = getBaseProductName(
+              p.name || '',
+              (p as any).base_name || undefined
+            );
+
+            const sameBaseName =
+              candidateBaseName.trim().toLowerCase() ===
+              mainBaseName.trim().toLowerCase();
+
+            const sameCategory = mainCategoryId
+              ? p.category?.id === mainCategoryId
+              : true;
+
+            // Accept sibling by mother name + category, with SKU fallback.
+            return p.id === mainProduct.id || sameSku || (sameBaseName && sameCategory);
+          })
+          .map((p) => ({
             id: p.id,
             name: p.name,
-            sku: p.sku,
+            sku: p.sku || `product-${p.id}`,
             color: getColorLabel(p.name),
             size: getSizeLabel(p.name),
             selling_price: (p as any).selling_price ?? null,
@@ -164,10 +169,11 @@ export default function ProductDetailPage() {
             images: (p as any).images ?? [],
           }))
           .sort((a, b) => {
-            const aColor = a.color || '';
-            const bColor = b.color || '';
-            const aSize = a.size || '';
-            const bSize = b.size || '';
+            const aColor = (a.color || '').toLowerCase();
+            const bColor = (b.color || '').toLowerCase();
+            const aSize = (a.size || '').toLowerCase();
+            const bSize = (b.size || '').toLowerCase();
+
             if (aColor !== bColor) return aColor.localeCompare(bColor);
             return aSize.localeCompare(bSize);
           });

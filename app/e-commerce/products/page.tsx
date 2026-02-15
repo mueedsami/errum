@@ -1,373 +1,311 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { Loader2, AlertCircle, ShoppingBag, ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { ShoppingCart, Heart, Eye, Loader2 } from 'lucide-react';
 
 import Navigation from '@/components/ecommerce/Navigation';
 import Footer from '@/components/ecommerce/Footer';
-import catalogService from '@/services/catalogService';
-import cartService from '@/services/cartService';
+import catalogService, { Product, PaginationMeta } from '@/services/catalogService';
+import { useCart } from '../CartContext';
+import CartSidebar from '@/components/ecommerce/cart/CartSidebar';
+import { wishlistUtils } from '@/lib/wishlistUtils';
+import {
+  formatGroupedPrice,
+  groupProductsByMother,
+  GroupedProduct,
+} from '@/lib/ecommerceProductGrouping';
 
-// Types for grouped products
-interface ProductVariant {
-  id: number;
-  sku: string;
-  full_name: string;
-  size_info?: string;
-  selling_price: number;
-  in_stock: boolean;
-  stock_quantity: number;
-  images: any[];
-}
+export default function ProductsPage() {
+  const router = useRouter();
+  const { addToCart } = useCart();
 
-interface GroupedProduct {
-  id: number;
-  name: string; // Base name
-  sku: string;
-  images: any[];
-  variants: ProductVariant[];
-  min_price: number;
-  max_price: number;
-  in_stock: boolean;
-}
+  const [rawProducts, setRawProducts] = useState<Product[]>([]);
+  const [pagination, setPagination] = useState<PaginationMeta | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-function ProductCard({ product }: { product: GroupedProduct }) {
-  const [selectedVariant, setSelectedVariant] = useState(product.variants[0]);
-  
-  // Extract unique sizes from variants
-  const sizes = [...new Set(product.variants.map(v => v.size_info).filter(Boolean))].sort();
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [addingGroupKey, setAddingGroupKey] = useState<string | null>(null);
+  const [isCartOpen, setIsCartOpen] = useState(false);
 
-  const primary = selectedVariant.images?.find((i: any) => i.is_primary) || selectedVariant.images?.[0] || product.images[0];
-  const imageUrl = primary?.url || primary?.image_url;
+  const [wishlistIds, setWishlistIds] = useState<Set<number>>(new Set());
 
-  const add = async () => {
+  const groupedProducts = useMemo(() => groupProductsByMother(rawProducts), [rawProducts]);
+
+  useEffect(() => {
+    fetchProducts();
+  }, []);
+
+  useEffect(() => {
+    const updateWishlistIds = () => {
+      const items = wishlistUtils.getAll();
+      setWishlistIds(new Set(items.map((i) => Number(i.id))));
+    };
+
+    updateWishlistIds();
+    window.addEventListener('wishlist-updated', updateWishlistIds);
+    return () => window.removeEventListener('wishlist-updated', updateWishlistIds);
+  }, []);
+
+  const fetchProducts = async () => {
     try {
-      await cartService.addToCart({ product_id: selectedVariant.id, quantity: 1 });
-      window.dispatchEvent(new Event('cart-updated'));
-      alert('Added to cart!');
-    } catch (err) {
-      console.error('Add to cart failed:', err);
-      alert('Failed to add to cart');
+      setLoading(true);
+      setError(null);
+
+      const response = await catalogService.getProducts({
+        per_page: 100,
+        sort_by: 'created_at',
+        sort_order: 'desc',
+      });
+
+      setRawProducts(response.products);
+      setPagination(response.pagination);
+    } catch (err: any) {
+      console.error('Error fetching products:', err);
+      setError('Failed to load products');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const priceDisplay = product.min_price === product.max_price
-    ? `৳${product.min_price.toFixed(0)}`
-    : `৳${product.min_price.toFixed(0)} - ৳${product.max_price.toFixed(0)}`;
+  const navigateToProduct = (productId: number) => {
+    router.push(`/e-commerce/product/${productId}`);
+  };
 
-  return (
-    <div className="bg-white border rounded-xl overflow-hidden hover:shadow-lg transition group">
-      <Link href={`/e-commerce/product/${selectedVariant.id}`} className="block">
-        <div className="aspect-square bg-gray-100 relative overflow-hidden">
-          {imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={imageUrl} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-gray-400">
-              <ShoppingBag />
-            </div>
-          )}
-          {!selectedVariant.in_stock && (
-            <div className="absolute inset-0 bg-black bg-opacity-40 flex items-center justify-center">
-              <span className="text-white font-semibold text-sm">Out of Stock</span>
-            </div>
-          )}
-        </div>
-        <div className="p-4">
-          <p className="font-semibold text-gray-900 line-clamp-2 min-h-[2.5rem]">{product.name}</p>
-          <p className="text-red-700 font-bold mt-2">{priceDisplay}</p>
-          
-          {/* Show variation count if there are multiple variants */}
-          {product.variants.length > 1 && (
-            <p className="text-xs text-gray-500 mt-1">
-              {sizes.length} size{sizes.length > 1 ? 's' : ''} available
-            </p>
-          )}
-        </div>
-      </Link>
-      
-      {/* Size Options */}
-      {sizes.length > 1 && (
-        <div className="px-4 pb-2">
-          <p className="text-xs text-gray-600 mb-2">Available Sizes:</p>
-          <div className="flex gap-1 flex-wrap">
-            {sizes.slice(0, 6).map(size => {
-              const variant = product.variants.find(v => v.size_info === size);
-              if (!variant) return null;
-              
-              return (
-                <button
-                  key={size}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setSelectedVariant(variant);
-                  }}
-                  disabled={!variant.in_stock}
-                  className={`px-2 py-1 text-xs border rounded transition-all ${
-                    selectedVariant.size_info === size
-                      ? 'bg-red-700 text-white border-red-700'
-                      : variant.in_stock
-                      ? 'bg-white text-gray-700 border-gray-300 hover:border-red-700'
-                      : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                  }`}
-                >
-                  {size}
-                </button>
-              );
-            })}
-            {sizes.length > 6 && <span className="text-xs text-gray-500 self-center">+{sizes.length - 6}</span>}
-          </div>
-        </div>
-      )}
-      
-      <div className="p-4 pt-0">
-        <button 
-          onClick={add} 
-          disabled={!selectedVariant.in_stock}
-          className={`w-full font-semibold py-2.5 rounded-lg transition ${
-            selectedVariant.in_stock
-              ? 'bg-red-700 hover:bg-red-800 text-white'
-              : 'bg-gray-300 text-gray-500 cursor-not-allowed'
-          }`}
-        >
-          {selectedVariant.in_stock ? 'Add to Cart' : 'Out of Stock'}
-        </button>
-      </div>
-    </div>
-  );
-}
+  const toggleWishlist = (group: GroupedProduct, e: React.MouseEvent) => {
+    e.stopPropagation();
 
-export default function ProductsPage() {
-  const [products, setProducts] = useState<GroupedProduct[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [pagination, setPagination] = useState<any>(null);
+    const representative = group.variants.find((v) => v.in_stock) || group.variants[0];
+    if (!representative) return;
 
-  useEffect(() => {
-    (async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const data: any = await catalogService.getProducts({ page, per_page: 100 });
-        
-        console.log('📦 Fetched products:', data.products?.length);
-        console.log('📝 Sample product name:', data.products?.[0]?.name);
-        
-        // Group products by base name
-        const grouped = groupProducts(data.products || []);
-        console.log('🔄 Grouped into:', grouped.length, 'products');
-        console.log('📊 Sample grouped product:', grouped[0]);
-        
-        setProducts(grouped);
-        setPagination(data.pagination || null);
-      } catch (err: any) {
-        console.error('Failed to fetch products:', err);
-        setError('Failed to load products. Please try again.');
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [page]);
+    const productId = representative.id;
 
-  const canPrev = page > 1;
-  const canNext = pagination?.has_next_page ?? false;
-
-  return (
-    <div className="min-h-screen bg-gray-50">
-      <Navigation />
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="flex items-start justify-between gap-4 mb-8">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-900">All Products</h1>
-            <p className="text-gray-600 mt-1">Browse our full catalog</p>
-          </div>
-        </div>
-
-        {error && (
-          <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-            <AlertCircle className="text-red-600 flex-shrink-0 mt-0.5" size={20} />
-            <p className="text-red-700 text-sm">{error}</p>
-          </div>
-        )}
-
-        {loading ? (
-          <div className="text-center py-20">
-            <Loader2 className="animate-spin h-10 w-10 text-red-700 mx-auto mb-3" />
-            <p className="text-gray-600">Loading products...</p>
-          </div>
-        ) : (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-              {products.map((p) => (
-                <ProductCard key={p.id} product={p} />
-              ))}
-            </div>
-
-            {products.length === 0 && !loading && (
-              <div className="text-center py-20">
-                <ShoppingBag className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                <p className="text-gray-600">No products found</p>
-              </div>
-            )}
-
-            <div className="flex items-center justify-between mt-8">
-              <button
-                disabled={!canPrev}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition"
-              >
-                <ChevronLeft size={18} /> Prev
-              </button>
-              <div className="text-sm text-gray-600">
-                Page {page} {pagination?.total ? `of ${pagination.last_page || '?'}` : ''}
-              </div>
-              <button
-                disabled={!canNext}
-                onClick={() => setPage((p) => p + 1)}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg border disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50 transition"
-              >
-                Next <ChevronRight size={18} />
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-
-      <Footer />
-    </div>
-  );
-}
-
-/**
- * Group products by extracting base name
- * Handles patterns like:
- * - "Nike Air Force 1 Low Supreme Black White (1:1)-na-45-us-11"
- * - "Nike Air Force 1 Low Supreme Black White (1:1)-na-44-us-10"
- * Should group into: "Nike Air Force 1 Low Supreme Black White"
- */
-function groupProducts(products: any[]): GroupedProduct[] {
-  const grouped = new Map<string, GroupedProduct>();
-
-  products.forEach(product => {
-    // Extract base name by removing size suffix
-    const baseName = extractBaseName(product.name);
-    const sizeInfo = extractSizeInfo(product.name);
-
-    console.log('Processing:', product.name);
-    console.log('  → Base:', baseName);
-    console.log('  → Size:', sizeInfo);
-
-    if (!grouped.has(baseName)) {
-      // Create new grouped product
-      grouped.set(baseName, {
-        id: product.id,
-        name: baseName,
-        sku: product.sku?.split('-').slice(0, -3).join('-') || product.sku,
-        images: product.images || [],
-        variants: [],
-        min_price: product.selling_price,
-        max_price: product.selling_price,
-        in_stock: product.in_stock
+    if (wishlistIds.has(productId)) {
+      wishlistUtils.remove(productId);
+    } else {
+      wishlistUtils.add({
+        id: productId,
+        name: group.baseName,
+        image: representative.image,
+        price: representative.price,
+        sku: representative.sku,
       });
     }
+  };
 
-    const group = grouped.get(baseName)!;
+  const handleAddToCart = async (group: GroupedProduct, e: React.MouseEvent) => {
+    e.stopPropagation();
 
-    // Add variant
-    group.variants.push({
-      id: product.id,
-      sku: product.sku,
-      full_name: product.name,
-      size_info: sizeInfo,
-      selling_price: product.selling_price,
-      in_stock: product.in_stock,
-      stock_quantity: product.stock_quantity,
-      images: product.images || []
-    });
+    const representative = group.variants.find((v) => v.in_stock) || group.variants[0];
+    if (!representative) return;
 
-    // Update price range
-    group.min_price = Math.min(group.min_price, product.selling_price);
-    group.max_price = Math.max(group.max_price, product.selling_price);
-
-    // Update stock status
-    if (product.in_stock) {
-      group.in_stock = true;
+    // If there are variations, open product details for variation selection.
+    if (group.totalVariants > 1) {
+      navigateToProduct(representative.id);
+      return;
     }
 
-    // Use images from in-stock variant if available
-    if (product.in_stock && product.images?.length > 0) {
-      group.images = product.images;
-    }
-  });
+    setAddingGroupKey(group.key);
 
-  return Array.from(grouped.values());
-}
+    addToCart(
+      {
+        id: representative.id,
+        name: group.baseName,
+        image: representative.image,
+        price: representative.price,
+        sku: representative.sku || '',
+        quantity: 1,
+      } as any,
+      1
+    );
 
-/**
- * Extract base product name by removing size/variant suffix
- * Examples:
- * "Nike Air Force 1 Low Supreme Black White (1:1)-na-45-us-11" → "Nike Air Force 1 Low Supreme Black White (1:1)"
- * "Air Force 1 07 Fossil-not-applicable-46-us-12" → "Air Force 1 07 Fossil"
- */
-function extractBaseName(fullName: string): string {
-  // Pattern 1: Product name with (1:1) - keep the (1:1) part
-  // Remove everything after "(1:1)-" pattern (the size suffix)
-  const pattern1Match = fullName.match(/^(.+\(1:1\))-/);
-  if (pattern1Match) {
-    return pattern1Match[1].trim();
-  }
-  
-  // Pattern 2: Remove size suffix like "-not-applicable-46-us-12" or "-na-45-us-11"
-  // Match patterns like: -na-XX-us-XX or -not-applicable-XX-us-XX
-  const sizePattern = /-(na|not-applicable)-\d+-us-\d+$/i;
-  if (sizePattern.test(fullName)) {
-    return fullName.replace(sizePattern, '').trim();
-  }
-  
-  // Pattern 3: Remove last part if it looks like a size (e.g., "-42", "-us-11")
-  const parts = fullName.split('-');
-  if (parts.length >= 2) {
-    const lastPart = parts[parts.length - 1];
-    const secondLast = parts[parts.length - 2];
-    
-    // Check if ends with size-like pattern
-    if (/^\d+$/.test(lastPart) || /^us-\d+$/i.test(`${secondLast}-${lastPart}`)) {
-      return parts.slice(0, -2).join('-').trim();
-    }
-  }
-  
-  return fullName.trim();
-}
+    setTimeout(() => {
+      setAddingGroupKey(null);
+      setIsCartOpen(true);
+    }, 1000);
+  };
 
-/**
- * Extract size information from product name
- * Examples:
- * "(1:1)-na-45-us-11" → "US 11 (EU 45)"
- * "-not-applicable-46-us-12" → "US 12 (EU 46)"
- */
-function extractSizeInfo(fullName: string): string | undefined {
-  // Pattern: -na-45-us-11 or -not-applicable-46-us-12
-  const match = fullName.match(/-(na|not-applicable)-(\d+)-us-(\d+)$/i);
-  if (match) {
-    const euSize = match[2];
-    const usSize = match[3];
-    return `US ${usSize} (EU ${euSize})`;
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <div className="flex items-center justify-center py-32">
+          <div className="text-center">
+            <Loader2 className="h-10 w-10 animate-spin text-red-700 mx-auto mb-3" />
+            <p className="text-gray-600">Loading products...</p>
+          </div>
+        </div>
+      </div>
+    );
   }
-  
-  // Try to find just US size
-  const usMatch = fullName.match(/-us-(\d+)$/i);
-  if (usMatch) {
-    return `US ${usMatch[1]}`;
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+        <div className="flex items-center justify-center py-32">
+          <div className="text-center">
+            <p className="text-red-600 mb-4">{error}</p>
+            <button
+              onClick={fetchProducts}
+              className="bg-red-800 text-white px-6 py-2 rounded-lg hover:bg-red-900"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
-  
-  // Try to find just EU size
-  const euMatch = fullName.match(/-(\d{2})$/);
-  if (euMatch) {
-    return `EU ${euMatch[1]}`;
-  }
-  
-  return undefined;
+
+  return (
+    <>
+      <div className="min-h-screen bg-gray-50">
+        <Navigation />
+
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* Header */}
+          <div className="mb-8">
+            <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">All Products</h1>
+            <p className="text-gray-600">
+              {groupedProducts.length} mother products available
+              {pagination && ` (from ${pagination.total} total variants)`}
+            </p>
+          </div>
+
+          {/* Products Grid */}
+          {groupedProducts.length === 0 ? (
+            <div className="text-center py-20">
+              <p className="text-gray-500 text-lg">No products available</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {groupedProducts.map((group) => {
+                const representative = group.variants.find((v) => v.in_stock) || group.variants[0];
+                if (!representative) return null;
+
+                const isInWishlist = wishlistIds.has(representative.id);
+
+                return (
+                  <div
+                    key={group.key}
+                    className="group bg-white rounded-xl overflow-hidden hover:shadow-xl transition-all duration-300 border border-gray-200"
+                    onMouseEnter={() => setHoveredId(group.key)}
+                    onMouseLeave={() => setHoveredId(null)}
+                  >
+                    <div
+                      onClick={() => navigateToProduct(representative.id)}
+                      className="relative aspect-square overflow-hidden bg-gray-50 cursor-pointer"
+                    >
+                      <img
+                        src={group.primaryImage}
+                        alt={group.baseName}
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                        onError={(e) => {
+                          e.currentTarget.src = '/placeholder-product.png';
+                        }}
+                      />
+
+                      {group.totalVariants > 1 && (
+                        <span className="absolute top-3 left-3 bg-blue-600 text-white px-3 py-1.5 text-xs font-bold rounded-full shadow-lg">
+                          {group.totalVariants} OPTIONS
+                        </span>
+                      )}
+
+                      {!group.inStock && (
+                        <span className="absolute top-3 left-3 bg-red-600 text-white px-3 py-1.5 text-xs font-bold rounded-full shadow-lg">
+                          OUT OF STOCK
+                        </span>
+                      )}
+
+                      <div
+                        className={`absolute top-2 right-2 flex flex-col gap-2 transition-all duration-300 ${
+                          hoveredId === group.key ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4'
+                        }`}
+                      >
+                        <button
+                          onClick={(e) => toggleWishlist(group, e)}
+                          className={`p-2 rounded-full shadow-lg transition-all duration-300 ${
+                            isInWishlist ? 'bg-red-600 text-white scale-110' : 'bg-white hover:bg-red-50'
+                          }`}
+                        >
+                          <Heart size={16} className={isInWishlist ? 'fill-white' : 'text-gray-700'} />
+                        </button>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigateToProduct(representative.id);
+                          }}
+                          className="p-2 bg-white rounded-full shadow-lg hover:bg-blue-50 transition-colors"
+                        >
+                          <Eye size={16} className="text-gray-700" />
+                        </button>
+                      </div>
+
+                      <button
+                        onClick={(e) => handleAddToCart(group, e)}
+                        disabled={!group.inStock || addingGroupKey === group.key}
+                        className={`absolute bottom-0 left-0 right-0 text-white py-3 text-sm font-bold transition-transform duration-300 flex items-center justify-center gap-2 ${
+                          hoveredId === group.key ? 'translate-y-0' : 'translate-y-full'
+                        } ${
+                          !group.inStock
+                            ? 'bg-gray-400 cursor-not-allowed'
+                            : addingGroupKey === group.key
+                            ? 'bg-green-600'
+                            : group.totalVariants > 1
+                            ? 'bg-indigo-700 hover:bg-indigo-800'
+                            : 'bg-red-700 hover:bg-red-800'
+                        }`}
+                      >
+                        {addingGroupKey === group.key ? (
+                          <>✓ ADDED</>
+                        ) : group.totalVariants > 1 ? (
+                          'SELECT OPTION'
+                        ) : (
+                          <>
+                            <ShoppingCart size={16} />
+                            ADD TO CART
+                          </>
+                        )}
+                      </button>
+                    </div>
+
+                    <div className="p-4 text-center">
+                      <h3
+                        onClick={() => navigateToProduct(representative.id)}
+                        className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 group-hover:text-red-600 transition-colors cursor-pointer"
+                      >
+                        {group.baseName}
+                      </h3>
+
+                      <span className="text-lg font-bold text-red-700">{formatGroupedPrice(group)}</span>
+
+                      {group.totalVariants > 1 && (
+                        <p className="text-xs text-gray-500 mt-1">
+                          {group.totalVariants} variations available
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Pagination Info */}
+          {pagination && pagination.last_page > 1 && (
+            <div className="mt-8 text-center text-sm text-gray-600">
+              Page {pagination.current_page} of {pagination.last_page}
+            </div>
+          )}
+        </div>
+
+        <Footer />
+      </div>
+
+      <CartSidebar isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} />
+    </>
+  );
 }

@@ -3,10 +3,10 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import catalogService, { Product, PaginationMeta, CatalogCategory } from '@/services/catalogService';
-import { ShoppingCart, Heart, Eye, ArrowLeft } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import CategorySidebar from '@/components/ecommerce/category/CategorySidebar';
 import Navigation from '@/components/ecommerce/Navigation';
-import { getBaseProductName, getColorLabel } from '@/lib/productNameUtils';
+import { groupProductsByMother } from '@/lib/ecommerceProductGrouping';
 
 // Types for product grouping
 interface ProductVariant {
@@ -101,81 +101,36 @@ export default function CategoryProductsPage() {
     }
   };
 
-  // Helper functions
-      // Group products with variation logic
+  // Group variant rows under one mother product name
   const productGroups = useMemo((): ProductGroup[] => {
-    const groups = new Map<string, ProductGroup>();
+    const grouped = groupProductsByMother(products);
 
-    products.forEach((product) => {
-      const sku = product.sku || `product-${product.id}`;
-      const baseName = getBaseProductName(product.name || '');
-      const extractedColor = getColorLabel(product.name || '');
-      
-      // Find primary image or use first image
-      const images = product.images || [];
-      const primaryImage = images.find(img => img.is_primary) || images[0];
-      const imageUrl = primaryImage?.url || null;
-
-      // Group by SKU only - products with same SKU are variations
-      const groupKey = sku;
-
-      if (!groups.has(groupKey)) {
-        groups.set(groupKey, {
-          sku: sku,
-          baseName,
-          totalVariants: 0,
-          variants: [],
-          primaryImage: imageUrl,
-          category: product.category ? {
-            id: product.category.id,
-            name: product.category.name
-          } : undefined,
-          hasVariations: false,
-          lowestPrice: Number(product.selling_price) || 0,
-          highestPrice: Number(product.selling_price) || 0,
-        });
-      }
-
-      const group = groups.get(groupKey)!;
-      
-      // Get variant-specific image
-      const variantPrimaryImage = images.find(img => img.is_primary) || images[0];
-      const variantImageUrl = variantPrimaryImage?.url || null;
-
-      const price = Number(product.selling_price) || 0;
-      group.lowestPrice = Math.min(group.lowestPrice, price);
-      group.highestPrice = Math.max(group.highestPrice, price);
-
-      group.variants.push({
-        id: product.id,
-        name: product.name,
-        sku: product.sku || `product-${product.id}`,
-        color: extractedColor,
-        size: undefined,
-        image: variantImageUrl,
-        selling_price: String(product.selling_price || 0),
-        in_stock: product.in_stock || false,
-        stock_quantity: product.stock_quantity || 0,
-      });
-    });
-
-    // Calculate variants and mark groups with variations
-    groups.forEach(group => {
-      const uniqueColors = new Set(group.variants.map(v => v.color).filter(Boolean));
-      
-      // If we have colors, count unique colors
-      if (uniqueColors.size > 0) {
-        group.totalVariants = uniqueColors.size;
-        group.hasVariations = uniqueColors.size > 1;
-      }
-      // Otherwise just count total variants
-      else {
-        group.totalVariants = group.variants.length;
-        group.hasVariations = group.variants.length > 1;
-      }
-    });
-
-    return Array.from(groups.values());
+    return grouped.map((group) => ({
+      sku: group.key,
+      baseName: group.baseName,
+      totalVariants: group.totalVariants,
+      variants: group.variants.map((variant) => ({
+        id: variant.id,
+        name: variant.name,
+        sku: variant.sku || `product-${variant.id}`,
+        color: variant.color,
+        size: variant.size,
+        image: variant.image,
+        selling_price: String(variant.price || 0),
+        in_stock: variant.in_stock,
+        stock_quantity: variant.stock_quantity,
+      })),
+      primaryImage: group.primaryImage || null,
+      category: group.category
+        ? {
+            id: group.category.id,
+            name: group.category.name,
+          }
+        : undefined,
+      hasVariations: group.hasVariations,
+      lowestPrice: group.lowestPrice,
+      highestPrice: group.highestPrice,
+    }));
   }, [products]);
 
   const handleToggleCategory = (categoryId: number) => {

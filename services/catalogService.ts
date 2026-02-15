@@ -18,6 +18,8 @@ export interface Product {
   id: number;
   name: string;
   sku: string;
+  base_name?: string;
+  variation_suffix?: string;
   description: string;
   short_description?: string;
   selling_price: number;
@@ -34,6 +36,8 @@ export interface SimpleProduct {
   id: number;
   name: string;
   sku: string;
+  base_name?: string;
+  variation_suffix?: string;
   selling_price: number;
   images: ProductImage[];
   category?: string | ProductCategory | null;

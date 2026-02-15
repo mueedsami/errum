@@ -1,28 +1,60 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import catalogService, { SimpleProduct } from '@/services/catalogService';
+import React, { useState, useEffect, useMemo } from 'react';
+import { ShoppingCart, Heart, Eye } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { ShoppingCart, Heart, Eye, Sparkles } from 'lucide-react';
+import catalogService, { SimpleProduct } from '@/services/catalogService';
+import { useCart } from '@/app/e-commerce/CartContext';
+import CartSidebar from './cart/CartSidebar';
+import { wishlistUtils } from '@/lib/wishlistUtils';
+import {
+  formatGroupedPrice,
+  groupProductsByMother,
+  GroupedProduct,
+} from '@/lib/ecommerceProductGrouping';
 
 export default function NewArrivals() {
   const router = useRouter();
-  const [products, setProducts] = useState<SimpleProduct[]>([]);
+  const { addToCart } = useCart();
+
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [rawProducts, setRawProducts] = useState<SimpleProduct[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [addingGroupKey, setAddingGroupKey] = useState<string | null>(null);
+  const [isCartOpen, setIsCartOpen] = useState(false);
+  const [wishlistIds, setWishlistIds] = useState<Set<number>>(new Set());
+
+  const arrivalGroups = useMemo(
+    () => groupProductsByMother(rawProducts).slice(0, 8),
+    [rawProducts]
+  );
+
+  useEffect(() => {
+    const updateWishlistIds = () => {
+      const items = wishlistUtils.getAll();
+      setWishlistIds(new Set(items.map((i) => Number(i.id))));
+    };
+
+    updateWishlistIds();
+    window.addEventListener('wishlist-updated', updateWishlistIds);
+    return () => window.removeEventListener('wishlist-updated', updateWishlistIds);
+  }, []);
 
   useEffect(() => {
     const fetchNewArrivals = async () => {
       try {
         setLoading(true);
-        const data = await catalogService.getNewArrivals(8, 30);
-        console.log('New Arrivals Response:', data);
-        console.log('First Product:', data.new_arrivals[0]);
-        console.log('First Product Images:', data.new_arrivals[0]?.images);
-        setProducts(data.new_arrivals);
-      } catch (err: any) {
-        console.error('Error fetching new arrivals:', err);
-        setError(err.message || 'Failed to load new arrivals');
+
+        const response = await catalogService.getProducts({
+          per_page: 40,
+          sort_by: 'created_at',
+          sort_order: 'desc',
+          in_stock: true,
+        });
+
+        setRawProducts(response.products as any);
+      } catch (error) {
+        console.error('Error fetching new arrivals:', error);
       } finally {
         setLoading(false);
       }
@@ -31,166 +63,199 @@ export default function NewArrivals() {
     fetchNewArrivals();
   }, []);
 
-  const handleProductClick = (productId: number) => {
+  const navigateToProduct = (productId: number) => {
     router.push(`/e-commerce/product/${productId}`);
+  };
+
+  const toggleWishlist = (group: GroupedProduct, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    const representative = group.variants.find((v) => v.in_stock) || group.variants[0];
+    if (!representative) return;
+
+    const productId = representative.id;
+
+    if (wishlistIds.has(productId)) {
+      wishlistUtils.remove(productId);
+    } else {
+      wishlistUtils.add({
+        id: productId,
+        name: group.baseName,
+        image: representative.image,
+        price: representative.price,
+        sku: representative.sku,
+      });
+    }
+  };
+
+  const handleAddToCart = (group: GroupedProduct, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    const representative = group.variants.find((v) => v.in_stock) || group.variants[0];
+    if (!representative) return;
+
+    if (group.totalVariants > 1) {
+      navigateToProduct(representative.id);
+      return;
+    }
+
+    setAddingGroupKey(group.key);
+
+    addToCart(
+      {
+        id: representative.id,
+        name: group.baseName,
+        image: representative.image,
+        price: representative.price,
+        sku: representative.sku || '',
+        quantity: 1,
+      } as any,
+      1
+    );
+
+    setTimeout(() => {
+      setAddingGroupKey(null);
+      setIsCartOpen(true);
+    }, 1200);
   };
 
   if (loading) {
     return (
-      <section className="py-12 px-4 bg-white">
-        <div className="max-w-7xl mx-auto">
-          <div className="mb-8">
-            <div className="h-8 w-64 bg-gray-200 rounded-lg mb-2 animate-pulse"></div>
-            <div className="h-4 w-96 bg-gray-200 rounded-lg animate-pulse"></div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {[1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-              <div key={i} className="bg-gray-50 rounded-lg shadow-md p-4 animate-pulse">
-                <div className="aspect-square bg-gray-200 rounded-lg mb-4"></div>
-                <div className="h-4 bg-gray-200 rounded mb-2"></div>
-                <div className="h-4 bg-gray-200 rounded w-3/4 mb-2"></div>
-                <div className="h-6 bg-gray-200 rounded w-1/2"></div>
-              </div>
-            ))}
+      <section className="py-20 bg-gradient-to-b from-white to-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center">
+            <p className="text-gray-600">Loading new arrivals...</p>
           </div>
         </div>
       </section>
     );
   }
 
-  if (error || products.length === 0) {
+  if (arrivalGroups.length === 0) {
     return null;
   }
 
   return (
-    <section className="py-12 px-4 bg-white">
-      <div className="max-w-7xl mx-auto">
-        {/* Section Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-2 mb-2">
-            <Sparkles className="h-6 w-6 text-red-800" />
-            <h2 className="text-3xl font-bold text-gray-900">
-              New Arrivals
-            </h2>
+    <>
+      <section className="py-20 bg-gradient-to-b from-white to-gray-50">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center mb-16">
+            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">New Arrivals</h2>
+            <p className="text-lg text-gray-600">Fresh styles just landed</p>
           </div>
-          <p className="text-gray-600">
-            Fresh products added in the last 30 days
-          </p>
-        </div>
 
-        {/* Products Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {products.map((product) => {
-            // Better image handling
-            const imagesArray = Array.isArray(product.images) ? product.images : [];
-            const primaryImage = imagesArray.find(img => img.is_primary) || imagesArray[0];
-            const imageUrl = primaryImage?.url || '/placeholder-product.jpg';
-            
-            const categoryName = typeof product.category === 'string' 
-              ? product.category 
-              : product.category?.name;
-            
-            return (
-              <div
-                key={product.id}
-                className="bg-gray-50 rounded-lg shadow-md overflow-hidden hover:shadow-xl transition-shadow duration-300 cursor-pointer group"
-                onClick={() => handleProductClick(product.id)}
-              >
-                {/* Product Image */}
-                <div className="relative aspect-square overflow-hidden bg-gray-100">
-                  <img
-                    src={imageUrl}
-                    alt={product.name}
-                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                    onError={(e) => {
-                      const target = e.target as HTMLImageElement;
-                      if (!target.src.includes('/placeholder-product.jpg')) { target.src = '/placeholder-product.jpg'; }
-                    }}
-                  />
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            {arrivalGroups.map((group) => {
+              const representative = group.variants.find((v) => v.in_stock) || group.variants[0];
+              if (!representative) return null;
 
-                  {/* New Badge */}
-                  <div className="absolute top-2 left-2 bg-gradient-to-r from-red-800 to-red-900 text-white px-2 py-1 rounded-md text-xs font-semibold flex items-center gap-1">
-                    <Sparkles className="h-3 w-3" />
-                    New
-                  </div>
+              const isInWishlist = wishlistIds.has(representative.id);
 
-                  {/* Days Ago Badge (if available) */}
-                  {product.added_days_ago !== undefined && product.added_days_ago <= 7 && (
-                    <div className="absolute top-2 right-2 bg-white text-red-800 px-2 py-1 rounded-md text-xs font-semibold">
-                      {product.added_days_ago === 0 ? 'Today' : `${product.added_days_ago}d ago`}
+              return (
+                <div
+                  key={group.key}
+                  className="group bg-white rounded-lg overflow-hidden hover:shadow-xl transition-all duration-300 border border-gray-200"
+                  onMouseEnter={() => setHoveredId(group.key)}
+                  onMouseLeave={() => setHoveredId(null)}
+                >
+                  <div
+                    onClick={() => navigateToProduct(representative.id)}
+                    className="relative aspect-square overflow-hidden bg-gray-50 cursor-pointer"
+                  >
+                    <img
+                      src={group.primaryImage}
+                      alt={group.baseName}
+                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                      onError={(e) => {
+                        e.currentTarget.src = '/placeholder-product.png';
+                      }}
+                    />
+
+                    <span className="absolute top-3 left-3 bg-green-600 text-white px-3 py-1.5 text-xs font-bold rounded-full shadow-lg">
+                      New
+                    </span>
+
+                    {group.totalVariants > 1 && (
+                      <span className="absolute top-12 left-3 bg-blue-600 text-white px-2 py-1 text-[10px] font-semibold rounded-full shadow-lg">
+                        {group.totalVariants} options
+                      </span>
+                    )}
+
+                    <div
+                      className={`absolute top-2 right-2 flex flex-col gap-2 transition-all duration-300 ${
+                        hoveredId === group.key ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4'
+                      }`}
+                    >
+                      <button
+                        onClick={(e) => toggleWishlist(group, e)}
+                        className={`p-2 rounded-full shadow-lg transition-all duration-300 ${
+                          isInWishlist ? 'bg-red-600 text-white scale-110' : 'bg-white hover:bg-red-50'
+                        }`}
+                      >
+                        <Heart size={16} className={isInWishlist ? 'fill-white' : 'text-gray-700'} />
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigateToProduct(representative.id);
+                        }}
+                        className="p-2 bg-white rounded-full shadow-lg hover:bg-blue-50 transition-colors"
+                      >
+                        <Eye size={16} className="text-gray-700" />
+                      </button>
                     </div>
-                  )}
 
-                  {/* Quick Actions */}
-                  <div className="absolute bottom-2 right-2 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        // Add to wishlist logic
-                      }}
-                      className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100"
+                      onClick={(e) => handleAddToCart(group, e)}
+                      disabled={!group.inStock || addingGroupKey === group.key}
+                      className={`absolute bottom-0 left-0 right-0 text-white py-3 text-sm font-bold transition-transform duration-300 flex items-center justify-center gap-2 ${
+                        hoveredId === group.key ? 'translate-y-0' : 'translate-y-full'
+                      } ${
+                        !group.inStock
+                          ? 'bg-gray-400 cursor-not-allowed'
+                          : addingGroupKey === group.key
+                          ? 'bg-green-600'
+                          : group.totalVariants > 1
+                          ? 'bg-indigo-700 hover:bg-indigo-800'
+                          : 'bg-red-700 hover:bg-red-800'
+                      }`}
                     >
-                      <Heart className="h-4 w-4 text-gray-700" />
+                      {addingGroupKey === group.key ? (
+                        <>✓ ADDED</>
+                      ) : group.totalVariants > 1 ? (
+                        'SELECT OPTION'
+                      ) : (
+                        <>
+                          <ShoppingCart size={16} />
+                          ADD TO CART
+                        </>
+                      )}
                     </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleProductClick(product.id);
-                      }}
-                      className="bg-white p-2 rounded-full shadow-md hover:bg-gray-100"
+                  </div>
+
+                  <div className="p-4 text-center">
+                    <h3
+                      onClick={() => navigateToProduct(representative.id)}
+                      className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 group-hover:text-red-600 transition-colors cursor-pointer"
                     >
-                      <Eye className="h-4 w-4 text-gray-700" />
-                    </button>
+                      {group.baseName}
+                    </h3>
+
+                    <span className="text-lg font-bold text-red-700">{formatGroupedPrice(group)}</span>
+
+                    {group.totalVariants > 1 && (
+                      <p className="text-xs text-gray-500 mt-1">{group.totalVariants} variations available</p>
+                    )}
                   </div>
                 </div>
-
-                {/* Product Info */}
-                <div className="p-4">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 min-h-[2.5rem]">
-                    {product.name}
-                  </h3>
-
-                  {/* Category */}
-                  {categoryName && (
-                    <p className="text-xs text-gray-500 mb-2">
-                      {categoryName}
-                    </p>
-                  )}
-
-                  {/* Price */}
-                  <div className="flex items-center space-x-2 mb-3">
-                    <span className="text-lg font-bold text-gray-900">
-                      ৳{Number(product.selling_price).toFixed(2)}
-                    </span>
-                  </div>
-
-                  {/* Stock Status and Cart Button */}
-                  <div className="flex items-center justify-between">
-                    <span className={`text-xs font-medium ${product.in_stock ? 'text-red-800' : 'text-red-600'}`}>
-                      {product.in_stock ? 'In Stock' : 'Out of Stock'}
-                    </span>
-                    
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        // Add to cart logic
-                      }}
-                      disabled={!product.in_stock}
-                      className={`p-2 rounded-full ${
-                        product.in_stock
-                          ? 'bg-red-800 text-white hover:bg-red-900'
-                          : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                      } transition-colors`}
-                    >
-                      <ShoppingCart className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
+
+      <CartSidebar isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} />
+    </>
   );
 }

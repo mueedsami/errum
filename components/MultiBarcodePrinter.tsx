@@ -1,6 +1,13 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
+import {
+  LABEL_WIDTH_MM as SHARED_LABEL_WIDTH_MM,
+  LABEL_HEIGHT_MM as SHARED_LABEL_HEIGHT_MM,
+  DEFAULT_DPI as SHARED_DEFAULT_DPI,
+  mmToIn as sharedMmToIn,
+  renderBarcodeLabelBase64,
+} from "@/lib/barcodeLabelRenderer";
 
 // A lightweight multi-label printer that prints multiple different barcodes in one click.
 // Uses the same 39x25mm pixel-perfect printing approach used in BatchPrinter.
@@ -361,10 +368,10 @@ export default function MultiBarcodePrinter({
     try {
       await ensureQZConnection();
 
-      const dpi = DEFAULT_DPI;
+      const dpi = SHARED_DEFAULT_DPI;
       const config = qz.configs.create(defaultPrinter, {
         units: "in",
-        size: { width: mmToIn(LABEL_WIDTH_MM), height: mmToIn(LABEL_HEIGHT_MM) },
+        size: { width: sharedMmToIn(SHARED_LABEL_WIDTH_MM), height: sharedMmToIn(SHARED_LABEL_HEIGHT_MM) },
         margins: { top: 0, right: 0, bottom: 0, left: 0 },
         density: dpi,
         colorType: "blackwhite",
@@ -378,11 +385,12 @@ export default function MultiBarcodePrinter({
         if (!qty) continue;
 
         for (let i = 0; i < qty; i++) {
-          const base64 = await renderLabelBase64({
+          const base64 = await renderBarcodeLabelBase64({
             code: it.code,
             productName: it.productName || "Product",
             price: it.price,
             dpi,
+            brandName: "Errum BD",
           });
           data.push({
             type: "pixel",

@@ -15,6 +15,13 @@ import productImageService from '@/services/productImageService';
 import storeService, { Store } from '@/services/storeService';
 import { connectQZ, getDefaultPrinter } from '@/lib/qz-tray';
 import BatchPrinter from "@/components/BatchPrinter";
+import {
+  LABEL_WIDTH_MM as SHARED_LABEL_WIDTH_MM,
+  LABEL_HEIGHT_MM as SHARED_LABEL_HEIGHT_MM,
+  DEFAULT_DPI as SHARED_DEFAULT_DPI,
+  mmToIn as sharedMmToIn,
+  renderBarcodeLabelBase64,
+} from "@/lib/barcodeLabelRenderer";
 
 // -----------------------
 // QZ + barcode label rendering (same configuration as BatchPrinter)
@@ -168,7 +175,7 @@ async function renderLabelBase64(opts: { code: string; productName: string; pric
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   ctx.font = `800 ${Math.round(hPx * 0.11)}px Arial`;
-  ctx.fillText("Deshio", centerX, topPad);
+  ctx.fillText("Errum BD", centerX, topPad);
 
   // Product name (match BatchPrinter)
   const nameY = topPad + Math.round(hPx * 0.14);
@@ -924,18 +931,19 @@ export default function LookupPage() {
       }
       if (!printer) throw new Error('No printer found. Set a default printer and try again.');
 
-      const dpi = DEFAULT_DPI;
+      const dpi = SHARED_DEFAULT_DPI;
 
-      const base64 = await renderLabelBase64({
+      const base64 = await renderBarcodeLabelBase64({
         code: params.barcode,
         productName: (params.productName || 'Product').trim(),
         price: safeNum(params.price),
         dpi,
+        brandName: "Errum BD",
       });
 
       const config = qz.configs.create(printer, {
         units: 'in',
-        size: { width: mmToIn(LABEL_WIDTH_MM), height: mmToIn(LABEL_HEIGHT_MM) },
+        size: { width: sharedMmToIn(SHARED_LABEL_WIDTH_MM), height: sharedMmToIn(SHARED_LABEL_HEIGHT_MM) },
         margins: { top: 0, right: 0, bottom: 0, left: 0 },
         density: dpi,
         colorType: 'blackwhite',

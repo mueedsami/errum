@@ -23,6 +23,8 @@ import orderManagementService, {
   AvailableStoresResponse,
 } from '@/services/orderManagementService';
 import Toast from '@/components/Toast';
+import storeService from '@/services/storeService';
+import inventoryService from '@/services/inventoryService';
 
 export default function StoreAssignmentPage() {
   const [darkMode, setDarkMode] = useState(false);
@@ -56,7 +58,7 @@ export default function StoreAssignmentPage() {
     if (selectedOrderId) {
       const order = pendingOrders.find((o) => o.id === selectedOrderId);
       setSelectedOrder(order || null);
-      fetchAvailableStores(selectedOrderId);
+      fetchAvailableStores(selectedOrderId, order || null);
     }
     // include pendingOrders so selection works after refresh
   }, [selectedOrderId, pendingOrders]);
@@ -115,13 +117,24 @@ export default function StoreAssignmentPage() {
   };
 
   const normalizeAvailableStoresPayload = (data: any) => {
-    const candidateArrays = [
-      data?.stores,
-      data?.warehouses,
-      data?.available_stores,
-      data?.available_warehouses,
-      data?.outlets,
-    ].filter(Array.isArray);
+    const deepCandidates = [
+      data,
+      data?.data,
+      data?.data?.data,
+      data?.payload,
+      data?.result,
+    ];
+
+    const candidateArrays = deepCandidates
+      .flatMap((d: any) => [
+        d?.stores,
+        d?.warehouses,
+        d?.available_stores,
+        d?.available_warehouses,
+        d?.outlets,
+        d?.locations,
+      ])
+      .filter(Array.isArray);
 
     const mergedRaw = candidateArrays.flat();
 
@@ -130,15 +143,21 @@ export default function StoreAssignmentPage() {
       const metrics = computeFulfillmentMetrics(inventoryDetails);
       const backendPercent = toNumber(store?.fulfillment_percentage);
 
+      const storeId = toNumber(store?.store_id ?? store?.id);
+      const resolvedType = String(
+        store?.store_type ??
+          store?.type ??
+          (store?.is_warehouse === true ? 'warehouse' : 'store')
+      ).toLowerCase();
+
       return {
         ...store,
-        store_type:
-          store?.store_type ||
-          (store?.is_warehouse === true || String(store?.type || '').toLowerCase() === 'warehouse'
-            ? 'warehouse'
-            : 'store'),
+        store_id: storeId,
+        store_name: store?.store_name ?? store?.name ?? `Location #${storeId}`,
+        store_address: store?.store_address ?? store?.address ?? '—',
+        store_type: resolvedType === 'warehouse' ? 'warehouse' : 'store',
         fulfillment_percentage: Math.min(100, Math.max(0, metrics.percent || backendPercent || 0)),
-        can_fulfill_entire_order: metrics.canFulfillEntireOrder,
+        can_fulfill_entire_order: inventoryDetails.length ? metrics.canFulfillEntireOrder : !!store?.can_fulfill_entire_order,
         total_items_available:
           store?.total_items_available ??
           inventoryDetails.filter((d: any) => toNumber(d?.available_quantity) > 0).length,
@@ -147,10 +166,181 @@ export default function StoreAssignmentPage() {
       };
     });
 
+    // de-duplicate by store_id keeping richer entry (higher inventory detail count)
+    const dedupMap = new Map<number, any>();
+    for (const s of normalizedStores) {
+      const sid = toNumber(s?.store_id);
+      if (!sid) continue;
+      const prev = dedupMap.get(sid);
+      if (!prev) {
+        dedupMap.set(sid, s);
+        continue;
+      }
+      const prevLen = Array.isArray(prev?.inventory_details) ? prev.inventory_details.length : 0;
+      const currLen = Array.isArray(s?.inventory_details) ? s.inventory_details.length : 0;
+      if (currLen > prevLen) {
+        dedupMap.set(sid, { ...prev, ...s });
+      } else {
+        dedupMap.set(sid, { ...s, ...prev });
+      }
+    }
+
     return {
       ...data,
-      stores: normalizedStores,
+      stores: Array.from(dedupMap.values()),
     };
+  };
+
+  const extractWarehouseList = (raw: any): any[] => {
+    const candidates = [
+      raw?.data?.data,
+      raw?.data,
+      raw?.warehouses,
+      raw?.stores,
+      raw,
+    ];
+
+    for (const c of candidates) {
+      if (Array.isArray(c)) {
+        return c.filter((x: any) => {
+          const t = String(x?.store_type ?? x?.type ?? '').toLowerCase();
+          return x?.is_warehouse === true || t === 'warehouse';
+        });
+      }
+    }
+
+    return [];
+  };
+
+  const buildWarehouseRowsFromInventory = async (order: PendingAssignmentOrder | null) => {
+    if (!order?.items?.length) return [] as any[];
+
+    // 1) Warehouse master list
+    let warehouseMasters: any[] = [];
+    try {
+      const warehousesResp = await storeService.getWarehouses();
+      warehouseMasters = extractWarehouseList(warehousesResp);
+    } catch (e) {
+      console.warn('Could not load warehouse master list:', e);
+    }
+
+    const warehouseMeta = new Map<number, any>();
+    warehouseMasters.forEach((w: any) => {
+      const id = toNumber(w?.id ?? w?.store_id);
+      if (!id) return;
+      warehouseMeta.set(id, {
+        id,
+        name: w?.name ?? w?.store_name ?? `Warehouse #${id}`,
+        address: w?.address ?? w?.store_address ?? '—',
+      });
+    });
+
+    // 2) Global inventory snapshot (includes store-wise quantities)
+    let inventoryItems: any[] = [];
+    try {
+      const inventoryResp: any = await inventoryService.getGlobalInventory();
+      const cands = [inventoryResp?.data, inventoryResp?.data?.data, inventoryResp];
+      for (const c of cands) {
+        if (Array.isArray(c)) {
+          inventoryItems = c;
+          break;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not load global inventory for warehouses:', e);
+    }
+
+    type WarehouseAgg = {
+      store_id: number;
+      store_name: string;
+      store_address: string;
+      byProduct: Map<number, number>;
+      bySku: Map<string, number>;
+    };
+
+    const warehouseAgg = new Map<number, WarehouseAgg>();
+
+    const ensureAgg = (id: number, fallbackName?: string, fallbackAddress?: string) => {
+      if (!warehouseAgg.has(id)) {
+        const meta = warehouseMeta.get(id);
+        warehouseAgg.set(id, {
+          store_id: id,
+          store_name: meta?.name ?? fallbackName ?? `Warehouse #${id}`,
+          store_address: meta?.address ?? fallbackAddress ?? '—',
+          byProduct: new Map<number, number>(),
+          bySku: new Map<string, number>(),
+        });
+      }
+      return warehouseAgg.get(id)!;
+    };
+
+    // seed from warehouse master so 0-stock warehouses are still visible
+    for (const [id, meta] of warehouseMeta.entries()) {
+      ensureAgg(id, meta?.name, meta?.address);
+    }
+
+    for (const item of inventoryItems) {
+      const productId = toNumber(item?.product_id);
+      const sku = String(item?.sku || '').trim().toLowerCase();
+      const stores = Array.isArray(item?.stores) ? item.stores : [];
+
+      for (const s of stores) {
+        const sid = toNumber(s?.store_id ?? s?.id);
+        if (!sid) continue;
+
+        const sType = String(s?.store_type ?? s?.type ?? '').toLowerCase();
+        const isWarehouse = s?.is_warehouse === true || sType === 'warehouse' || warehouseMeta.has(sid);
+        if (!isWarehouse) continue;
+
+        const agg = ensureAgg(sid, s?.store_name ?? s?.name, s?.store_address ?? s?.address);
+        const qty = toNumber(s?.quantity);
+
+        if (productId) {
+          agg.byProduct.set(productId, toNumber(agg.byProduct.get(productId)) + qty);
+        }
+        if (sku) {
+          agg.bySku.set(sku, toNumber(agg.bySku.get(sku)) + qty);
+        }
+      }
+    }
+
+    const rows = Array.from(warehouseAgg.values()).map((w) => {
+      const inventory_details = order.items.map((oi: any) => {
+        const req = toNumber(oi?.quantity);
+        const pid = toNumber(oi?.product_id);
+        const sku = String(oi?.product_sku || '').trim().toLowerCase();
+
+        const byPid = pid ? toNumber(w.byProduct.get(pid)) : 0;
+        const bySku = sku ? toNumber(w.bySku.get(sku)) : 0;
+        const available = Math.max(byPid, bySku);
+
+        return {
+          product_id: pid,
+          product_name: oi?.product_name ?? 'Unknown Product',
+          product_sku: oi?.product_sku ?? '',
+          required_quantity: req,
+          available_quantity: available,
+          can_fulfill: available >= req,
+          batches: [],
+        };
+      });
+
+      const metrics = computeFulfillmentMetrics(inventory_details);
+
+      return {
+        store_id: w.store_id,
+        store_name: w.store_name,
+        store_address: w.store_address,
+        store_type: 'warehouse',
+        inventory_details,
+        total_items_available: inventory_details.filter((d: any) => toNumber(d.available_quantity) > 0).length,
+        total_items_required: inventory_details.length,
+        can_fulfill_entire_order: metrics.canFulfillEntireOrder,
+        fulfillment_percentage: metrics.percent,
+      };
+    });
+
+    return rows;
   };
 
   const fetchPendingOrders = async () => {
@@ -182,19 +372,55 @@ export default function StoreAssignmentPage() {
     }
   };
 
-  const fetchAvailableStores = async (orderId: number) => {
+  const fetchAvailableStores = async (orderId: number, orderCtx: PendingAssignmentOrder | null = null) => {
     setIsLoadingStores(true);
     try {
       const data = await orderManagementService.getAvailableStores(orderId);
       const normalized = normalizeAvailableStoresPayload(data);
-      setAvailableStoresData(normalized);
 
-      // Auto-select recommended store if available
-      if (normalized?.recommendation?.store_id) {
-        setSelectedStoreId(normalized.recommendation.store_id);
+      let mergedStores = Array.isArray(normalized?.stores) ? [...normalized.stores] : [];
+      const hasWarehouseAlready = mergedStores.some(
+        (s: any) => String(s?.store_type ?? s?.type ?? '').toLowerCase() === 'warehouse'
+      );
+
+      // Fallback: if API doesn't return warehouses, derive them from warehouse master + global inventory.
+      if (!hasWarehouseAlready) {
+        const fallbackWarehouses = await buildWarehouseRowsFromInventory(orderCtx || selectedOrder || null);
+        const existingIds = new Set(mergedStores.map((s: any) => toNumber(s?.store_id ?? s?.id)).filter(Boolean));
+        for (const w of fallbackWarehouses) {
+          const sid = toNumber(w?.store_id);
+          if (!sid || existingIds.has(sid)) continue;
+          mergedStores.push(w);
+        }
       }
 
-      console.log('🏪 Available stores loaded:', data?.stores?.length || 0);
+      const mergedPayload: any = {
+        ...normalized,
+        stores: mergedStores,
+      };
+
+      // Recompute recommendation if backend recommendation is missing from merged list
+      if (mergedStores.length && mergedPayload?.recommendation?.store_id) {
+        const recId = toNumber(mergedPayload.recommendation.store_id);
+        const hasRec = mergedStores.some((s: any) => toNumber(s?.store_id) === recId);
+        if (!hasRec) {
+          mergedPayload.recommendation = null;
+        }
+      }
+
+      setAvailableStoresData(mergedPayload);
+
+      // Auto-select recommended store if available, else best fulfillment candidate
+      if (mergedPayload?.recommendation?.store_id) {
+        setSelectedStoreId(toNumber(mergedPayload.recommendation.store_id));
+      } else if (mergedStores.length) {
+        const sorted = [...mergedStores].sort(
+          (a: any, b: any) => toNumber(b?.fulfillment_percentage) - toNumber(a?.fulfillment_percentage)
+        );
+        setSelectedStoreId(toNumber(sorted[0]?.store_id));
+      }
+
+      console.log('🏪 Available locations loaded:', mergedStores.length);
     } catch (error: any) {
       console.error('Error fetching stores:', error);
       displayToast('Error loading stores: ' + (error?.message || 'Unknown error'), 'error');

@@ -16,7 +16,14 @@ const SIZE_TOKENS = new Set([
 
 const MARKET_SIZE_TOKENS = new Set(['US', 'EU', 'UK', 'BD', 'CM', 'MM']);
 
-const normalize = (s: string) => (s || '').replace(/\s+/g, ' ').trim();
+const normalize = (s: string) =>
+  (s || '')
+    // Normalize unicode dash variants to ASCII hyphen for reliable tokenization.
+    .replace(/[‐‑‒–—−﹘﹣－]/g, '-')
+    // Remove zero-width characters sometimes introduced by copy/paste.
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 const isNumeric = (s: string) => /^\d+$/.test(s.trim());
 const isSizeToken = (s: string) => SIZE_TOKENS.has(s.trim().toUpperCase());
 
@@ -131,7 +138,16 @@ export function splitNameParts(name: string): string[] {
  */
 export function getBaseProductName(name: string, explicitBaseName?: string): string {
   const explicit = normalize(explicitBaseName || '');
-  if (explicit) return explicit;
+  if (explicit) {
+    const normalizedName = normalize(name || '');
+
+    // Usually backend base_name is authoritative.
+    // But when legacy rows accidentally store full variation name in base_name,
+    // explicit can equal the full `name` value. In that case, continue parsing.
+    if (!normalizedName || explicit !== normalizedName) {
+      return explicit;
+    }
+  }
 
   const normalized = normalize(name);
   const parts = splitNameParts(normalized);

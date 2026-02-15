@@ -37,6 +37,12 @@ export interface GroupingOptions {
    * inconsistent category shapes (object/string/null).
    */
   useCategoryInKey?: boolean;
+
+  /**
+   * Prefer SKU-level grouping when SKU is present.
+   * This matches backend variation model where one mother product shares SKU.
+   */
+  preferSkuGrouping?: boolean;
 }
 
 const toNumber = (value: any): number => {
@@ -78,9 +84,56 @@ function getCategoryKey(product: any): string {
   return 'none';
 }
 
+function normalizeSku(value: any): string {
+  if (value === null || value === undefined) return '';
+  return String(value).trim().toLowerCase();
+}
+
+function chooseGroupBaseName(products: any[], fallback: string): string {
+  if (!Array.isArray(products) || products.length === 0) return fallback;
+
+  const scored = new Map<string, { name: string; count: number; length: number }>();
+
+  products.forEach((product: any) => {
+    const parsed = getMotherBaseName(product).trim();
+    if (!parsed) return;
+
+    const key = parsed.toLowerCase();
+    const existing = scored.get(key);
+    if (existing) {
+      existing.count += 1;
+      // Keep shortest human-readable form as canonical label.
+      if (parsed.length < existing.length) {
+        existing.name = parsed;
+        existing.length = parsed.length;
+      }
+    } else {
+      scored.set(key, { name: parsed, count: 1, length: parsed.length });
+    }
+  });
+
+  if (scored.size === 0) return fallback;
+
+  const best = Array.from(scored.values()).sort((a, b) => {
+    if (a.count !== b.count) return b.count - a.count;
+    if (a.length !== b.length) return a.length - b.length;
+    return a.name.localeCompare(b.name);
+  })[0];
+
+  return best?.name || fallback;
+}
+
 export function getMotherGroupKey(product: any, options: GroupingOptions = {}): string {
-  const { useCategoryInKey = true } = options;
+  const { useCategoryInKey = true, preferSkuGrouping = true } = options;
   const baseName = getMotherBaseName(product).toLowerCase();
+
+  if (preferSkuGrouping) {
+    const sku = normalizeSku(product?.sku);
+    if (sku) {
+      // SKU is the most reliable variation group id in backend design.
+      return `sku:${sku}`;
+    }
+  }
 
   if (!useCategoryInKey) {
     return `base::${baseName}`;
@@ -94,12 +147,17 @@ export function groupProductsByMother(
   options: GroupingOptions = {}
 ): GroupedProduct[] {
   const groups = new Map<string, GroupedProduct>();
+  const productsByGroupKey = new Map<string, any[]>();
 
   (products || []).forEach((product: any) => {
     if (!product || typeof product !== 'object') return;
 
     const baseName = getMotherBaseName(product);
     const key = getMotherGroupKey(product, options);
+
+    const list = productsByGroupKey.get(key) || [];
+    list.push(product);
+    productsByGroupKey.set(key, list);
 
     if (!groups.has(key)) {
       groups.set(key, {
@@ -151,6 +209,9 @@ export function groupProductsByMother(
   });
 
   return Array.from(groups.values()).map((group) => {
+    const rawProducts = productsByGroupKey.get(group.key) || [];
+    const canonicalBaseName = chooseGroupBaseName(rawProducts, group.baseName);
+
     const uniqueById = new Map<number, GroupedVariant>();
     group.variants.forEach((v) => {
       if (!uniqueById.has(v.id)) uniqueById.set(v.id, v);
@@ -174,6 +235,7 @@ export function groupProductsByMother(
 
     return {
       ...group,
+      baseName: canonicalBaseName,
       variants,
       totalVariants: variants.length,
       hasVariations: variants.length > 1,

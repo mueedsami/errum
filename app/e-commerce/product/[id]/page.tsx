@@ -150,8 +150,10 @@ export default function ProductDetailPage() {
               candidateBaseName.trim().toLowerCase() ===
               mainBaseName.trim().toLowerCase();
 
+            // Some list rows may miss category while still being true siblings.
+            // Keep strict match when candidate has category, but allow null/undefined category rows.
             const sameCategory = mainCategoryId
-              ? p.category?.id === mainCategoryId
+              ? !p.category?.id || p.category.id === mainCategoryId
               : true;
 
             // Accept sibling by mother name + category, with SKU fallback.

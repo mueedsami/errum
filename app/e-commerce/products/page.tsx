@@ -8,14 +8,13 @@ import Navigation from '@/components/ecommerce/Navigation';
 import Footer from '@/components/ecommerce/Footer';
 import catalogService from '@/services/catalogService';
 import cartService from '@/services/cartService';
-import { getBaseProductName, getColorLabel, getSizeLabel } from '@/lib/productNameUtils';
 
 // Types for grouped products
 interface ProductVariant {
   id: number;
   sku: string;
-  color?: string;
-  size?: string;
+  full_name: string;
+  size_info?: string;
   selling_price: number;
   in_stock: boolean;
   stock_quantity: number;
@@ -36,18 +35,8 @@ interface GroupedProduct {
 function ProductCard({ product }: { product: GroupedProduct }) {
   const [selectedVariant, setSelectedVariant] = useState(product.variants[0]);
   
-  // Get unique colors and sizes
-  const colors = [...new Set(product.variants.map(v => v.color).filter(Boolean))];
-  const sizes = [...new Set(product.variants.map(v => v.size).filter(Boolean))].sort((a, b) => {
-    const sizeOrder = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
-    const aIdx = sizeOrder.indexOf(a?.toUpperCase() || '');
-    const bIdx = sizeOrder.indexOf(b?.toUpperCase() || '');
-    if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx;
-    const aNum = parseInt(a || '0');
-    const bNum = parseInt(b || '0');
-    if (!isNaN(aNum) && !isNaN(bNum)) return aNum - bNum;
-    return (a || '').localeCompare(b || '');
-  });
+  // Extract unique sizes from variants
+  const sizes = [...new Set(product.variants.map(v => v.size_info).filter(Boolean))].sort();
 
   const primary = selectedVariant.images?.find((i: any) => i.is_primary) || selectedVariant.images?.[0] || product.images[0];
   const imageUrl = primary?.url || primary?.image_url;
@@ -92,80 +81,43 @@ function ProductCard({ product }: { product: GroupedProduct }) {
           {/* Show variation count if there are multiple variants */}
           {product.variants.length > 1 && (
             <p className="text-xs text-gray-500 mt-1">
-              {colors.length > 0 && `${colors.length} color${colors.length > 1 ? 's' : ''}`}
-              {colors.length > 0 && sizes.length > 0 && ', '}
-              {sizes.length > 0 && `${sizes.length} size${sizes.length > 1 ? 's' : ''}`}
+              {sizes.length} size{sizes.length > 1 ? 's' : ''} available
             </p>
           )}
         </div>
       </Link>
       
-      {/* Size/Color Options */}
-      {(colors.length > 1 || sizes.length > 1) && (
+      {/* Size Options */}
+      {sizes.length > 1 && (
         <div className="px-4 pb-2">
-          {/* Colors */}
-          {colors.length > 1 && (
-            <div className="mb-2">
-              <p className="text-xs text-gray-600 mb-1">Colors:</p>
-              <div className="flex gap-1 flex-wrap">
-                {colors.slice(0, 5).map(color => {
-                  const variant = product.variants.find(v => v.color === color && (sizes.length === 0 || v.size === selectedVariant.size));
-                  if (!variant) return null;
-                  return (
-                    <button
-                      key={color}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setSelectedVariant(variant);
-                      }}
-                      className={`px-2 py-1 text-xs border rounded transition-all ${
-                        selectedVariant.color === color
-                          ? 'bg-red-700 text-white border-red-700'
-                          : 'bg-white text-gray-700 border-gray-300 hover:border-red-700'
-                      }`}
-                      title={color}
-                    >
-                      {color}
-                    </button>
-                  );
-                })}
-                {colors.length > 5 && <span className="text-xs text-gray-500 self-center">+{colors.length - 5}</span>}
-              </div>
-            </div>
-          )}
-          
-          {/* Sizes */}
-          {sizes.length > 1 && (
-            <div className="mb-2">
-              <p className="text-xs text-gray-600 mb-1">Sizes:</p>
-              <div className="flex gap-1 flex-wrap">
-                {sizes.slice(0, 6).map(size => {
-                  const variant = product.variants.find(v => v.size === size && (colors.length === 0 || v.color === selectedVariant.color));
-                  if (!variant) return null;
-                  return (
-                    <button
-                      key={size}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        setSelectedVariant(variant);
-                      }}
-                      disabled={!variant.in_stock}
-                      className={`px-2 py-1 text-xs border rounded transition-all ${
-                        selectedVariant.size === size
-                          ? 'bg-red-700 text-white border-red-700'
-                          : variant.in_stock
-                          ? 'bg-white text-gray-700 border-gray-300 hover:border-red-700'
-                          : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                      }`}
-                    >
-                      {size}
-                    </button>
-                  );
-                })}
-                {sizes.length > 6 && <span className="text-xs text-gray-500 self-center">+{sizes.length - 6}</span>}
-              </div>
-            </div>
-          )}
+          <p className="text-xs text-gray-600 mb-2">Available Sizes:</p>
+          <div className="flex gap-1 flex-wrap">
+            {sizes.slice(0, 6).map(size => {
+              const variant = product.variants.find(v => v.size_info === size);
+              if (!variant) return null;
+              
+              return (
+                <button
+                  key={size}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setSelectedVariant(variant);
+                  }}
+                  disabled={!variant.in_stock}
+                  className={`px-2 py-1 text-xs border rounded transition-all ${
+                    selectedVariant.size_info === size
+                      ? 'bg-red-700 text-white border-red-700'
+                      : variant.in_stock
+                      ? 'bg-white text-gray-700 border-gray-300 hover:border-red-700'
+                      : 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                  }`}
+                >
+                  {size}
+                </button>
+              );
+            })}
+            {sizes.length > 6 && <span className="text-xs text-gray-500 self-center">+{sizes.length - 6}</span>}
+          </div>
         </div>
       )}
       
@@ -200,8 +152,14 @@ export default function ProductsPage() {
         setError(null);
         const data: any = await catalogService.getProducts({ page, per_page: 100 });
         
+        console.log('📦 Fetched products:', data.products?.length);
+        console.log('📝 Sample product name:', data.products?.[0]?.name);
+        
         // Group products by base name
         const grouped = groupProducts(data.products || []);
+        console.log('🔄 Grouped into:', grouped.length, 'products');
+        console.log('📊 Sample grouped product:', grouped[0]);
+        
         setProducts(grouped);
         setPagination(data.pagination || null);
       } catch (err: any) {
@@ -263,7 +221,9 @@ export default function ProductsPage() {
               >
                 <ChevronLeft size={18} /> Prev
               </button>
-              <div className="text-sm text-gray-600">Page {page} {pagination?.total ? `of ${pagination.last_page || '?'}` : ''}</div>
+              <div className="text-sm text-gray-600">
+                Page {page} {pagination?.total ? `of ${pagination.last_page || '?'}` : ''}
+              </div>
               <button
                 disabled={!canNext}
                 onClick={() => setPage((p) => p + 1)}
@@ -282,23 +242,30 @@ export default function ProductsPage() {
 }
 
 /**
- * Group products by base name
- * Converts individual product records into grouped products with variants
+ * Group products by extracting base name
+ * Handles patterns like:
+ * - "Nike Air Force 1 Low Supreme Black White (1:1)-na-45-us-11"
+ * - "Nike Air Force 1 Low Supreme Black White (1:1)-na-44-us-10"
+ * Should group into: "Nike Air Force 1 Low Supreme Black White"
  */
 function groupProducts(products: any[]): GroupedProduct[] {
   const grouped = new Map<string, GroupedProduct>();
 
   products.forEach(product => {
-    const baseName = getBaseProductName(product.name);
-    const color = getColorLabel(product.name);
-    const size = getSizeLabel(product.name);
+    // Extract base name by removing size suffix
+    const baseName = extractBaseName(product.name);
+    const sizeInfo = extractSizeInfo(product.name);
+
+    console.log('Processing:', product.name);
+    console.log('  → Base:', baseName);
+    console.log('  → Size:', sizeInfo);
 
     if (!grouped.has(baseName)) {
       // Create new grouped product
       grouped.set(baseName, {
         id: product.id,
         name: baseName,
-        sku: extractBaseSku(product.sku),
+        sku: product.sku?.split('-').slice(0, -3).join('-') || product.sku,
         images: product.images || [],
         variants: [],
         min_price: product.selling_price,
@@ -313,8 +280,8 @@ function groupProducts(products: any[]): GroupedProduct[] {
     group.variants.push({
       id: product.id,
       sku: product.sku,
-      color,
-      size,
+      full_name: product.name,
+      size_info: sizeInfo,
       selling_price: product.selling_price,
       in_stock: product.in_stock,
       stock_quantity: product.stock_quantity,
@@ -340,9 +307,67 @@ function groupProducts(products: any[]): GroupedProduct[] {
 }
 
 /**
- * Extract base SKU from variant SKU
+ * Extract base product name by removing size/variant suffix
+ * Examples:
+ * "Nike Air Force 1 Low Supreme Black White (1:1)-na-45-us-11" → "Nike Air Force 1 Low Supreme Black White (1:1)"
+ * "Air Force 1 07 Fossil-not-applicable-46-us-12" → "Air Force 1 07 Fossil"
  */
-function extractBaseSku(sku: string): string {
-  const parts = sku.split('-');
-  return parts.slice(0, -2).join('-') || sku;
+function extractBaseName(fullName: string): string {
+  // Pattern 1: Product name with (1:1) - keep the (1:1) part
+  // Remove everything after "(1:1)-" pattern (the size suffix)
+  const pattern1Match = fullName.match(/^(.+\(1:1\))-/);
+  if (pattern1Match) {
+    return pattern1Match[1].trim();
+  }
+  
+  // Pattern 2: Remove size suffix like "-not-applicable-46-us-12" or "-na-45-us-11"
+  // Match patterns like: -na-XX-us-XX or -not-applicable-XX-us-XX
+  const sizePattern = /-(na|not-applicable)-\d+-us-\d+$/i;
+  if (sizePattern.test(fullName)) {
+    return fullName.replace(sizePattern, '').trim();
+  }
+  
+  // Pattern 3: Remove last part if it looks like a size (e.g., "-42", "-us-11")
+  const parts = fullName.split('-');
+  if (parts.length >= 2) {
+    const lastPart = parts[parts.length - 1];
+    const secondLast = parts[parts.length - 2];
+    
+    // Check if ends with size-like pattern
+    if (/^\d+$/.test(lastPart) || /^us-\d+$/i.test(`${secondLast}-${lastPart}`)) {
+      return parts.slice(0, -2).join('-').trim();
+    }
+  }
+  
+  return fullName.trim();
+}
+
+/**
+ * Extract size information from product name
+ * Examples:
+ * "(1:1)-na-45-us-11" → "US 11 (EU 45)"
+ * "-not-applicable-46-us-12" → "US 12 (EU 46)"
+ */
+function extractSizeInfo(fullName: string): string | undefined {
+  // Pattern: -na-45-us-11 or -not-applicable-46-us-12
+  const match = fullName.match(/-(na|not-applicable)-(\d+)-us-(\d+)$/i);
+  if (match) {
+    const euSize = match[2];
+    const usSize = match[3];
+    return `US ${usSize} (EU ${euSize})`;
+  }
+  
+  // Try to find just US size
+  const usMatch = fullName.match(/-us-(\d+)$/i);
+  if (usMatch) {
+    return `US ${usMatch[1]}`;
+  }
+  
+  // Try to find just EU size
+  const euMatch = fullName.match(/-(\d{2})$/);
+  if (euMatch) {
+    return `EU ${euMatch[1]}`;
+  }
+  
+  return undefined;
 }

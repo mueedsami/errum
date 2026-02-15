@@ -88,6 +88,71 @@ export default function StoreAssignmentPage() {
     return [];
   };
 
+
+
+  const toNumber = (v: any): number => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const computeFulfillmentMetrics = (inventoryDetails: any[] = []) => {
+    const totalRequiredQty = inventoryDetails.reduce((sum, d) => sum + toNumber(d?.required_quantity), 0);
+    const fulfillableQty = inventoryDetails.reduce(
+      (sum, d) => sum + Math.min(toNumber(d?.required_quantity), toNumber(d?.available_quantity)),
+      0
+    );
+    const percent = totalRequiredQty > 0 ? Math.round((fulfillableQty / totalRequiredQty) * 100) : 0;
+    const canFulfillEntireOrder = inventoryDetails.every(
+      (d) => toNumber(d?.available_quantity) >= toNumber(d?.required_quantity)
+    );
+
+    return {
+      totalRequiredQty,
+      fulfillableQty,
+      percent,
+      canFulfillEntireOrder,
+    };
+  };
+
+  const normalizeAvailableStoresPayload = (data: any) => {
+    const candidateArrays = [
+      data?.stores,
+      data?.warehouses,
+      data?.available_stores,
+      data?.available_warehouses,
+      data?.outlets,
+    ].filter(Array.isArray);
+
+    const mergedRaw = candidateArrays.flat();
+
+    const normalizedStores = mergedRaw.map((store: any) => {
+      const inventoryDetails = Array.isArray(store?.inventory_details) ? store.inventory_details : [];
+      const metrics = computeFulfillmentMetrics(inventoryDetails);
+      const backendPercent = toNumber(store?.fulfillment_percentage);
+
+      return {
+        ...store,
+        store_type:
+          store?.store_type ||
+          (store?.is_warehouse === true || String(store?.type || '').toLowerCase() === 'warehouse'
+            ? 'warehouse'
+            : 'store'),
+        fulfillment_percentage: Math.min(100, Math.max(0, metrics.percent || backendPercent || 0)),
+        can_fulfill_entire_order: metrics.canFulfillEntireOrder,
+        total_items_available:
+          store?.total_items_available ??
+          inventoryDetails.filter((d: any) => toNumber(d?.available_quantity) > 0).length,
+        total_items_required:
+          store?.total_items_required ?? inventoryDetails.length,
+      };
+    });
+
+    return {
+      ...data,
+      stores: normalizedStores,
+    };
+  };
+
   const fetchPendingOrders = async () => {
     setIsLoadingOrders(true);
     try {
@@ -121,11 +186,12 @@ export default function StoreAssignmentPage() {
     setIsLoadingStores(true);
     try {
       const data = await orderManagementService.getAvailableStores(orderId);
-      setAvailableStoresData(data);
+      const normalized = normalizeAvailableStoresPayload(data);
+      setAvailableStoresData(normalized);
 
       // Auto-select recommended store if available
-      if (data?.recommendation?.store_id) {
-        setSelectedStoreId(data.recommendation.store_id);
+      if (normalized?.recommendation?.store_id) {
+        setSelectedStoreId(normalized.recommendation.store_id);
       }
 
       console.log('🏪 Available stores loaded:', data?.stores?.length || 0);
@@ -430,7 +496,7 @@ export default function StoreAssignmentPage() {
                 {/* Left Column - Available Stores */}
                 <div>
                   <h2 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
-                    Available Stores
+                    Available Stores & Warehouses
                   </h2>
 
                   {isLoadingStores ? (
@@ -462,6 +528,9 @@ export default function StoreAssignmentPage() {
                                   <h3 className="font-semibold text-gray-900 dark:text-white">
                                     {store.store_name}
                                   </h3>
+                                  <span className={`text-[10px] px-2 py-0.5 rounded-full border ${String((store as any).store_type ?? (store as any).type ?? '').toLowerCase()==='warehouse' ? 'border-indigo-300 text-indigo-700 dark:border-indigo-700 dark:text-indigo-300' : 'border-emerald-300 text-emerald-700 dark:border-emerald-700 dark:text-emerald-300'}`}>
+                                    {String((store as any).store_type ?? (store as any).type ?? '').toLowerCase() === 'warehouse' ? 'Warehouse' : 'Store'}
+                                  </span>
                                   {isRecommended && <Award className="h-4 w-4 text-yellow-500" />}
                                 </div>
                                 <p className="text-xs text-gray-600 dark:text-gray-400 flex items-start gap-1">
@@ -630,7 +699,7 @@ export default function StoreAssignmentPage() {
                     <div className="text-center py-12 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800">
                       <StoreIcon className="mx-auto h-12 w-12 mb-4 text-gray-400" />
                       <p className="text-gray-600 dark:text-gray-400">
-                        Select a store to view inventory details
+                        Select a store/warehouse to view inventory details
                       </p>
                     </div>
                   )}

@@ -35,20 +35,6 @@ interface CartProduct {
   store_name: string;
 }
 
-// Pathao types
-interface PathaoCity {
-  city_id: number;
-  city_name: string;
-}
-interface PathaoZone {
-  zone_id: number;
-  zone_name: string;
-}
-interface PathaoArea {
-  area_id: number;
-  area_name: string;
-}
-
 interface ProductBatchInfo {
   id: number;
   name: string;
@@ -82,15 +68,7 @@ export default function SocialCommercePage() {
 
   const [isInternational, setIsInternational] = useState(false);
 
-  // ✅ Domestic (Pathao)
-  const [pathaoCities, setPathaoCities] = useState<PathaoCity[]>([]);
-  const [pathaoZones, setPathaoZones] = useState<PathaoZone[]>([]);
-  const [pathaoAreas, setPathaoAreas] = useState<PathaoArea[]>([]);
-
-  const [pathaoCityId, setPathaoCityId] = useState<string>('');
-  const [pathaoZoneId, setPathaoZoneId] = useState<string>('');
-  const [pathaoAreaId, setPathaoAreaId] = useState<string>('');
-
+  // ✅ Domestic
   const [streetAddress, setStreetAddress] = useState('');
   const [postalCode, setPostalCode] = useState('');
 
@@ -255,40 +233,6 @@ export default function SocialCommercePage() {
       setAllBatches([]);
     } finally {
       setIsLoadingData(false);
-    }
-  };
-
-  // ✅ Pathao lookup
-  const fetchPathaoCities = async () => {
-    try {
-      const res = await axios.get('/shipments/pathao/cities');
-      const data = Array.isArray(res.data) ? res.data : res.data?.data ?? [];
-      setPathaoCities(data);
-    } catch (err) {
-      console.error('Failed to load Pathao cities', err);
-      setPathaoCities([]);
-    }
-  };
-
-  const fetchPathaoZones = async (cityId: number) => {
-    try {
-      const res = await axios.get(`/shipments/pathao/zones/${cityId}`);
-      const data = Array.isArray(res.data) ? res.data : res.data?.data ?? [];
-      setPathaoZones(data);
-    } catch (err) {
-      console.error('Failed to load Pathao zones', err);
-      setPathaoZones([]);
-    }
-  };
-
-  const fetchPathaoAreas = async (zoneId: number) => {
-    try {
-      const res = await axios.get(`/shipments/pathao/areas/${zoneId}`);
-      const data = Array.isArray(res.data) ? res.data : res.data?.data ?? [];
-      setPathaoAreas(data);
-    } catch (err) {
-      console.error('Failed to load Pathao areas', err);
-      setPathaoAreas([]);
     }
   };
 
@@ -508,47 +452,6 @@ export default function SocialCommercePage() {
     }
   }, [stores]);
 
-  // ✅ Load Pathao cities when domestic
-  useEffect(() => {
-    if (!isInternational) {
-      fetchPathaoCities();
-    } else {
-      setPathaoCityId('');
-      setPathaoZoneId('');
-      setPathaoAreaId('');
-      setPathaoZones([]);
-      setPathaoAreas([]);
-    }
-  }, [isInternational]);
-
-  // ✅ Fetch zones when city changes
-  useEffect(() => {
-    if (isInternational) return;
-    if (!pathaoCityId) {
-      setPathaoZoneId('');
-      setPathaoAreaId('');
-      setPathaoZones([]);
-      setPathaoAreas([]);
-      return;
-    }
-    fetchPathaoZones(Number(pathaoCityId));
-    setPathaoZoneId('');
-    setPathaoAreaId('');
-    setPathaoAreas([]);
-  }, [pathaoCityId, isInternational]);
-
-  // ✅ Fetch areas when zone changes
-  useEffect(() => {
-    if (isInternational) return;
-    if (!pathaoZoneId) {
-      setPathaoAreaId('');
-      setPathaoAreas([]);
-      return;
-    }
-    fetchPathaoAreas(Number(pathaoZoneId));
-    setPathaoAreaId('');
-  }, [pathaoZoneId, isInternational]);
-
   // ✅ Updated search effect - searches across all stores
   useEffect(() => {
     if (!searchQuery.trim() || !Array.isArray(allBatches)) {
@@ -743,8 +646,8 @@ export default function SocialCommercePage() {
         return;
       }
     } else {
-      if (!pathaoCityId || !pathaoZoneId || !pathaoAreaId || !streetAddress) {
-        alert('Please select City/Zone/Area and enter Street Address');
+      if (!streetAddress) {
+        alert('Please enter full delivery address');
         return;
       }
     }
@@ -769,10 +672,6 @@ export default function SocialCommercePage() {
     try {
     console.log('📦 CREATING SOCIAL COMMERCE ORDER');
 
-    const cityObj = pathaoCities.find((c) => String(c.city_id) === String(pathaoCityId));
-    const zoneObj = pathaoZones.find((z) => String(z.zone_id) === String(pathaoZoneId));
-    const areaObj = pathaoAreas.find((a) => String(a.area_id) === String(pathaoAreaId));
-
     const shipping_address = isInternational
       ? {
           name: userName,
@@ -787,11 +686,6 @@ export default function SocialCommercePage() {
           name: userName,
           phone: userPhone,
           street: streetAddress,
-          area: areaObj?.area_name || '',
-          city: cityObj?.city_name || '',
-          pathao_city_id: Number(pathaoCityId),
-          pathao_zone_id: Number(pathaoZoneId),
-          pathao_area_id: Number(pathaoAreaId),
           postal_code: postalCode || undefined,
         };
 
@@ -1013,11 +907,6 @@ export default function SocialCommercePage() {
                       <button
                         onClick={() => {
                           setIsInternational(!isInternational);
-                          setPathaoCityId('');
-                          setPathaoZoneId('');
-                          setPathaoAreaId('');
-                          setPathaoZones([]);
-                          setPathaoAreas([]);
                           setStreetAddress('');
                           setPostalCode('');
                           setCountry('');
@@ -1092,78 +981,24 @@ export default function SocialCommercePage() {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">City (Pathao)*</label>
-                            <select
-                              value={pathaoCityId}
-                              onChange={(e) => setPathaoCityId(e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                            >
-                              <option value="">Select City</option>
-                              {pathaoCities.map((c) => (
-                                <option key={c.city_id} value={c.city_id}>
-                                  {c.city_name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Zone (Pathao)*</label>
-                            <select
-                              value={pathaoZoneId}
-                              onChange={(e) => setPathaoZoneId(e.target.value)}
-                              disabled={!pathaoCityId}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50"
-                            >
-                              <option value="">Select Zone</option>
-                              {pathaoZones.map((z) => (
-                                <option key={z.zone_id} value={z.zone_id}>
-                                  {z.zone_name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Area (Pathao)*</label>
-                            <select
-                              value={pathaoAreaId}
-                              onChange={(e) => setPathaoAreaId(e.target.value)}
-                              disabled={!pathaoZoneId}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-50"
-                            >
-                              <option value="">Select Area</option>
-                              {pathaoAreas.map((a) => (
-                                <option key={a.area_id} value={a.area_id}>
-                                  {a.area_name}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Postal Code</label>
-                            <input
-                              type="text"
-                              placeholder="e.g., 1212"
-                              value={postalCode}
-                              onChange={(e) => setPostalCode(e.target.value)}
-                              className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400"
-                            />
-                          </div>
+                        <div>
+                          <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Full Address*</label>
+                          <textarea
+                            placeholder="House/Flat, Road, Area, Landmark"
+                            value={streetAddress}
+                            onChange={(e) => setStreetAddress(e.target.value)}
+                            rows={3}
+                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400"
+                          />
                         </div>
 
                         <div>
-                          <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Street Address*</label>
-                          <textarea
-                            placeholder="House 12, Road 5, etc."
-                            value={streetAddress}
-                            onChange={(e) => setStreetAddress(e.target.value)}
-                            rows={2}
+                          <label className="block text-xs text-gray-700 dark:text-gray-300 mb-1">Postal Code (Optional)</label>
+                          <input
+                            type="text"
+                            placeholder="e.g., 1212"
+                            value={postalCode}
+                            onChange={(e) => setPostalCode(e.target.value)}
                             className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400"
                           />
                         </div>

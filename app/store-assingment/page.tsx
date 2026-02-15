@@ -116,7 +116,10 @@ export default function StoreAssignmentPage() {
     };
   };
 
-  const normalizeAvailableStoresPayload = (data: any) => {
+  const normalizeAvailableStoresPayload = (
+    data: any,
+    orderCtx: PendingAssignmentOrder | null = null
+  ) => {
     const deepCandidates = [
       data,
       data?.data,
@@ -138,10 +141,72 @@ export default function StoreAssignmentPage() {
 
     const mergedRaw = candidateArrays.flat();
 
+    const orderItems = Array.isArray(orderCtx?.items) ? orderCtx.items : [];
+    const orderReqByProduct = new Map<number, { req: number; name: string; sku: string }>();
+
+    for (const oi of orderItems) {
+      const pid = toNumber((oi as any)?.product_id);
+      if (!pid) continue;
+      const prev = orderReqByProduct.get(pid);
+      const qty = toNumber((oi as any)?.quantity);
+      orderReqByProduct.set(pid, {
+        req: toNumber(prev?.req) + qty,
+        name: (oi as any)?.product_name ?? prev?.name ?? 'Unknown Product',
+        sku: (oi as any)?.product_sku ?? prev?.sku ?? '',
+      });
+    }
+
     const normalizedStores = mergedRaw.map((store: any) => {
-      const inventoryDetails = Array.isArray(store?.inventory_details) ? store.inventory_details : [];
+      const rawDetails = Array.isArray(store?.inventory_details) ? store.inventory_details : [];
+
+      const inventoryDetails = rawDetails.map((d: any) => {
+        const requiredQty = toNumber(d?.required_quantity);
+        const availableQty = toNumber(d?.available_quantity ?? d?.quantity ?? d?.stock ?? 0);
+        const productId = toNumber(d?.product_id);
+
+        return {
+          ...d,
+          product_id: productId,
+          product_name: d?.product_name ?? d?.name ?? 'Unknown Product',
+          product_sku: d?.product_sku ?? d?.sku ?? '',
+          required_quantity: requiredQty,
+          available_quantity: availableQty,
+          can_fulfill: availableQty >= requiredQty,
+        };
+      });
+
+      // IMPORTANT:
+      // Some APIs return partial inventory_details (missing one or more order items),
+      // which can incorrectly show 100% fulfillment.
+      // Fill missing required order items with available_quantity = 0 for accurate %.
+      if (orderReqByProduct.size) {
+        const byPid = new Map<number, any>();
+        for (const d of inventoryDetails) {
+          const pid = toNumber(d?.product_id);
+          if (pid) byPid.set(pid, d);
+        }
+
+        for (const [pid, reqMeta] of orderReqByProduct.entries()) {
+          const found = byPid.get(pid);
+          if (found) {
+            const correctedReq = Math.max(toNumber(found?.required_quantity), toNumber(reqMeta.req));
+            found.required_quantity = correctedReq;
+            found.can_fulfill = toNumber(found.available_quantity) >= correctedReq;
+          } else {
+            inventoryDetails.push({
+              product_id: pid,
+              product_name: reqMeta.name,
+              product_sku: reqMeta.sku,
+              required_quantity: toNumber(reqMeta.req),
+              available_quantity: 0,
+              can_fulfill: false,
+              batches: [],
+            });
+          }
+        }
+      }
+
       const metrics = computeFulfillmentMetrics(inventoryDetails);
-      const backendPercent = toNumber(store?.fulfillment_percentage);
 
       const storeId = toNumber(store?.store_id ?? store?.id);
       const resolvedType = String(
@@ -150,19 +215,26 @@ export default function StoreAssignmentPage() {
           (store?.is_warehouse === true ? 'warehouse' : 'store')
       ).toLowerCase();
 
+      const safePercent = inventoryDetails.length
+        ? metrics.percent
+        : Math.min(100, Math.max(0, toNumber(store?.fulfillment_percentage)));
+
+      const requiredCount = orderReqByProduct.size || inventoryDetails.length;
+
       return {
         ...store,
         store_id: storeId,
         store_name: store?.store_name ?? store?.name ?? `Location #${storeId}`,
         store_address: store?.store_address ?? store?.address ?? '—',
         store_type: resolvedType === 'warehouse' ? 'warehouse' : 'store',
-        fulfillment_percentage: Math.min(100, Math.max(0, metrics.percent || backendPercent || 0)),
-        can_fulfill_entire_order: inventoryDetails.length ? metrics.canFulfillEntireOrder : !!store?.can_fulfill_entire_order,
-        total_items_available:
-          store?.total_items_available ??
-          inventoryDetails.filter((d: any) => toNumber(d?.available_quantity) > 0).length,
+        inventory_details: inventoryDetails,
+        fulfillment_percentage: safePercent,
+        can_fulfill_entire_order: inventoryDetails.length
+          ? metrics.canFulfillEntireOrder
+          : !!store?.can_fulfill_entire_order,
+        total_items_available: inventoryDetails.filter((d: any) => toNumber(d?.available_quantity) > 0).length,
         total_items_required:
-          store?.total_items_required ?? inventoryDetails.length,
+          store?.total_items_required ?? requiredCount,
       };
     });
 
@@ -176,12 +248,18 @@ export default function StoreAssignmentPage() {
         dedupMap.set(sid, s);
         continue;
       }
+
       const prevLen = Array.isArray(prev?.inventory_details) ? prev.inventory_details.length : 0;
       const currLen = Array.isArray(s?.inventory_details) ? s.inventory_details.length : 0;
+
       if (currLen > prevLen) {
-        dedupMap.set(sid, { ...prev, ...s });
+        dedupMap.set(sid, s);
+      } else if (currLen === prevLen) {
+        const prevPct = toNumber(prev?.fulfillment_percentage);
+        const currPct = toNumber(s?.fulfillment_percentage);
+        dedupMap.set(sid, currPct >= prevPct ? s : prev);
       } else {
-        dedupMap.set(sid, { ...s, ...prev });
+        dedupMap.set(sid, prev);
       }
     }
 
@@ -343,27 +421,72 @@ export default function StoreAssignmentPage() {
     return rows;
   };
 
+  const isOrderUnassigned = (order: any): boolean => {
+    const candidateIds = [
+      order?.store_id,
+      order?.assigned_store_id,
+      order?.store?.id,
+      order?.store?.store_id,
+      order?.assigned_store?.id,
+      order?.assigned_store?.store_id,
+      order?.outlet_id,
+      order?.branch_id,
+    ]
+      .map((v) => toNumber(v))
+      .filter((v) => v > 0);
+
+    return candidateIds.length === 0;
+  };
+
   const fetchPendingOrders = async () => {
     setIsLoadingOrders(true);
     try {
-      // Force status filter (fallback to kebab-case if backend uses that)
-      const primary = await orderManagementService.getPendingAssignment({
-        per_page: 100,
-        status: 'pending_assignment',
-      } as any);
+      const statusCandidates = ['pending_assignment', 'pending-assignment', 'pending'];
+      const combined: PendingAssignmentOrder[] = [];
 
-      let orders = extractOrders(primary);
+      for (const status of statusCandidates) {
+        try {
+          const resp = await orderManagementService.getPendingAssignment({
+            per_page: 100,
+            status,
+          } as any);
 
-      if (!orders.length) {
-        const fallback = await orderManagementService.getPendingAssignment({
-          per_page: 100,
-          status: 'pending-assignment',
-        } as any);
-        orders = extractOrders(fallback);
+          let orders = extractOrders(resp);
+
+          // If backend stores e-commerce unassigned orders as plain "pending",
+          // keep only truly unassigned ones.
+          if (status === 'pending') {
+            orders = orders.filter((o: any) => isOrderUnassigned(o));
+          }
+
+          if (orders.length) combined.push(...(orders as PendingAssignmentOrder[]));
+        } catch (e) {
+          // continue trying other status variants
+          console.warn(`Could not fetch status=${status}`, e);
+        }
       }
 
+      // final fallback: no status filter
+      if (!combined.length) {
+        const fallback = await orderManagementService.getPendingAssignment({
+          per_page: 100,
+        } as any);
+        const fallbackOrders = extractOrders(fallback).filter((o: any) => isOrderUnassigned(o));
+        combined.push(...(fallbackOrders as PendingAssignmentOrder[]));
+      }
+
+      // de-dupe by order id
+      const byId = new Map<number, PendingAssignmentOrder>();
+      for (const o of combined) {
+        const oid = toNumber((o as any)?.id);
+        if (!oid) continue;
+        if (!byId.has(oid)) byId.set(oid, o);
+      }
+
+      const orders = Array.from(byId.values());
+
       setPendingOrders(orders);
-      console.log('📦 Loaded pending assignment orders:', orders.length);
+      console.log('📦 Loaded pending/unassigned orders:', orders.length);
     } catch (error: any) {
       console.error('Error fetching orders:', error);
       displayToast('Error loading orders: ' + (error?.message || 'Unknown error'), 'error');
@@ -376,7 +499,7 @@ export default function StoreAssignmentPage() {
     setIsLoadingStores(true);
     try {
       const data = await orderManagementService.getAvailableStores(orderId);
-      const normalized = normalizeAvailableStoresPayload(data);
+      const normalized = normalizeAvailableStoresPayload(data, orderCtx || selectedOrder || null);
 
       let mergedStores = Array.isArray(normalized?.stores) ? [...normalized.stores] : [];
       const hasWarehouseAlready = mergedStores.some(

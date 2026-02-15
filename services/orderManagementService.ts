@@ -49,6 +49,10 @@ export interface AvailableStore {
   store_id: number;
   store_name: string;
   store_address: string;
+  // Optional because some APIs return only one of these keys
+  store_type?: 'store' | 'warehouse' | string;
+  type?: 'store' | 'warehouse' | string;
+  is_warehouse?: boolean;
   inventory_details: StoreInventoryDetail[];
   total_items_available: number;
   total_items_required: number;

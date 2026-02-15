@@ -49,6 +49,15 @@ export interface CreateOrderRequest {
   scheduled_delivery_date?: string;
   // Keep unassigned so warehouse/store-assignment can assign later
   store_id?: number | null;
+
+  // Extra hints for backends that support explicit assignment workflow
+  // (ignored safely by most APIs if unsupported)
+  assigned_store_id?: number | null;
+  status?: string;
+  order_status?: string;
+  assignment_status?: string;
+  auto_assign_store?: boolean;
+  requires_store_assignment?: boolean;
 }
 
 export interface Order {
@@ -217,29 +226,67 @@ class CheckoutService {
     payment_url?: string; // For SSLCommerz
     transaction_id?: string; // For SSLCommerz
   }> {
-    try {
-      console.log('📦 Creating order from cart...');
-      console.log('📋 Order data:', orderData);
-      
-      const response = await axiosInstance.post<ApiResponse<{
-        order: Order;
-        order_summary: any;
-        payment_url?: string;
-        transaction_id?: string;
-      }>>('/customer/orders/create-from-cart', orderData);
-      
-      console.log('✅ Order created successfully:', response.data);
-      
-      return response.data.data;
-    } catch (error: any) {
-      console.error('❌ Failed to create order - Full error details:');
-      console.error('Status:', error.response?.status);
-      console.error('Status Text:', error.response?.statusText);
-      console.error('Data:', error.response?.data);
-      console.error('Message:', error.message);
-      
-      throw new Error(error.response?.data?.message || 'Failed to create order');
+    const basePayload: CreateOrderRequest = {
+      ...orderData,
+      // enforce "not assigned" at order creation
+      store_id: null,
+      assigned_store_id: null,
+    };
+
+    // Try explicit pending-assignment hints first; fall back gracefully
+    // so checkout never breaks on strict validators.
+    const payloadVariants: CreateOrderRequest[] = [
+      {
+        ...basePayload,
+        status: 'pending_assignment',
+        order_status: 'pending_assignment',
+        assignment_status: 'unassigned',
+        auto_assign_store: false,
+        requires_store_assignment: true,
+      },
+      {
+        ...basePayload,
+        status: 'pending_assignment',
+      },
+      {
+        ...basePayload,
+      },
+    ];
+
+    let lastError: any = null;
+
+    for (const payload of payloadVariants) {
+      try {
+        console.log('📦 Creating order from cart...');
+        console.log('📋 Order payload:', payload);
+
+        const response = await axiosInstance.post<ApiResponse<{
+          order: Order;
+          order_summary: any;
+          payment_url?: string;
+          transaction_id?: string;
+        }>>('/customer/orders/create-from-cart', payload);
+
+        console.log('✅ Order created successfully:', response.data);
+
+        return response.data.data;
+      } catch (error: any) {
+        lastError = error;
+        console.warn('⚠️ create-from-cart attempt failed, trying fallback payload...', {
+          status: error?.response?.status,
+          message: error?.response?.data?.message || error?.message,
+          errors: error?.response?.data?.errors,
+        });
+      }
     }
+
+    console.error('❌ Failed to create order - Full error details:');
+    console.error('Status:', lastError?.response?.status);
+    console.error('Status Text:', lastError?.response?.statusText);
+    console.error('Data:', lastError?.response?.data);
+    console.error('Message:', lastError?.message);
+
+    throw new Error(lastError?.response?.data?.message || 'Failed to create order');
   }
 
   /**

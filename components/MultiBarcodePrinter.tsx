@@ -37,11 +37,12 @@ async function ensureQZConnection() {
   return qzConnectionPromise;
 }
 
-// Label geometry (same as BatchPrinter)
+// Label geometry (match BatchPrinter)
 const LABEL_WIDTH_MM = 39;
 const LABEL_HEIGHT_MM = 25;
-const DEFAULT_DPI = 300;
-const SHIFT_X_MM = 2; // move right by 2mm (per your latest request)
+const DEFAULT_DPI = 300; // set to 203 for 203dpi printers
+const TOP_GAP_MM = 1; // extra blank gap at the very top (same as Batch)
+const SHIFT_X_MM = 0; // keep 0 for perfect centering
 
 function mmToIn(mm: number) {
   return mm / 25.4;
@@ -101,6 +102,13 @@ function wrapTwoLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: num
   return [line1, line2] as const;
 }
 
+function normalizeLabelName(text: string) {
+  const clean = (text || "").trim().replace(/\s+/g, " ");
+  if (!clean) return "";
+  // Normalize separators so wrap logic can break naturally on spaces
+  return clean.replace(/\s*[-–—]\s*/g, " - ");
+}
+
 async function renderLabelBase64(opts: {
   code: string;
   productName: string;
@@ -127,6 +135,8 @@ async function renderLabelBase64(opts: {
   ctx.fillRect(0, 0, wPx, hPx);
 
   const pad = Math.round(wPx * 0.04);
+  const topGapPx = Math.round((TOP_GAP_MM / 25.4) * dpi);
+  const topPad = pad + topGapPx;
   const shiftPx = Math.round((SHIFT_X_MM / 25.4) * dpi);
   const centerX = wPx / 2 + shiftPx;
 
@@ -135,23 +145,29 @@ async function renderLabelBase64(opts: {
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   ctx.font = `800 ${Math.round(hPx * 0.11)}px Arial`;
-  ctx.fillText("Deshio", centerX, pad);
+  ctx.fillText("Errum BD", centerX, topPad);
 
-  // Product name (wrap to 2 lines)
-  const nameY = pad + Math.round(hPx * 0.14);
+  // Product name
+  const nameY = topPad + Math.round(hPx * 0.14);
   const nameMaxW = wPx - pad * 2;
-  let nameFont = Math.round(hPx * 0.09);
+  const lineGap = Math.max(2, Math.round(hPx * 0.01));
+  const fullName = normalizeLabelName(opts.productName || "Product");
+
+  let name1 = "";
+  let name2 = "";
+
+  let nameFont = Math.round(hPx * 0.095);
   ctx.font = `700 ${nameFont}px Arial`;
 
-  let [name1, name2] = wrapTwoLines(ctx, (opts.productName || "Product").trim(), nameMaxW);
+  [name1, name2] = wrapTwoLines(ctx, fullName, nameMaxW);
   if (name2) {
     nameFont = Math.round(hPx * 0.082);
     ctx.font = `700 ${nameFont}px Arial`;
-    ;[name1, name2] = wrapTwoLines(ctx, (opts.productName || "Product").trim(), nameMaxW);
+    [name1, name2] = wrapTwoLines(ctx, fullName, nameMaxW);
   }
 
   ctx.fillText(name1, centerX, nameY);
-  const lineGap = Math.max(2, Math.round(hPx * 0.01));
+
   let afterNameBottom = nameY + nameFont;
   if (name2) {
     ctx.fillText(name2, centerX, nameY + nameFont + lineGap);
@@ -159,7 +175,9 @@ async function renderLabelBase64(opts: {
   }
   const afterNameY = afterNameBottom + Math.round(hPx * 0.03);
 
+  // Barcode
   const JsBarcode = (window as any).JsBarcode;
+
   const maxBcW = Math.round((wPx - pad * 2) * 0.98);
   const maxBcH = Math.round(hPx * 0.56);
   const bcHeight = Math.round(hPx * 0.28);
@@ -192,7 +210,7 @@ async function renderLabelBase64(opts: {
     break;
   }
 
-  const bcY = Math.max(pad + Math.round(hPx * 0.27), Math.round(afterNameY));
+  const bcY = Math.max(topPad + Math.round(hPx * 0.27), Math.round(afterNameY));
   const scale = Math.min(1, maxBcW / bcCanvas.width, maxBcH / bcCanvas.height);
   const drawW = Math.round(bcCanvas.width * scale);
   const drawH = Math.round(bcCanvas.height * scale);
@@ -202,9 +220,10 @@ async function renderLabelBase64(opts: {
   ctx.drawImage(bcCanvas, bcX, bcY, drawW, drawH);
 
   // Price
-  const priceText = `Price (VAT Inclusive): ৳${Number(opts.price || 0).toLocaleString("en-BD")}`;
+  const priceText = `Price (VAT inc.): ৳${Number(opts.price || 0).toLocaleString("en-BD")}`;
   ctx.textBaseline = "bottom";
-  ctx.font = `800 ${Math.round(hPx * 0.085)}px Arial`;
+  const priceFontSize = Math.round(hPx * 0.082);
+  ctx.font = `700 ${priceFontSize}px "Consolas", "Lucida Console", "DejaVu Sans Mono", "Courier New", monospace`;
   const priceY = hPx - pad;
   ctx.fillText(fitText(ctx, priceText, wPx - pad * 2), centerX, priceY);
 
@@ -361,7 +380,7 @@ export default function MultiBarcodePrinter({
         for (let i = 0; i < qty; i++) {
           const base64 = await renderLabelBase64({
             code: it.code,
-            productName: (it.productName || "Product").substring(0, 28),
+            productName: it.productName || "Product",
             price: it.price,
             dpi,
           });

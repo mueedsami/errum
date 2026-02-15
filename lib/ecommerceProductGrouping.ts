@@ -29,6 +29,16 @@ export interface GroupedProduct {
   representative: any;
 }
 
+export interface GroupingOptions {
+  /**
+   * Include category in grouping key.
+   * Keep true for category/list pages.
+   * Disable for home widgets where sibling variations may come with
+   * inconsistent category shapes (object/string/null).
+   */
+  useCategoryInKey?: boolean;
+}
+
 const toNumber = (value: any): number => {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -44,20 +54,52 @@ export function getMotherBaseName(product: any): string {
   return getBaseProductName(product?.name || '', product?.base_name || undefined);
 }
 
-export function getMotherGroupKey(product: any): string {
-  const baseName = getMotherBaseName(product).toLowerCase();
-  const categoryId = product?.category?.id ?? '0';
-  return `${categoryId}::${baseName}`;
+function getCategoryKey(product: any): string {
+  const category = product?.category;
+
+  if (category && typeof category === 'object' && category.id) {
+    return `id:${String(category.id).trim()}`;
+  }
+
+  if (typeof category === 'string' && category.trim()) {
+    return `name:${category.trim().toLowerCase()}`;
+  }
+
+  const fallbackName =
+    product?.category_name ||
+    product?.category_title ||
+    product?.categoryPath ||
+    '';
+
+  if (typeof fallbackName === 'string' && fallbackName.trim()) {
+    return `name:${fallbackName.trim().toLowerCase()}`;
+  }
+
+  return 'none';
 }
 
-export function groupProductsByMother(products: any[]): GroupedProduct[] {
+export function getMotherGroupKey(product: any, options: GroupingOptions = {}): string {
+  const { useCategoryInKey = true } = options;
+  const baseName = getMotherBaseName(product).toLowerCase();
+
+  if (!useCategoryInKey) {
+    return `base::${baseName}`;
+  }
+
+  return `cat:${getCategoryKey(product)}::base:${baseName}`;
+}
+
+export function groupProductsByMother(
+  products: any[],
+  options: GroupingOptions = {}
+): GroupedProduct[] {
   const groups = new Map<string, GroupedProduct>();
 
   (products || []).forEach((product: any) => {
     if (!product || typeof product !== 'object') return;
 
     const baseName = getMotherBaseName(product);
-    const key = getMotherGroupKey(product);
+    const key = getMotherGroupKey(product, options);
 
     if (!groups.has(key)) {
       groups.set(key, {

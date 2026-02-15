@@ -25,7 +25,7 @@ export default function FeaturedProducts() {
   const [wishlistIds, setWishlistIds] = useState<Set<number>>(new Set());
 
   const featuredGroups = useMemo(
-    () => groupProductsByMother(rawProducts).slice(0, 8),
+    () => groupProductsByMother(rawProducts, { useCategoryInKey: false }).slice(0, 8),
     [rawProducts]
   );
 

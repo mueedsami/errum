@@ -15,6 +15,7 @@ import {
 import { useCart } from '@/app/e-commerce/CartContext';
 import Navigation from '@/components/ecommerce/Navigation';
 import { getBaseProductName, getColorLabel, getSizeLabel } from '@/lib/productNameUtils';
+import { groupProductsByMother } from '@/lib/ecommerceProductGrouping';
 import CartSidebar from '@/components/ecommerce/cart/CartSidebar';
 import catalogService, {
   Product,
@@ -137,39 +138,46 @@ export default function ProductDetailPage() {
         );
         const mainCategoryId = mainProduct.category?.id;
 
-        const variations: ProductVariant[] = allProductsResponse.products
-          .filter((p) => {
-            const sameSku = !!mainProduct.sku && p.sku === mainProduct.sku;
+        const grouped = groupProductsByMother(allProductsResponse.products, {
+          // Home sections group by mother name irrespective of category payload shape.
+          // Use same behavior on details page so "X options" always matches.
+          useCategoryInKey: false,
+        });
 
-            const candidateBaseName = getBaseProductName(
-              p.name || '',
-              (p as any).base_name || undefined
-            );
+        const selectedGroupById = grouped.find((g) =>
+          g.variants.some((v) => Number(v.id) === Number(mainProduct.id))
+        );
 
-            const sameBaseName =
-              candidateBaseName.trim().toLowerCase() ===
-              mainBaseName.trim().toLowerCase();
+        const selectedGroupByRule = grouped.find((g) => {
+          const sameSku = !!mainProduct.sku && g.variants.some((v) => v.sku === mainProduct.sku);
 
-            // Some list rows may miss category while still being true siblings.
-            // Keep strict match when candidate has category, but allow null/undefined category rows.
-            const sameCategory = mainCategoryId
-              ? !p.category?.id || p.category.id === mainCategoryId
-              : true;
+          const sameBase =
+            g.baseName.trim().toLowerCase() === mainBaseName.trim().toLowerCase();
 
-            // Accept sibling by mother name + category, with SKU fallback.
-            return p.id === mainProduct.id || sameSku || (sameBaseName && sameCategory);
+          const sameCategory = mainCategoryId
+            ? !g.category?.id || g.category.id === mainCategoryId
+            : true;
+
+          return sameSku || (sameBase && sameCategory);
+        });
+
+        const selectedGroup = selectedGroupById || selectedGroupByRule;
+
+        const variations: ProductVariant[] = (selectedGroup?.variants || [])
+          .map((variant) => {
+            const raw = (variant as any).raw || {};
+            return {
+              id: variant.id,
+              name: variant.name,
+              sku: variant.sku || `product-${variant.id}`,
+              color: variant.color || getColorLabel(variant.name),
+              size: variant.size || getSizeLabel(variant.name),
+              selling_price: variant.price ?? raw.selling_price ?? null,
+              in_stock: !!variant.in_stock,
+              stock_quantity: variant.stock_quantity ?? raw.stock_quantity ?? 0,
+              images: raw.images ?? [],
+            } as ProductVariant;
           })
-          .map((p) => ({
-            id: p.id,
-            name: p.name,
-            sku: p.sku || `product-${p.id}`,
-            color: getColorLabel(p.name),
-            size: getSizeLabel(p.name),
-            selling_price: (p as any).selling_price ?? null,
-            in_stock: !!p.in_stock,
-            stock_quantity: (p as any).stock_quantity ?? 0,
-            images: (p as any).images ?? [],
-          }))
           .sort((a, b) => {
             const aColor = (a.color || '').toLowerCase();
             const bColor = (b.color || '').toLowerCase();

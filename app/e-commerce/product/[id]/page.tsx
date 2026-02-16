@@ -142,6 +142,7 @@ export default function ProductDetailPage() {
           // Home sections group by mother name irrespective of category payload shape.
           // Use same behavior on details page so "X options" always matches.
           useCategoryInKey: false,
+          preferSkuGrouping: false,
         });
 
         const selectedGroupById = grouped.find((g) =>

@@ -25,7 +25,7 @@ export default function NewArrivals() {
   const [wishlistIds, setWishlistIds] = useState<Set<number>>(new Set());
 
   const arrivalGroups = useMemo(
-    () => groupProductsByMother(rawProducts, { useCategoryInKey: false }).slice(0, 8),
+    () => groupProductsByMother(rawProducts, { useCategoryInKey: false, preferSkuGrouping: false }).slice(0, 8),
     [rawProducts]
   );
 

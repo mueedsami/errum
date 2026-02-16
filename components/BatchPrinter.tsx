@@ -70,6 +70,33 @@ async function ensureQZConnection() {
   return qzConnectionPromise;
 }
 
+
+async function resolvePrinterName(): Promise<string | null> {
+  const qz = (window as any).qz;
+  if (!qz) return null;
+
+  try {
+    const def = await qz.printers.getDefault();
+    if (def && String(def).trim()) return String(def);
+  } catch (_e) {}
+
+  try {
+    const found = await qz.printers.find();
+    if (Array.isArray(found) && found.length > 0 && found[0]) return String(found[0]);
+    if (typeof found === "string" && found.trim()) return found;
+  } catch (_e) {}
+
+  try {
+    const details = await qz.printers.details?.();
+    if (Array.isArray(details) && details.length > 0) {
+      const name = details[0]?.name || details[0];
+      if (name) return String(name);
+    }
+  } catch (_e) {}
+
+  return null;
+}
+
 // Label geometry (match MultiBarcodePrinter)
 const LABEL_WIDTH_MM = 39;
 const LABEL_HEIGHT_MM = 25;
@@ -319,38 +346,27 @@ export default function BatchPrinter({ batch, product, barcodes: externalBarcode
     }
   }, [externalBarcodes]);
 
-  const loadDefaultPrinter = async () => {
+  const loadDefaultPrinter = async (): Promise<string | null> => {
     try {
       const qz = (window as any).qz;
-      if (!qz) return;
+      if (!qz) return null;
 
       await ensureQZConnection();
+      const printer = await resolvePrinterName();
 
-      try {
-        const printer = await qz.printers.getDefault();
-        console.log("✅ Default printer loaded:", printer);
+      if (printer) {
+        console.log("✅ Printer loaded:", printer);
         setDefaultPrinter(printer);
         setPrinterError(null);
-      } catch (err: any) {
-        console.error("❌ No default printer found:", err);
-
-        try {
-          const printers = await qz.printers.find();
-          if (printers && printers.length > 0) {
-            console.log("✅ Using first available printer:", printers[0]);
-            setDefaultPrinter(printers[0]);
-            setPrinterError(null);
-          } else {
-            setPrinterError("No printers found");
-          }
-        } catch (findErr) {
-          console.error("❌ Failed to find printers:", findErr);
-          setPrinterError("Failed to load printers");
-        }
+        return printer;
       }
-    } catch (err) {
+
+      setPrinterError("No printers found");
+      return null;
+    } catch (err: any) {
       console.error("❌ Error loading default printer:", err);
-      setPrinterError("QZ Tray connection failed");
+      setPrinterError(err?.message || "QZ Tray connection failed");
+      return null;
     }
   };
 
@@ -414,12 +430,13 @@ export default function BatchPrinter({ batch, product, barcodes: externalBarcode
       return;
     }
 
-    if (!defaultPrinter) {
+    let printerToUse = defaultPrinter;
+    if (!printerToUse) {
       console.log("Loading printer before print...");
-      await loadDefaultPrinter();
+      printerToUse = await loadDefaultPrinter();
     }
 
-    if (!defaultPrinter) {
+    if (!printerToUse) {
       alert("No printer available. Please check your printer settings and try again.");
       return;
     }
@@ -428,7 +445,7 @@ export default function BatchPrinter({ batch, product, barcodes: externalBarcode
       await ensureQZConnection();
 
       const dpi = SHARED_DEFAULT_DPI;
-      const config = qz.configs.create(defaultPrinter, {
+      const config = qz.configs.create(printerToUse, {
         units: "in",
         size: { width: sharedMmToIn(SHARED_LABEL_WIDTH_MM), height: sharedMmToIn(SHARED_LABEL_HEIGHT_MM) },
         margins: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -438,7 +455,7 @@ export default function BatchPrinter({ batch, product, barcodes: externalBarcode
         scaleContent: false,
       });
 
-      console.log(`Using printer: ${defaultPrinter}`);
+      console.log(`Using printer: ${printerToUse}`);
 
       const data: any[] = [];
       for (const code of selected) {
@@ -465,7 +482,7 @@ export default function BatchPrinter({ batch, product, barcodes: externalBarcode
       console.log(`📄 Printing ${data.length} labels to printer: ${defaultPrinter}`);
 
       await qz.print(config, data);
-      alert(`✅ ${data.length} barcode(s) sent to printer "${defaultPrinter}" successfully!`);
+      alert(`✅ ${data.length} barcode(s) sent to printer "${printerToUse}" successfully!`);
       setIsModalOpen(false);
     } catch (err: any) {
       console.error("❌ Print error:", err);

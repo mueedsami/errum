@@ -242,6 +242,30 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+
+async function resolvePrinterName(qz: any): Promise<string | null> {
+  try {
+    const def = await qz.printers.getDefault();
+    if (def && String(def).trim()) return String(def);
+  } catch (_e) {}
+
+  try {
+    const found = await qz.printers.find();
+    if (Array.isArray(found) && found.length > 0 && found[0]) return String(found[0]);
+    if (typeof found === "string" && found.trim()) return found;
+  } catch (_e) {}
+
+  try {
+    const details = await qz.printers.details?.();
+    if (Array.isArray(details) && details.length > 0) {
+      const name = details[0]?.name || details[0];
+      if (name) return String(name);
+    }
+  } catch (_e) {}
+
+  return null;
+}
+
 export default function MultiBarcodePrinter({
   items,
   buttonLabel = "Print All Barcodes",
@@ -301,26 +325,24 @@ export default function MultiBarcodePrinter({
     return items.reduce((sum, it) => sum + (qtyByCode[it.code] || 0), 0);
   }, [items, qtyByCode]);
 
-  const loadDefaultPrinter = async () => {
+  const loadDefaultPrinter = async (): Promise<string | null> => {
     try {
       const qz = (window as any).qz;
-      if (!qz) return;
+      if (!qz) return null;
       await ensureQZConnection();
-      try {
-        const printer = await qz.printers.getDefault();
+
+      const printer = await resolvePrinterName(qz);
+      if (printer) {
         setDefaultPrinter(printer);
         setPrinterError(null);
-      } catch {
-        const printers = await qz.printers.find();
-        if (printers?.length) {
-          setDefaultPrinter(printers[0]);
-          setPrinterError(null);
-        } else {
-          setPrinterError("No printers found");
-        }
+        return printer;
       }
+
+      setPrinterError("No printers found");
+      return null;
     } catch (e: any) {
       setPrinterError(e?.message || "Failed to load printers");
+      return null;
     }
   };
 
@@ -347,10 +369,12 @@ export default function MultiBarcodePrinter({
       alert("QZ Tray library not loaded. Please refresh the page or install QZ Tray.");
       return;
     }
-    if (!defaultPrinter) {
-      await loadDefaultPrinter();
+
+    let printerToUse = defaultPrinter;
+    if (!printerToUse) {
+      printerToUse = await loadDefaultPrinter();
     }
-    if (!defaultPrinter) {
+    if (!printerToUse) {
       alert("No printer available. Please set a default printer and try again.");
       return;
     }
@@ -361,7 +385,7 @@ export default function MultiBarcodePrinter({
       return;
     }
 
-    const ok = confirm(`Print ${willPrint} label(s) to \"${defaultPrinter}\"?`);
+    const ok = confirm(`Print ${willPrint} label(s) to "${printerToUse}"?`);
     if (!ok) return;
 
     setIsPrinting(true);
@@ -369,7 +393,7 @@ export default function MultiBarcodePrinter({
       await ensureQZConnection();
 
       const dpi = SHARED_DEFAULT_DPI;
-      const config = qz.configs.create(defaultPrinter, {
+      const config = qz.configs.create(printerToUse, {
         units: "in",
         size: { width: sharedMmToIn(SHARED_LABEL_WIDTH_MM), height: sharedMmToIn(SHARED_LABEL_HEIGHT_MM) },
         margins: { top: 0, right: 0, bottom: 0, left: 0 },
@@ -402,7 +426,7 @@ export default function MultiBarcodePrinter({
       }
 
       await qz.print(config, data);
-      alert(`✅ ${data.length} label(s) sent to printer \"${defaultPrinter}\" successfully!`);
+      alert(`✅ ${data.length} label(s) sent to printer "${printerToUse}" successfully!`);
       setIsOpen(false);
     } catch (err: any) {
       console.error("❌ Multi print error:", err);

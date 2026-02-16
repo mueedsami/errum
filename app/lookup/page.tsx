@@ -924,11 +924,28 @@ export default function LookupPage() {
       // Pick default printer (fallback to first available)
       let printer: string | null = null;
       try {
-        printer = await qz.printers.getDefault();
-      } catch (_e) {
-        const list = await qz.printers.find();
-        if (Array.isArray(list) && list.length) printer = list[0];
+        const def = await qz.printers.getDefault();
+        if (def && String(def).trim()) printer = String(def);
+      } catch (_e) {}
+
+      if (!printer) {
+        try {
+          const list = await qz.printers.find();
+          if (Array.isArray(list) && list.length && list[0]) printer = String(list[0]);
+          else if (typeof list === 'string' && list.trim()) printer = list;
+        } catch (_e) {}
       }
+
+      if (!printer) {
+        try {
+          const details = await qz.printers.details?.();
+          if (Array.isArray(details) && details.length > 0) {
+            const name = details[0]?.name || details[0];
+            if (name) printer = String(name);
+          }
+        } catch (_e) {}
+      }
+
       if (!printer) throw new Error('No printer found. Set a default printer and try again.');
 
       const dpi = SHARED_DEFAULT_DPI;

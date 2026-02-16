@@ -208,7 +208,7 @@ async function renderLabelBase64(opts: {
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   ctx.font = `800 ${Math.round(hPx * 0.11)}px Arial`;
-  ctx.fillText("Errum BD", centerX, topPad);
+  ctx.fillText("ERRUM BD", centerX, topPad);
 
   // Product name (match Multi)
   const nameY = topPad + Math.round(hPx * 0.14);
@@ -467,7 +467,7 @@ export default function BatchPrinter({ batch, product, barcodes: externalBarcode
             productName: product?.name || "Product",
             price: batch.sellingPrice,
             dpi,
-            brandName: "Errum BD",
+            brandName: "ERRUM BD",
           });
 
           data.push({

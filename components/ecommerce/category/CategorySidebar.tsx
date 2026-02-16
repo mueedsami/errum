@@ -28,16 +28,24 @@ export default function CategorySidebar({
 
       return (
         <div key={cat.id}>
-          <div
-            className={`flex items-center justify-between py-2.5 px-3 cursor-pointer transition-colors ${
+          <button
+            type="button"
+            onClick={() => {
+              if (hasSubcategories) {
+                onToggleCategory(cat.id);
+                return;
+              }
+
+              router.push(`/e-commerce/${encodeURIComponent(cat.name)}`);
+            }}
+            className={`w-full flex items-center justify-between py-2.5 px-3 cursor-pointer transition-colors text-left ${
               isActive ? 'text-red-700 font-semibold bg-red-50' : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
             }`}
             style={{ paddingLeft: `${level * 20 + 12}px` }}
+            aria-expanded={hasSubcategories ? isExpanded : undefined}
+            aria-label={hasSubcategories ? `${cat.name} category` : undefined}
           >
-            <span
-              onClick={() => router.push(`/e-commerce/${encodeURIComponent(cat.name)}`)}
-              className="flex-1"
-            >
+            <span className="flex-1">
               {cat.name}
               {cat.product_count > 0 && (
                 <span className="ml-2 text-xs text-gray-500">
@@ -45,20 +53,12 @@ export default function CategorySidebar({
                 </span>
               )}
             </span>
-            <div className="flex items-center gap-2">
-              {hasSubcategories && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleCategory(cat.id);
-                  }}
-                  className="p-0.5 hover:bg-gray-200 rounded"
-                >
-                  {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                </button>
-              )}
-            </div>
-          </div>
+            {hasSubcategories && (
+              <span className="p-0.5 rounded" aria-hidden="true">
+                {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              </span>
+            )}
+          </button>
           {hasSubcategories && isExpanded && (
             <div>{renderCategoryTree(cat.children!, level + 1)}</div>
           )}

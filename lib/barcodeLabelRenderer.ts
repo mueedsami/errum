@@ -114,7 +114,7 @@ export async function renderBarcodeLabelBase64(opts: {
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   ctx.font = `800 ${Math.round(hPx * 0.11)}px Arial`;
-  ctx.fillText((opts.brandName || "Errum BD").trim() || "Errum BD", centerX, topPad);
+  ctx.fillText((opts.brandName || "ERRUM BD").trim() || "ERRUM BD", centerX, topPad);
 
   // Product name
   const nameY = topPad + Math.round(hPx * 0.14);

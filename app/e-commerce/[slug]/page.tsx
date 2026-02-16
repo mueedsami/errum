@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import catalogService, { Product, PaginationMeta, CatalogCategory } from '@/services/catalogService';
 import { ArrowLeft } from 'lucide-react';
@@ -55,6 +55,7 @@ export default function CategoryProductsPage() {
   const [sortBy, setSortBy] = useState<string>('created_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
   const [currentPage, setCurrentPage] = useState(1);
+  const topAnchorRef = useRef<HTMLDivElement | null>(null);
 
   // Fetch categories on mount
   useEffect(() => {
@@ -154,8 +155,13 @@ export default function CategoryProductsPage() {
   };
 
   const handlePageChange = (page: number) => {
+    if (topAnchorRef.current) {
+      topAnchorRef.current.scrollIntoView({ behavior: 'auto', block: 'start' });
+    } else {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    }
+
     setCurrentPage(page);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleProductClick = (productId: number) => {
@@ -195,6 +201,7 @@ export default function CategoryProductsPage() {
 
   return (    
     <div className="min-h-screen bg-gray-50">
+      <div ref={topAnchorRef} />
       <Navigation />
       {/* Header */}
       <div className="bg-white border-b">

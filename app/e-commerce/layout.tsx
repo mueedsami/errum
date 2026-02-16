@@ -3,6 +3,7 @@
 import { CustomerAuthProvider } from '@/contexts/CustomerAuthContext';
 import { CartProvider } from '@/app/e-commerce/CartContext';
 import Footer from '@/components/ecommerce/Footer';
+import ScrollToTopOnRouteChange from '@/components/ecommerce/ScrollToTopOnRouteChange';
 
 export default function EcommerceLayout({
   children,
@@ -12,6 +13,7 @@ export default function EcommerceLayout({
   return (
     <CustomerAuthProvider>
       <CartProvider>
+        <ScrollToTopOnRouteChange />
         {children}
         <Footer />
       </CartProvider>

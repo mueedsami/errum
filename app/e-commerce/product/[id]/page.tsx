@@ -15,7 +15,7 @@ import {
 import { useCart } from '@/app/e-commerce/CartContext';
 import Navigation from '@/components/ecommerce/Navigation';
 import { getBaseProductName, getColorLabel, getSizeLabel } from '@/lib/productNameUtils';
-import { groupProductsByMother } from '@/lib/ecommerceProductGrouping';
+import { adaptCatalogGroupedProducts, groupProductsByMother } from '@/lib/ecommerceProductGrouping';
 import CartSidebar from '@/components/ecommerce/cart/CartSidebar';
 import catalogService, {
   Product,
@@ -33,11 +33,183 @@ interface ProductVariant {
   sku: string;
   color?: string;
   size?: string;
+  variation_suffix?: string | null;
+  option_label?: string;
   selling_price: number | null; // ✅ allow null safely
   in_stock: boolean;
   stock_quantity: number | null; // ✅ allow null safely
   images: ProductImage[] | null; // ✅ allow null safely
 }
+
+const normalizeVariantText = (value: any): string =>
+  String(value ?? '')
+    .trim()
+    .replace(/[‐‑‒–—−﹘﹣－]/g, '-')
+    .replace(/\s+/g, ' ');
+
+const SIZE_WORD_TOKENS = new Set([
+  'XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL', 'XXXXL',
+  'FREE SIZE', 'FREESIZE', 'ONE SIZE', 'ONESIZE',
+]);
+
+const isLikelySizeToken = (token: string): boolean => {
+  const t = normalizeVariantText(token).toUpperCase();
+  if (!t) return false;
+  if (SIZE_WORD_TOKENS.has(t)) return true;
+
+  if (/^\d{1,3}$/.test(t)) {
+    const n = Number(t);
+    // shoes/apparel size ranges + compact single digit sizes.
+    return (n >= 1 && n <= 15) || (n >= 20 && n <= 60);
+  }
+
+  return /^\d{1,3}(US|EU|UK|BD|CM|MM)$/i.test(t);
+};
+
+const MARKET_SIZE_TOKENS = new Set(['US', 'EU', 'UK', 'BD', 'CM', 'MM']);
+const NON_COLOR_TOKENS = new Set(['NA', 'N/A', 'NOT', 'APPLICABLE', 'NOT APPLICABLE']);
+
+const isNumericToken = (value: string): boolean => /^\d{1,3}(?:\.\d+)?$/.test(normalizeVariantText(value));
+
+const prettifyToken = (token: string): string => {
+  const t = normalizeVariantText(token).replace(/_/g, ' ');
+  if (!t) return '';
+  const up = t.toUpperCase();
+  if (MARKET_SIZE_TOKENS.has(up) || NON_COLOR_TOKENS.has(up)) return up;
+  if (isNumericToken(t)) return t;
+  return t
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+};
+
+const normalizeColorToken = (token: string): string => {
+  const up = normalizeVariantText(token).toUpperCase();
+  if (NON_COLOR_TOKENS.has(up)) return '';
+  return prettifyToken(token);
+};
+
+const parseVariationSuffix = (suffix?: string | null): { color?: string; size?: string; label?: string } => {
+  const raw = normalizeVariantText(suffix || '');
+  if (!raw) return {};
+
+  const trimmed = raw.startsWith('-') ? raw.slice(1) : raw;
+  const tokens = trimmed.split('-').map((t) => normalizeVariantText(t)).filter(Boolean);
+  if (!tokens.length) return {};
+
+  const usedAsSize = new Set<number>();
+  const sizeParts: string[] = [];
+
+  // First pass: explicit market-size pairs (e.g., US-7, EU-40)
+  for (let i = 0; i < tokens.length - 1; i += 1) {
+    const current = tokens[i];
+    const next = tokens[i + 1];
+    const currentUp = current.toUpperCase();
+    const nextIsNumeric = isNumericToken(next);
+
+    if (MARKET_SIZE_TOKENS.has(currentUp) && nextIsNumeric) {
+      sizeParts.push(`${currentUp} ${next}`);
+      usedAsSize.add(i);
+      usedAsSize.add(i + 1);
+      i += 1;
+      continue;
+    }
+
+    // Pattern like 40-US-7 should preserve 40 and only pair US-7.
+    const nextUp = next.toUpperCase();
+    const hasTrailingNumeric = i + 2 < tokens.length && isNumericToken(tokens[i + 2]);
+    if (isNumericToken(current) && MARKET_SIZE_TOKENS.has(nextUp) && !hasTrailingNumeric) {
+      sizeParts.push(`${nextUp} ${current}`);
+      usedAsSize.add(i);
+      usedAsSize.add(i + 1);
+      i += 1;
+    }
+  }
+
+  // Second pass: leftover tokens that look like size values (e.g., 7, 40, XL)
+  for (let i = 0; i < tokens.length; i += 1) {
+    if (usedAsSize.has(i)) continue;
+    const token = tokens[i];
+    if (isLikelySizeToken(token)) {
+      // If US size already exists and this is a plain 2-digit number, treat as EU size.
+      const hasUS = sizeParts.some((s) => s.startsWith('US '));
+      const n = Number(token);
+      if (hasUS && /^\d{2}$/.test(token) && n >= 30 && n <= 60) {
+        sizeParts.push(`EU ${token}`);
+      } else {
+        sizeParts.push(prettifyToken(token));
+      }
+      usedAsSize.add(i);
+    }
+  }
+
+  const colorTokens = tokens
+    .filter((_, idx) => !usedAsSize.has(idx))
+    .map((t) => normalizeColorToken(t))
+    .filter(Boolean);
+
+  const color = colorTokens.length ? colorTokens.join(' ') : undefined;
+  const dedupedSizeParts = Array.from(new Set(sizeParts.filter(Boolean)));
+  const size = dedupedSizeParts.length ? dedupedSizeParts.join(' • ') : undefined;
+
+  const label =
+    (color && size && `${color} / ${size}`) ||
+    color ||
+    size ||
+    tokens.map((t) => prettifyToken(t)).filter(Boolean).join(' ');
+
+  return { color, size, label: label || undefined };
+};
+
+const deriveVariantMeta = (variant: any, name: string) => {
+  const parsed = parseVariationSuffix(variant?.variation_suffix);
+
+  const rawColor = normalizeVariantText(variant?.attributes?.color || variant?.color);
+  const rawSize = normalizeVariantText(variant?.attributes?.size || variant?.size);
+
+  const color =
+    (rawColor ? normalizeColorToken(rawColor) : '') ||
+    parsed.color ||
+    getColorLabel(name) ||
+    undefined;
+
+  const size =
+    (rawSize ? prettifyToken(rawSize) : '') ||
+    parsed.size ||
+    getSizeLabel(name) ||
+    undefined;
+
+  const variationSuffix = normalizeVariantText(variant?.variation_suffix || '') || null;
+
+  const optionLabel =
+    normalizeVariantText(
+      variant?.option_label ||
+      parsed.label ||
+      (variationSuffix ? parseVariationSuffix(variationSuffix).label : '') ||
+      [color, size].filter(Boolean).join(' / ')
+    ) ||
+    undefined;
+
+  return { color, size, variationSuffix, optionLabel };
+};
+
+const getCategoryId = (category: Product['category'] | null | undefined): number | undefined => {
+  if (!category || typeof category === 'string') return undefined;
+  const id = Number(category.id);
+  return Number.isFinite(id) ? id : undefined;
+};
+
+const getCategoryName = (category: Product['category'] | null | undefined): string | undefined => {
+  if (!category) return undefined;
+  if (typeof category === 'string') {
+    const value = category.trim();
+    return value || undefined;
+  }
+
+  const value = String(category.name || '').trim();
+  return value || undefined;
+};
 
 export default function ProductDetailPage() {
   const params = useParams();
@@ -131,12 +303,16 @@ export default function ProductDetailPage() {
 
         const buildVariantFromAny = (variant: any): ProductVariant => {
           const name = variant?.name || '';
+          const meta = deriveVariantMeta(variant, name);
+
           return {
             id: Number(variant?.id),
             name,
             sku: variant?.sku || `product-${variant?.id}`,
-            color: variant?.attributes?.color || getColorLabel(name),
-            size: variant?.attributes?.size || getSizeLabel(name),
+            color: meta.color,
+            size: meta.size,
+            variation_suffix: meta.variationSuffix,
+            option_label: meta.optionLabel,
             selling_price: Number(variant?.selling_price ?? variant?.price ?? 0),
             in_stock:
               typeof variant?.in_stock === 'boolean'
@@ -191,14 +367,20 @@ export default function ProductDetailPage() {
           mainProduct.name || '',
           (mainProduct as any).base_name || undefined
         );
-        const mainCategoryId = mainProduct.category?.id;
+        const mainCategoryId = getCategoryId(mainProduct.category);
 
-        const grouped = groupProductsByMother(allProductsResponse.products, {
-          // Home sections group by mother name irrespective of category payload shape.
-          // Use same behavior on details page so "X options" always matches.
-          useCategoryInKey: false,
-          preferSkuGrouping: false,
-        });
+        const groupedFromApi = Array.isArray(allProductsResponse.grouped_products)
+          ? adaptCatalogGroupedProducts(allProductsResponse.grouped_products)
+          : [];
+
+        const grouped = groupedFromApi.length > 0
+          ? groupedFromApi
+          : groupProductsByMother(allProductsResponse.products, {
+              // Home sections group by mother name irrespective of category payload shape.
+              // Use same behavior on details page so "X options" always matches.
+              useCategoryInKey: false,
+              preferSkuGrouping: false,
+            });
 
         const selectedGroupById = grouped.find((g) =>
           g.variants.some((v) => Number(v.id) === Number(mainProduct.id))
@@ -222,12 +404,16 @@ export default function ProductDetailPage() {
         const variations: ProductVariant[] = (selectedGroup?.variants || [])
           .map((variant) => {
             const raw = (variant as any).raw || {};
+            const meta = deriveVariantMeta(raw, variant.name || raw?.name || '');
+
             return {
               id: variant.id,
               name: variant.name,
               sku: variant.sku || `product-${variant.id}`,
-              color: variant.color || getColorLabel(variant.name),
-              size: variant.size || getSizeLabel(variant.name),
+              color: meta.color || variant.color || getColorLabel(variant.name),
+              size: meta.size || variant.size || getSizeLabel(variant.name),
+              variation_suffix: meta.variationSuffix || raw?.variation_suffix || null,
+              option_label: meta.optionLabel,
               selling_price: variant.price ?? raw.selling_price ?? null,
               in_stock: !!variant.in_stock,
               stock_quantity: variant.stock_quantity ?? raw.stock_quantity ?? 0,
@@ -246,12 +432,15 @@ export default function ProductDetailPage() {
 
         // ✅ If no variations were found for this SKU, still show the product itself
         if (variations.length === 0) {
+          const selfMeta = deriveVariantMeta(mainProduct as any, mainProduct.name);
           const selfVariant: ProductVariant = {
             id: mainProduct.id,
             name: mainProduct.name,
             sku: mainProduct.sku || `product-${mainProduct.id}`,
-            color: getColorLabel(mainProduct.name),
-            size: getSizeLabel(mainProduct.name),
+            color: selfMeta.color || getColorLabel(mainProduct.name),
+            size: selfMeta.size || getSizeLabel(mainProduct.name),
+            variation_suffix: selfMeta.variationSuffix || (mainProduct as any).variation_suffix || null,
+            option_label: selfMeta.optionLabel,
             selling_price: (mainProduct as any).selling_price ?? null,
             in_stock: !!(mainProduct as any).in_stock,
             stock_quantity: (mainProduct as any).stock_quantity ?? 0,
@@ -298,6 +487,13 @@ export default function ProductDetailPage() {
     return Array.from(new Set(sizes));
   }, [productVariants]);
 
+  const shouldShowGenericOptions = useMemo(() => {
+    if (productVariants.length <= 1) return false;
+    // If we can already show meaningful color/size selectors, no need for generic options.
+    if (availableColors.length > 1 || availableSizes.length > 1) return false;
+    return true;
+  }, [productVariants, availableColors, availableSizes]);
+
   // Listen for wishlist updates
   useEffect(() => {
     const updateWishlistStatus = () => {
@@ -319,13 +515,29 @@ export default function ProductDetailPage() {
   };
 
   const handleColorSelect = (color: string) => {
-    const variant = productVariants.find(v => v.color === color);
-    if (variant) handleVariantChange(variant);
+    const candidates = productVariants.filter(v => v.color === color);
+    if (candidates.length === 0) return;
+
+    const preferred =
+      candidates.find((v) => selectedVariant?.size && v.size === selectedVariant.size && v.in_stock) ||
+      candidates.find((v) => selectedVariant?.size && v.size === selectedVariant.size) ||
+      candidates.find((v) => v.in_stock) ||
+      candidates[0];
+
+    if (preferred) handleVariantChange(preferred);
   };
 
   const handleSizeSelect = (size: string) => {
-    const variant = productVariants.find(v => v.size === size);
-    if (variant) handleVariantChange(variant);
+    const candidates = productVariants.filter(v => v.size === size);
+    if (candidates.length === 0) return;
+
+    const preferred =
+      candidates.find((v) => selectedVariant?.color && v.color === selectedVariant.color && v.in_stock) ||
+      candidates.find((v) => selectedVariant?.color && v.color === selectedVariant.color) ||
+      candidates.find((v) => v.in_stock) ||
+      candidates[0];
+
+    if (preferred) handleVariantChange(preferred);
   };
 
   const handleToggleWishlist = () => {
@@ -561,7 +773,7 @@ export default function ProductDetailPage() {
               onClick={() => router.back()}
               className="hover:text-gray-900 transition"
             >
-              {product.category?.name || 'Products'}
+              {getCategoryName(product.category) || 'Products'}
             </button>
             <span className="text-gray-300">/</span>
             <span className="text-gray-900 font-medium">{baseName}</span>
@@ -790,6 +1002,43 @@ export default function ProductDetailPage() {
                   </div>
                 )}
 
+                {/* Generic Options (fallback when color/size parsing is not meaningful) */}
+                {shouldShowGenericOptions && (
+                  <div className="mt-6">
+                    <label className="block text-xs font-semibold text-gray-900 mb-3 tracking-wide uppercase">
+                      Options ({productVariants.length})
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {productVariants.map((variant, index) => {
+                        const isSelected = selectedVariant.id === variant.id;
+                        const isAvailable = !!variant.in_stock;
+                        const fallbackLabel =
+                          variant.option_label ||
+                          parseVariationSuffix(variant.variation_suffix).label ||
+                          (variant.sku ? `SKU ${variant.sku}` : `Option ${index + 1}`);
+
+                        return (
+                          <button
+                            key={variant.id}
+                            onClick={() => handleVariantChange(variant)}
+                            disabled={!isAvailable}
+                            className={`px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all ${
+                              isSelected
+                                ? 'border-gray-900 bg-gray-900 text-white'
+                                : isAvailable
+                                ? 'border-gray-200 bg-white text-gray-800 hover:border-gray-300 hover:bg-gray-50'
+                                : 'border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed line-through'
+                            }`}
+                            title={variant.sku || fallbackLabel}
+                          >
+                            {fallbackLabel}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {/* Quantity + Actions */}
                 <div className="mt-7">
                   <div className="flex items-center justify-between gap-4">
@@ -864,7 +1113,7 @@ export default function ProductDetailPage() {
                     <div className="flex justify-between">
                       <span className="text-gray-500">Category</span>
                       <span className="font-semibold text-gray-800">
-                        {product.category.name}
+                        {getCategoryName(product.category) || 'N/A'}
                       </span>
                     </div>
                   )}

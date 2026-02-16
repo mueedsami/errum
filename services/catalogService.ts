@@ -1,4 +1,4 @@
-import api from './api';
+import api from '@/lib/axios';
 import axios from 'axios';
 import { getBaseProductName, getColorLabel, getSizeLabel } from '@/lib/productNameUtils';
 
@@ -457,7 +457,7 @@ const normalizeGroupedProduct = (rawGroup: any): CatalogGroupedProduct => {
     .filter((v: Product) => v.id > 0);
 
   // API docs indicate variants excludes main. Some implementations may include main, so de-dupe.
-  const variants = normalizedAllVariants.filter((v) => v.id !== mainVariant.id);
+  const variants = normalizedAllVariants.filter((v: Product) => v.id !== mainVariant.id);
 
   const all = [mainVariant, ...variants];
 
@@ -606,8 +606,34 @@ const catalogService = {
 
       // Legacy shape: { product, related_products }
       if (payload?.product) {
+        const rawProduct = payload.product;
+        const category = normalizeCategory(rawProduct?.category);
+        const baseName = normalizeString(rawProduct?.base_name || getBaseProductName(rawProduct?.name || ''));
+        const description = normalizeString(rawProduct?.description || '');
+
+        const product = normalizeProduct(rawProduct, {
+          base_name: baseName,
+          description,
+          category,
+        });
+
+        // Keep variants when legacy payload nests them under product.
+        const variantsRaw = Array.isArray(rawProduct?.variants)
+          ? rawProduct.variants
+          : Array.isArray(payload?.variants)
+            ? payload.variants
+            : [];
+
+        (product as any).variants = variantsRaw.map((v: any) =>
+          normalizeProduct(v, {
+            base_name: baseName,
+            description,
+            category,
+          })
+        );
+
         return {
-          product: normalizeProduct(payload.product),
+          product,
           related_products: Array.isArray(payload.related_products)
             ? payload.related_products.map((p: any) => normalizeProduct(p) as SimpleProduct)
             : [],

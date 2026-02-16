@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { CustomerAuthProvider } from '@/contexts/CustomerAuthContext';
 import { CartProvider } from '@/app/e-commerce/CartContext';
 import Footer from '@/components/ecommerce/Footer';
@@ -13,7 +14,9 @@ export default function EcommerceLayout({
   return (
     <CustomerAuthProvider>
       <CartProvider>
-        <ScrollToTopOnRouteChange />
+        <Suspense fallback={null}>
+          <ScrollToTopOnRouteChange />
+        </Suspense>
         {children}
         <Footer />
       </CartProvider>

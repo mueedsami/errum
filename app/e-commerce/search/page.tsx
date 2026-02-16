@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
-import Header from '@/components/ecommerce/Header';
+import Navigation from '@/components/ecommerce/Navigation';
 import Footer from '@/components/ecommerce/Footer';
 import SearchClient from './search-client';
 import catalogService from '@/services/catalogService';
@@ -38,7 +38,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header />
+      <Navigation />
 
       <Suspense fallback={<SearchLoadingSkeleton />}>
         <SearchClient

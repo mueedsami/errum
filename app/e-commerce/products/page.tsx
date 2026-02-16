@@ -5,10 +5,10 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { ChevronDown, Filter, ShoppingBag } from 'lucide-react';
 
-import Header from '@/components/ecommerce/Header';
+import Navigation from '@/components/ecommerce/Navigation';
 import Footer from '@/components/ecommerce/Footer';
-import CartSidebar from '@/components/ecommerce/CartSidebar';
-import { useCart } from '@/contexts/CartContext';
+import CartSidebar from '@/components/ecommerce/cart/CartSidebar';
+import { useCart } from '@/app/e-commerce/CartContext';
 import catalogService, {
   CatalogCategory,
   ProductResponse,
@@ -108,7 +108,7 @@ export default function ProductsPage() {
   return (
     <>
       <div className="min-h-screen bg-white">
-        <Header />
+        <Navigation />
 
         <div className="max-w-7xl mx-auto px-4 py-8">
           <div className="text-center mb-8">

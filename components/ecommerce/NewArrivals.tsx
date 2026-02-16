@@ -6,14 +6,22 @@ import Image from 'next/image';
 import { ShoppingCart, Clock, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import catalogService, { SimpleProduct } from '@/services/catalogService';
-import { useCart } from '@/contexts/CartContext';
-import { toast } from 'react-hot-toast';
+import { useCart } from '@/app/e-commerce/CartContext';
 import {
   buildCardProductsFromResponse,
   getAdditionalVariantCount,
   getCardPriceText,
   getCardStockLabel,
 } from '@/lib/ecommerceCardUtils';
+
+const toast = {
+  success: (message: string) => {
+    if (typeof window !== 'undefined') console.log(message);
+  },
+  error: (message: string) => {
+    if (typeof window !== 'undefined') console.error(message);
+  },
+};
 
 interface NewArrivalsProps {
   categoryId?: number;

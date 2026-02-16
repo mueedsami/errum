@@ -290,12 +290,6 @@ export default function CategoryProductsPage() {
                             className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                           />
 
-                          {/* Variation Badge */}
-                          {group.hasVariations && (
-                            <div className="absolute top-2 left-2 bg-red-800 text-white px-2 py-1 rounded-md text-xs font-semibold">
-                              {group.totalVariants} Colors
-                            </div>
-                          )}
                           {/* Color Swatches for variations */}
                           {group.hasVariations && group.variants.length > 1 && (
                             <div className="absolute bottom-2 left-2 flex gap-1">
@@ -352,11 +346,6 @@ export default function CategoryProductsPage() {
                           </span>
                         )}
 
-                        {group.hasVariations && (
-                          <span className="text-xs font-medium text-blue-600">
-                            {group.totalVariants} variations available
-                          </span>
-                        )}
                       </div>
 
                       {!group.hasVariations && (

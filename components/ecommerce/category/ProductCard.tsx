@@ -131,11 +131,6 @@ export default function ProductCard({ product, onCartOpen }: ProductCardProps) {
         <div className="mt-2 flex items-center justify-between">
           <span className="text-base font-bold text-red-700">{priceText}</span>
 
-          {product.variations?.length > 1 && (
-            <span className="text-[10px] px-2 py-1 rounded-full bg-gray-50 border border-gray-100 text-gray-600">
-              {product.variations.length} options
-            </span>
-          )}
         </div>
       </div>
     </div>

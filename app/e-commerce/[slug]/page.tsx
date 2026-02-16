@@ -105,7 +105,7 @@ export default function CategoryProductsPage() {
     }
   };
 
-  // Group variant rows under one mother product name
+  // Group variant rows under one base product name
   const productGroups = useMemo((): ProductGroup[] => {
     const grouped = (apiGroupedProducts.length > 0)
       ? adaptCatalogGroupedProducts(apiGroupedProducts as any)
@@ -306,33 +306,30 @@ export default function CategoryProductsPage() {
                             className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
                           />
 
-                          {/* Color Swatches for variations */}
+                          {/* Variant & stock badges */}
                           {group.hasVariations && group.variants.length > 1 && (
-                            <div className="absolute bottom-2 left-2 flex gap-1">
-                              {group.variants.slice(0, 5).map((variant, idx) => (
-                                <div
-                                  key={idx}
-                                  className="w-6 h-6 rounded-full border-2 border-white shadow-sm overflow-hidden"
-                                  title={variant.color}
-                                >
-                                  {variant.image ? (
-                                    <img 
-                                      src={variant.image} 
-                                      alt={variant.color || ''} 
-                                      className="w-full h-full object-cover"
-                                    />
-                                  ) : (
-                                    <div className="w-full h-full bg-gray-300"></div>
-                                  )}
-                                </div>
-                              ))}
-                              {group.variants.length > 5 && (
-                                <div className="w-6 h-6 rounded-full border-2 border-white shadow-sm bg-gray-200 flex items-center justify-center text-xs font-semibold text-gray-600">
-                                  +{group.variants.length - 5}
-                                </div>
-                              )}
-                            </div>
+                            <span className="absolute top-2 left-2 bg-purple-600 text-white text-xs px-2 py-1 rounded-full font-medium shadow">
+                              +{group.variants.length - 1} variants available
+                            </span>
                           )}
+
+                          {(() => {
+                            const mainStock = Number(firstVariant.stock_quantity || 0);
+                            const hasOtherStock = group.variants.slice(1).some((v) => Number(v.stock_quantity || 0) > 0);
+                            const stockLabel = mainStock > 0 ? 'In Stock' : hasOtherStock ? 'Available in other variants' : 'Out of Stock';
+                            const stockClass =
+                              stockLabel === 'In Stock'
+                                ? 'bg-green-100 text-green-700'
+                                : stockLabel === 'Available in other variants'
+                                ? 'bg-amber-100 text-amber-700'
+                                : 'bg-red-100 text-red-700';
+
+                            return (
+                              <span className={`absolute top-2 right-2 text-xs px-2 py-1 rounded-full font-medium ${stockClass}`}>
+                                {stockLabel}
+                              </span>
+                            );
+                          })()}
                         </div>
 
                   {/* Product Info */}
@@ -364,15 +361,19 @@ export default function CategoryProductsPage() {
 
                       </div>
 
-                      {!group.hasVariations && (
-                        <span className={`text-xs font-medium ${
-                          group.variants.some(v => v.in_stock) ? 'text-green-600' : 'text-red-600'
-                        }`}>
-                          {group.variants.some(v => v.in_stock) 
-                            ? `In Stock (${group.variants.reduce((sum, v) => sum + v.stock_quantity, 0)})` 
-                            : 'Out of Stock'}
-                        </span>
-                      )}
+                      <span className={`text-xs font-medium ${
+                        Number(firstVariant.stock_quantity || 0) > 0
+                          ? 'text-green-600'
+                          : group.variants.slice(1).some((v) => Number(v.stock_quantity || 0) > 0)
+                          ? 'text-amber-700'
+                          : 'text-red-600'
+                      }`}>
+                        {Number(firstVariant.stock_quantity || 0) > 0
+                          ? 'In Stock'
+                          : group.variants.slice(1).some((v) => Number(v.stock_quantity || 0) > 0)
+                          ? 'Available in other variants'
+                          : 'Out of Stock'}
+                      </span>
                     </div>
                     {/* View Details Button */}
                     <button

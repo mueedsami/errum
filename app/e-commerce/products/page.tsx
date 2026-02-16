@@ -1,299 +1,233 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { ShoppingCart, Heart, Eye, Loader2 } from 'lucide-react';
+import { ChevronDown, Filter, ShoppingBag } from 'lucide-react';
 
-import Navigation from '@/components/ecommerce/Navigation';
+import Header from '@/components/ecommerce/Header';
 import Footer from '@/components/ecommerce/Footer';
-import catalogService, { Product, PaginationMeta } from '@/services/catalogService';
-import { useCart } from '../CartContext';
-import CartSidebar from '@/components/ecommerce/cart/CartSidebar';
-import { wishlistUtils } from '@/lib/wishlistUtils';
+import CartSidebar from '@/components/ecommerce/CartSidebar';
+import { useCart } from '@/contexts/CartContext';
+import catalogService, {
+  CatalogCategory,
+  ProductResponse,
+  GetProductsParams,
+  SimpleProduct,
+} from '@/services/catalogService';
 import {
-  adaptCatalogGroupedProducts,
-  formatGroupedPrice,
-  groupProductsByMother,
-  GroupedProduct,
-} from '@/lib/ecommerceProductGrouping';
+  buildCardProductsFromResponse,
+  getAdditionalVariantCount,
+  getCardPriceText,
+  getCardStockLabel,
+} from '@/lib/ecommerceCardUtils';
 
 export default function ProductsPage() {
   const router = useRouter();
+
+  const [categories, setCategories] = useState<CatalogCategory[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [sortBy, setSortBy] = useState<string>('newest');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const [products, setProducts] = useState<SimpleProduct[]>([]);
+  const [pagination, setPagination] = useState<ProductResponse['pagination'] | null>(null);
+
+  const [isCartOpen, setIsCartOpen] = useState(false);
   const { addToCart } = useCart();
 
-  const [rawProducts, setRawProducts] = useState<Product[]>([]);
-  const [apiGroupedProducts, setApiGroupedProducts] = useState<any[]>([]);
-  const [pagination, setPagination] = useState<PaginationMeta | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [addingGroupKey, setAddingGroupKey] = useState<string | null>(null);
-  const [isCartOpen, setIsCartOpen] = useState(false);
-
-  const [wishlistIds, setWishlistIds] = useState<Set<number>>(new Set());
-
-  const groupedProducts = useMemo(() => {
-    if (apiGroupedProducts.length > 0) {
-      return adaptCatalogGroupedProducts(apiGroupedProducts as any);
-    }
-    return groupProductsByMother(rawProducts);
-  }, [apiGroupedProducts, rawProducts]);
+  useEffect(() => {
+    fetchCategories();
+  }, []);
 
   useEffect(() => {
     fetchProducts();
-  }, []);
+  }, [selectedCategory, searchTerm, sortBy]);
 
-  useEffect(() => {
-    const updateWishlistIds = () => {
-      const items = wishlistUtils.getAll();
-      setWishlistIds(new Set(items.map((i) => Number(i.id))));
-    };
-
-    updateWishlistIds();
-    window.addEventListener('wishlist-updated', updateWishlistIds);
-    return () => window.removeEventListener('wishlist-updated', updateWishlistIds);
-  }, []);
+  const fetchCategories = async () => {
+    try {
+      const categoryData = await catalogService.getCategories();
+      setCategories(categoryData);
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+    }
+  };
 
   const fetchProducts = async () => {
+    setIsLoading(true);
     try {
-      setLoading(true);
-      setError(null);
+      const params: GetProductsParams = {
+        page: 1,
+        per_page: 20,
+      };
 
-      const response = await catalogService.getProducts({
-        per_page: 100,
-        sort_by: 'newest',
-      });
+      if (selectedCategory !== 'all') {
+        params.category_id = parseInt(selectedCategory, 10);
+      }
 
-      setApiGroupedProducts(response.grouped_products || []);
-      setRawProducts(response.products);
+      if (searchTerm.trim()) {
+        params.search = searchTerm.trim();
+      }
+
+      if (sortBy) {
+        params.sort_by = sortBy;
+      }
+
+      const response = await catalogService.getProducts(params);
+      const cardProducts = buildCardProductsFromResponse(response);
+
+      setProducts(cardProducts);
       setPagination(response.pagination);
-    } catch (err: any) {
-      console.error('Error fetching products:', err);
-      setError('Failed to load products');
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      setProducts([]);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
-  const navigateToProduct = (productId: number) => {
-    router.push(`/e-commerce/product/${productId}`);
-  };
-
-  const toggleWishlist = (group: GroupedProduct, e: React.MouseEvent) => {
-    e.stopPropagation();
-
-    const representative = group.variants.find((v) => v.in_stock) || group.variants[0];
-    if (!representative) return;
-
-    const productId = representative.id;
-
-    if (wishlistIds.has(productId)) {
-      wishlistUtils.remove(productId);
-    } else {
-      wishlistUtils.add({
-        id: productId,
-        name: group.baseName,
-        image: representative.image,
-        price: representative.price,
-        sku: representative.sku,
-      });
-    }
-  };
-
-  const handleAddToCart = async (group: GroupedProduct, e: React.MouseEvent) => {
-    e.stopPropagation();
-
-    const representative = group.variants.find((v) => v.in_stock) || group.variants[0];
-    if (!representative) return;
-
-    // If there are variations, open product details for variation selection.
-    if (group.totalVariants > 1) {
-      navigateToProduct(representative.id);
+  const handleAddToCart = async (product: SimpleProduct) => {
+    if (product.has_variants) {
+      router.push(`/e-commerce/product/${product.id}`);
       return;
     }
 
-    setAddingGroupKey(group.key);
-
-    addToCart(
-      {
-        id: representative.id,
-        name: group.baseName,
-        image: representative.image,
-        price: representative.price,
-        sku: representative.sku || '',
-        quantity: 1,
-      } as any,
-      1
-    );
-
-    setTimeout(() => {
-      setAddingGroupKey(null);
+    try {
+      await addToCart(product, 1);
       setIsCartOpen(true);
-    }, 1000);
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+    }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <Navigation />
-        <div className="flex items-center justify-center py-32">
-          <div className="text-center">
-            <Loader2 className="h-10 w-10 animate-spin text-red-700 mx-auto mb-3" />
-            <p className="text-gray-600">Loading products...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <Navigation />
-        <div className="flex items-center justify-center py-32">
-          <div className="text-center">
-            <p className="text-red-600 mb-4">{error}</p>
-            <button
-              onClick={fetchProducts}
-              className="bg-red-800 text-white px-6 py-2 rounded-lg hover:bg-red-900"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const navigateToProduct = (identifier: number | string) => {
+    router.push(`/e-commerce/product/${identifier}`);
+  };
 
   return (
     <>
-      <div className="min-h-screen bg-gray-50">
-        <Navigation />
+      <div className="min-h-screen bg-white">
+        <Header />
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* Header */}
-          <div className="mb-8">
-            <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-2">All Products</h1>
-            <p className="text-gray-600">
-              {groupedProducts.length} mother products available
-              {pagination && ` (from ${pagination.total} total variants)`}
-            </p>
+        <div className="max-w-7xl mx-auto px-4 py-8">
+          <div className="text-center mb-8">
+            <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">All Products</h1>
+            <p className="text-gray-600">Browse our complete collection</p>
           </div>
 
-          {/* Products Grid */}
-          {groupedProducts.length === 0 ? (
-            <div className="text-center py-20">
-              <p className="text-gray-500 text-lg">No products available</p>
+          <div className="bg-gray-50 rounded-lg p-4 mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="md:col-span-2">
+                <input
+                  type="text"
+                  placeholder="Search products..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                />
+              </div>
+
+              <div className="relative">
+                <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="w-full pl-10 pr-8 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 appearance-none bg-white"
+                >
+                  <option value="all">All Categories</option>
+                  {categories.map((category) => (
+                    <option key={category.id} value={category.id.toString()}>
+                      {category.name}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+              </div>
+
+              <div className="relative">
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="w-full pl-4 pr-8 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 appearance-none bg-white"
+                >
+                  <option value="newest">Newest</option>
+                  <option value="name">Name</option>
+                  <option value="price_asc">Price: Low to High</option>
+                  <option value="price_desc">Price: High to Low</option>
+                </select>
+                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+              </div>
+            </div>
+          </div>
+
+          {isLoading ? (
+            <div className="text-center py-12">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-red-700" />
+              <p className="mt-4 text-gray-600">Loading products...</p>
+            </div>
+          ) : products.length === 0 ? (
+            <div className="text-center py-12">
+              <ShoppingBag className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">No products found</h3>
+              <p className="text-gray-600">Try adjusting your search or filters</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {groupedProducts.map((group) => {
-                const representative = group.variants.find((v) => v.in_stock) || group.variants[0];
-                if (!representative) return null;
-
-                const isInWishlist = wishlistIds.has(representative.id);
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+              {products.map((product) => {
+                const imageUrl = product.images?.[0]?.url || '/images/placeholder-product.jpg';
+                const additionalVariants = getAdditionalVariantCount(product);
+                const stockLabel = getCardStockLabel(product);
+                const hasStock = stockLabel !== 'Out of Stock';
 
                 return (
                   <div
-                    key={group.key}
-                    className="group bg-white rounded-xl overflow-hidden hover:shadow-xl transition-all duration-300 border border-gray-200"
-                    onMouseEnter={() => setHoveredId(group.key)}
-                    onMouseLeave={() => setHoveredId(null)}
+                    key={product.id}
+                    className="group bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-lg transition-all duration-300"
                   >
-                    <div
-                      onClick={() => navigateToProduct(representative.id)}
-                      className="relative aspect-square overflow-hidden bg-gray-50 cursor-pointer"
-                    >
-                      <img
-                        src={group.primaryImage}
-                        alt={group.baseName}
-                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                        onError={(e) => {
-                          e.currentTarget.src = '/placeholder-product.png';
-                        }}
+                    <div className="relative aspect-[3/4] bg-gray-100 overflow-hidden">
+                      <Image
+                        src={imageUrl}
+                        alt={product.display_name || product.base_name || product.name}
+                        fill
+                        className="object-cover group-hover:scale-105 transition-transform duration-300"
                       />
 
-                      {group.totalVariants > 1 && (
-                        <span className="absolute top-3 left-3 bg-blue-600 text-white px-3 py-1.5 text-xs font-bold rounded-full shadow-lg">
-                          {group.totalVariants} OPTIONS
+                      {additionalVariants > 0 && (
+                        <span className="absolute top-2 left-2 bg-purple-600 text-white text-xs px-2 py-1 rounded-full">
+                          +{additionalVariants} variants available
                         </span>
                       )}
 
-                      {!group.inStock && (
-                        <span className="absolute top-3 left-3 bg-red-600 text-white px-3 py-1.5 text-xs font-bold rounded-full shadow-lg">
-                          OUT OF STOCK
-                        </span>
-                      )}
-
-                      <div
-                        className={`absolute top-2 right-2 flex flex-col gap-2 transition-all duration-300 ${
-                          hoveredId === group.key ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4'
+                      <span
+                        className={`absolute top-2 right-2 text-xs px-2 py-1 rounded-full ${
+                          stockLabel === 'In Stock'
+                            ? 'bg-green-100 text-green-700'
+                            : hasStock
+                            ? 'bg-amber-100 text-amber-700'
+                            : 'bg-red-100 text-red-700'
                         }`}
                       >
-                        <button
-                          onClick={(e) => toggleWishlist(group, e)}
-                          className={`p-2 rounded-full shadow-lg transition-all duration-300 ${
-                            isInWishlist ? 'bg-red-600 text-white scale-110' : 'bg-white hover:bg-red-50'
-                          }`}
-                        >
-                          <Heart size={16} className={isInWishlist ? 'fill-white' : 'text-gray-700'} />
-                        </button>
-
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            navigateToProduct(representative.id);
-                          }}
-                          className="p-2 bg-white rounded-full shadow-lg hover:bg-blue-50 transition-colors"
-                        >
-                          <Eye size={16} className="text-gray-700" />
-                        </button>
-                      </div>
-
-                      <button
-                        onClick={(e) => handleAddToCart(group, e)}
-                        disabled={!group.inStock || addingGroupKey === group.key}
-                        className={`absolute bottom-0 left-0 right-0 text-white py-3 text-sm font-bold transition-transform duration-300 flex items-center justify-center gap-2 ${
-                          hoveredId === group.key ? 'translate-y-0' : 'translate-y-full'
-                        } ${
-                          !group.inStock
-                            ? 'bg-gray-400 cursor-not-allowed'
-                            : addingGroupKey === group.key
-                            ? 'bg-green-600'
-                            : group.totalVariants > 1
-                            ? 'bg-indigo-700 hover:bg-indigo-800'
-                            : 'bg-red-700 hover:bg-red-800'
-                        }`}
-                      >
-                        {addingGroupKey === group.key ? (
-                          <>✓ ADDED</>
-                        ) : group.totalVariants > 1 ? (
-                          'SELECT OPTION'
-                        ) : (
-                          <>
-                            <ShoppingCart size={16} />
-                            ADD TO CART
-                          </>
-                        )}
-                      </button>
+                        {stockLabel}
+                      </span>
                     </div>
 
                     <div className="p-4 text-center">
                       <h3
-                        onClick={() => navigateToProduct(representative.id)}
+                        onClick={() => navigateToProduct(product.id)}
                         className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 group-hover:text-red-600 transition-colors cursor-pointer"
                       >
-                        {group.baseName}
+                        {product.display_name || product.base_name || product.name}
                       </h3>
 
-                      <span className="text-lg font-bold text-red-700">{formatGroupedPrice(group)}</span>
+                      <span className="text-lg font-bold text-red-700">{getCardPriceText(product)}</span>
 
-                      {group.totalVariants > 1 && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          {group.totalVariants} variations available
-                        </p>
-                      )}
+                      <button
+                        onClick={() => handleAddToCart(product)}
+                        className="mt-3 w-full bg-red-600 text-white py-2 rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
+                      >
+                        {product.has_variants ? 'Select Option' : 'Add to Cart'}
+                      </button>
                     </div>
                   </div>
                 );
@@ -301,7 +235,6 @@ export default function ProductsPage() {
             </div>
           )}
 
-          {/* Pagination Info */}
           {pagination && pagination.last_page > 1 && (
             <div className="mt-8 text-center text-sm text-gray-600">
               Page {pagination.current_page} of {pagination.last_page}

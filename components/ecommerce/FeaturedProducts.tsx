@@ -1,270 +1,245 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { ShoppingCart, Heart, Eye } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import Image from 'next/image';
+import { ShoppingCart, Star, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import catalogService, { SimpleProduct } from '@/services/catalogService';
-import { useCart } from '@/app/e-commerce/CartContext';
-import CartSidebar from './cart/CartSidebar';
-import { wishlistUtils } from '@/lib/wishlistUtils';
+import { useCart } from '@/contexts/CartContext';
+import { toast } from 'react-hot-toast';
 import {
-  adaptCatalogGroupedProducts,
-  formatGroupedPrice,
-  groupProductsByMother,
-  GroupedProduct,
-} from '@/lib/ecommerceProductGrouping';
+  buildCardProductsFromResponse,
+  getAdditionalVariantCount,
+  getCardPriceText,
+  getCardStockLabel,
+} from '@/lib/ecommerceCardUtils';
 
-export default function FeaturedProducts() {
+interface FeaturedProductsProps {
+  categoryId?: number;
+  limit?: number;
+}
+
+export default function FeaturedProducts({ categoryId, limit = 8 }: FeaturedProductsProps) {
   const router = useRouter();
+  const [products, setProducts] = useState<SimpleProduct[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadingProductIds, setLoadingProductIds] = useState<Set<number>>(new Set());
+  const [isNavigating, setIsNavigating] = useState(false);
   const { addToCart } = useCart();
 
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [rawProducts, setRawProducts] = useState<SimpleProduct[]>([]);
-  const [apiGroupedProducts, setApiGroupedProducts] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [addingGroupKey, setAddingGroupKey] = useState<string | null>(null);
-  const [isCartOpen, setIsCartOpen] = useState(false);
-  const [wishlistIds, setWishlistIds] = useState<Set<number>>(new Set());
-
-  const featuredGroups = useMemo(
-    () => {
-      if (apiGroupedProducts.length > 0) {
-        return adaptCatalogGroupedProducts(apiGroupedProducts as any).slice(0, 8);
-      }
-      return groupProductsByMother(rawProducts, { useCategoryInKey: false, preferSkuGrouping: false }).slice(0, 8);
-    },
-    [apiGroupedProducts, rawProducts]
-  );
-
   useEffect(() => {
-    const updateWishlistIds = () => {
-      const items = wishlistUtils.getAll();
-      setWishlistIds(new Set(items.map((i) => Number(i.id))));
-    };
-
-    updateWishlistIds();
-    window.addEventListener('wishlist-updated', updateWishlistIds);
-    return () => window.removeEventListener('wishlist-updated', updateWishlistIds);
-  }, []);
-
-  useEffect(() => {
-    const fetchFeaturedProducts = async () => {
-      try {
-        setLoading(true);
-
-        // Pull more rows, then group in UI so duplicate variants don't eat the section.
-        const response = await catalogService.getProducts({
-          per_page: 40,
-          sort_by: 'newest',
-          in_stock: true,
-        });
-
-        setApiGroupedProducts(response.grouped_products || []);
-        setRawProducts(response.products as any);
-      } catch (error) {
-        console.error('Error fetching featured products:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchFeaturedProducts();
-  }, []);
+  }, [categoryId, limit]);
 
-  const navigateToProduct = (productId: number) => {
-    router.push(`/e-commerce/product/${productId}`);
+  const fetchFeaturedProducts = async () => {
+    try {
+      setIsLoading(true);
+      const params: Record<string, any> = {
+        per_page: limit,
+        sort_by: 'newest',
+      };
+
+      if (categoryId) {
+        params.category_id = categoryId;
+      }
+
+      const response = await catalogService.getProducts(params);
+      const displayProducts = buildCardProductsFromResponse(response);
+      setProducts(displayProducts.slice(0, limit));
+    } catch (error) {
+      console.error('Error fetching featured products:', error);
+      toast.error('Failed to load featured products');
+      setProducts([]);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const toggleWishlist = (group: GroupedProduct, e: React.MouseEvent) => {
+  const handleAddToCart = async (e: React.MouseEvent, product: SimpleProduct) => {
+    e.preventDefault();
     e.stopPropagation();
 
-    const representative = group.variants.find((v) => v.in_stock) || group.variants[0];
-    if (!representative) return;
+    if (product.has_variants) {
+      router.push(`/e-commerce/product/${product.id}`);
+      return;
+    }
 
-    const productId = representative.id;
+    if (loadingProductIds.has(product.id)) {
+      return;
+    }
 
-    if (wishlistIds.has(productId)) {
-      wishlistUtils.remove(productId);
-    } else {
-      wishlistUtils.add({
-        id: productId,
-        name: group.baseName,
-        image: representative.image,
-        price: representative.price,
-        sku: representative.sku,
+    setLoadingProductIds((prev) => new Set(prev).add(product.id));
+
+    try {
+      await addToCart(product, 1);
+      toast.success(`${product.display_name || product.name} added to cart!`);
+    } catch (error: any) {
+      console.error('Error adding to cart:', error);
+      toast.error(error.message || 'Failed to add item to cart');
+    } finally {
+      setLoadingProductIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(product.id);
+        return newSet;
       });
     }
   };
 
-  const handleAddToCart = (group: GroupedProduct, e: React.MouseEvent) => {
+  const handleBuyNow = async (e: React.MouseEvent, product: SimpleProduct) => {
+    e.preventDefault();
     e.stopPropagation();
 
-    const representative = group.variants.find((v) => v.in_stock) || group.variants[0];
-    if (!representative) return;
-
-    // If there are multiple variants, send user to details page for selection.
-    if (group.totalVariants > 1) {
-      navigateToProduct(representative.id);
+    if (product.has_variants) {
+      router.push(`/e-commerce/product/${product.id}`);
       return;
     }
 
-    setAddingGroupKey(group.key);
+    if (loadingProductIds.has(product.id)) {
+      return;
+    }
 
-    addToCart(
-      {
-        id: representative.id,
-        name: group.baseName,
-        image: representative.image,
-        price: representative.price,
-        sku: representative.sku || '',
-        quantity: 1,
-      } as any,
-      1
-    );
+    setLoadingProductIds((prev) => new Set(prev).add(product.id));
 
-    setTimeout(() => {
-      setAddingGroupKey(null);
-      setIsCartOpen(true);
-    }, 1200);
+    try {
+      await addToCart(product, 1);
+      toast.success('Proceeding to checkout...');
+      setIsNavigating(true);
+      router.push('/e-commerce/checkout');
+    } catch (error: any) {
+      console.error('Error in buy now:', error);
+      toast.error(error.message || 'Failed to proceed');
+    } finally {
+      setLoadingProductIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(product.id);
+        return newSet;
+      });
+      setIsNavigating(false);
+    }
   };
 
-  if (loading) {
+  if (isLoading) {
     return (
-      <section className="py-20 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <p className="text-gray-600">Loading featured products...</p>
+      <section className="py-16 bg-gradient-to-br from-white to-slate-50">
+        <div className="container mx-auto px-6 text-center">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-r from-orange-100 to-red-100 rounded-full mb-4">
+            <Loader2 className="h-8 w-8 text-orange-600 animate-spin" />
           </div>
+          <p className="text-gray-600 text-lg">Loading featured products...</p>
         </div>
       </section>
     );
   }
 
-  if (featuredGroups.length === 0) {
+  if (products.length === 0) {
     return null;
   }
 
   return (
-    <>
-      <section className="py-20 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">Featured Products</h2>
-            <p className="text-lg text-gray-600">Discover our curated collection</p>
+    <section className="py-16 bg-gradient-to-br from-white to-slate-50">
+      <div className="container mx-auto px-6">
+        <div className="text-center mb-12">
+          <div className="inline-flex items-center gap-2 bg-gradient-to-r from-orange-100 to-red-100 px-4 py-2 rounded-full mb-4">
+            <Star className="h-4 w-4 text-orange-600" fill="currentColor" />
+            <span className="text-sm font-semibold text-orange-800">Featured Collection</span>
           </div>
+          <h2 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-gray-900 to-gray-700 bg-clip-text text-transparent mb-4">
+            Featured Products
+          </h2>
+          <p className="text-gray-600 text-lg max-w-2xl mx-auto">
+            Discover our handpicked selection of premium products
+          </p>
+        </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {featuredGroups.map((group) => {
-              const representative = group.variants.find((v) => v.in_stock) || group.variants[0];
-              if (!representative) return null;
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 mb-12">
+          {products.map((product, index) => {
+            const imageUrl = product.images?.[0]?.url || '/images/placeholder-product.jpg';
+            const productName = product.display_name || product.base_name || product.name;
+            const additionalVariants = getAdditionalVariantCount(product);
+            const stockLabel = getCardStockLabel(product);
+            const isMainInStock = stockLabel === 'In Stock';
+            const hasAnyStock = stockLabel !== 'Out of Stock';
 
-              const isInWishlist = wishlistIds.has(representative.id);
+            return (
+              <Link
+                key={`${product.id}-${index}`}
+                href={`/e-commerce/product/${product.id}`}
+                className="group bg-white rounded-3xl shadow-sm border border-gray-100 overflow-hidden hover:shadow-2xl hover:-translate-y-2 transition-all duration-500"
+              >
+                <div className="relative aspect-[4/5] overflow-hidden bg-gradient-to-br from-gray-50 to-gray-100">
+                  <Image
+                    src={imageUrl}
+                    alt={productName}
+                    fill
+                    className="object-cover group-hover:scale-110 transition-transform duration-700"
+                  />
 
-              return (
-                <div
-                  key={group.key}
-                  className="group bg-white rounded-lg overflow-hidden hover:shadow-xl transition-all duration-300 border border-gray-200"
-                  onMouseEnter={() => setHoveredId(group.key)}
-                  onMouseLeave={() => setHoveredId(null)}
-                >
-                  <div
-                    onClick={() => navigateToProduct(representative.id)}
-                    className="relative aspect-square overflow-hidden bg-gray-50 cursor-pointer"
-                  >
-                    <img
-                      src={group.primaryImage}
-                      alt={group.baseName}
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                      onError={(e) => {
-                        e.currentTarget.src = '/placeholder-product.png';
-                      }}
-                    />
-
-                    <span className="absolute top-3 left-3 bg-red-700 text-white px-3 py-1.5 text-xs font-bold rounded-full shadow-lg">
-                      Featured
-                    </span>
-
-                    {group.totalVariants > 1 && (
-                      <span className="absolute top-12 left-3 bg-blue-600 text-white px-2 py-1 text-[10px] font-semibold rounded-full shadow-lg">
-                        {group.totalVariants} options
+                  <div className="absolute top-3 left-3 flex flex-col gap-2">
+                    {additionalVariants > 0 && (
+                      <span className="bg-purple-500 text-white text-xs px-3 py-1 rounded-full font-medium shadow-lg">
+                        +{additionalVariants} variants available
                       </span>
                     )}
 
-                    <div
-                      className={`absolute top-2 right-2 flex flex-col gap-2 transition-all duration-300 ${
-                        hoveredId === group.key ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4'
+                    <span
+                      className={`text-xs px-3 py-1 rounded-full font-medium shadow-lg ${
+                        isMainInStock
+                          ? 'bg-green-500 text-white'
+                          : hasAnyStock
+                          ? 'bg-amber-500 text-white'
+                          : 'bg-red-500 text-white'
                       }`}
                     >
-                      <button
-                        onClick={(e) => toggleWishlist(group, e)}
-                        className={`p-2 rounded-full shadow-lg transition-all duration-300 ${
-                          isInWishlist ? 'bg-red-600 text-white scale-110' : 'bg-white hover:bg-red-50'
-                        }`}
-                      >
-                        <Heart size={16} className={isInWishlist ? 'fill-white' : 'text-gray-700'} />
-                      </button>
+                      {stockLabel}
+                    </span>
+                  </div>
+                </div>
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigateToProduct(representative.id);
-                        }}
-                        className="p-2 bg-white rounded-full shadow-lg hover:bg-blue-50 transition-colors"
-                      >
-                        <Eye size={16} className="text-gray-700" />
-                      </button>
-                    </div>
+                <div className="p-6">
+                  <h3 className="font-bold text-gray-900 mb-2 line-clamp-2 min-h-[3.5rem] group-hover:text-orange-600 transition-colors text-lg leading-tight">
+                    {productName}
+                  </h3>
 
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className="text-2xl font-bold text-orange-600">{getCardPriceText(product)}</span>
+                  </div>
+
+                  <div className="space-y-3">
                     <button
-                      onClick={(e) => handleAddToCart(group, e)}
-                      disabled={!group.inStock || addingGroupKey === group.key}
-                      className={`absolute bottom-0 left-0 right-0 text-white py-3 text-sm font-bold transition-transform duration-300 flex items-center justify-center gap-2 ${
-                        hoveredId === group.key ? 'translate-y-0' : 'translate-y-full'
-                      } ${
-                        !group.inStock
-                          ? 'bg-gray-400 cursor-not-allowed'
-                          : addingGroupKey === group.key
-                          ? 'bg-green-600'
-                          : group.totalVariants > 1
-                          ? 'bg-indigo-700 hover:bg-indigo-800'
-                          : 'bg-red-700 hover:bg-red-800'
-                      }`}
+                      onClick={(e) => handleAddToCart(e, product)}
+                      disabled={loadingProductIds.has(product.id)}
+                      className="w-full bg-gradient-to-r from-orange-500 to-red-500 text-white px-4 py-3 rounded-xl text-sm font-semibold hover:from-orange-600 hover:to-red-600 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
                     >
-                      {addingGroupKey === group.key ? (
-                        <>✓ ADDED</>
-                      ) : group.totalVariants > 1 ? (
-                        'SELECT OPTION'
+                      {loadingProductIds.has(product.id) ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Loading...
+                        </>
+                      ) : product.has_variants ? (
+                        'Select Option'
                       ) : (
                         <>
-                          <ShoppingCart size={16} />
-                          ADD TO CART
+                          <ShoppingCart className="h-4 w-4" />
+                          Add to Cart
                         </>
                       )}
                     </button>
-                  </div>
 
-                  <div className="p-4 text-center">
-                    <h3
-                      onClick={() => navigateToProduct(representative.id)}
-                      className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 group-hover:text-red-600 transition-colors cursor-pointer"
+                    <button
+                      onClick={(e) => handleBuyNow(e, product)}
+                      disabled={loadingProductIds.has(product.id) || isNavigating}
+                      className="w-full border-2 border-orange-500 text-orange-600 px-4 py-3 rounded-xl text-sm font-semibold hover:bg-orange-500 hover:text-white transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {group.baseName}
-                    </h3>
-
-                    <span className="text-lg font-bold text-red-700">{formatGroupedPrice(group)}</span>
-
-                    {group.totalVariants > 1 && (
-                      <p className="text-xs text-gray-500 mt-1">{group.totalVariants} variations available</p>
-                    )}
+                      {isNavigating ? 'Loading...' : product.has_variants ? 'Select Variant' : 'Buy Now'}
+                    </button>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              </Link>
+            );
+          })}
         </div>
-      </section>
-
-      <CartSidebar isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} />
-    </>
+      </div>
+    </section>
   );
 }

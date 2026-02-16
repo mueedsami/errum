@@ -111,7 +111,7 @@ export default function SearchClient({ initialQuery }: { initialQuery: string })
         {submittedQuery && !loading && !error && (
           <p className="text-sm text-gray-600 mb-4">
             Results for <span className="font-medium text-gray-900">“{submittedQuery}”</span> — {groupedProducts.length}{' '}
-            mother product{groupedProducts.length === 1 ? '' : 's'}
+            grouped product{groupedProducts.length === 1 ? '' : 's'}
           </p>
         )}
 
@@ -132,16 +132,26 @@ export default function SearchClient({ initialQuery }: { initialQuery: string })
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {groupedProducts.map((group) => {
-              const representative = group.variants.find((v) => v.in_stock) || group.variants[0];
-              if (!representative) return null;
+              const mainVariant = group.variants[0];
+              if (!mainVariant) return null;
+
+              const mainStock = Number(mainVariant.stock_quantity || 0);
+              const hasOtherStock = group.variants.slice(1).some((variant) => Number(variant.stock_quantity || 0) > 0);
+              const stockLabel = mainStock > 0 ? 'In Stock' : hasOtherStock ? 'Available in other variants' : 'Out of Stock';
+              const stockClass =
+                stockLabel === 'In Stock'
+                  ? 'bg-green-100 text-green-700'
+                  : stockLabel === 'Available in other variants'
+                  ? 'bg-amber-100 text-amber-700'
+                  : 'bg-red-100 text-red-700';
 
               return (
                 <Link
                   key={group.key}
-                  href={`/e-commerce/product/${representative.id}`}
+                  href={`/e-commerce/product/${mainVariant.id}`}
                   className="bg-white rounded-xl border hover:border-red-200 hover:shadow-sm transition overflow-hidden"
                 >
-                  <div className="aspect-square bg-gray-100">
+                  <div className="aspect-square bg-gray-100 relative">
                     {group.primaryImage ? (
                       <img
                         src={group.primaryImage}
@@ -154,13 +164,20 @@ export default function SearchClient({ initialQuery }: { initialQuery: string })
                     ) : (
                       <div className="w-full h-full bg-gray-200" />
                     )}
+
+                    {group.totalVariants > 1 && (
+                      <span className="absolute top-2 left-2 bg-purple-100 text-purple-700 text-xs font-medium px-2 py-1 rounded-full">
+                        +{group.totalVariants - 1} variants available
+                      </span>
+                    )}
+
+                    <span className={`absolute top-2 right-2 text-xs font-medium px-2 py-1 rounded-full ${stockClass}`}>
+                      {stockLabel}
+                    </span>
                   </div>
                   <div className="p-3">
                     <div className="text-sm font-medium text-gray-900 line-clamp-2">{group.baseName}</div>
                     <div className="mt-1 text-red-700 font-semibold">{formatGroupedPrice(group)}</div>
-                    {group.totalVariants > 1 && (
-                      <div className="mt-1 text-[11px] text-blue-600">{group.totalVariants} options available</div>
-                    )}
                   </div>
                 </Link>
               );

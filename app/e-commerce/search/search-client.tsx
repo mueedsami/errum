@@ -8,7 +8,7 @@ import { Search as SearchIcon, Loader2, AlertCircle } from 'lucide-react';
 import Navigation from '@/components/ecommerce/Navigation';
 import Footer from '@/components/ecommerce/Footer';
 import catalogService from '@/services/catalogService';
-import { formatGroupedPrice, groupProductsByMother } from '@/lib/ecommerceProductGrouping';
+import { adaptCatalogGroupedProducts, formatGroupedPrice, groupProductsByMother } from '@/lib/ecommerceProductGrouping';
 
 type SearchProduct = {
   id: number;
@@ -27,10 +27,16 @@ export default function SearchClient({ initialQuery }: { initialQuery: string })
   const [query, setQuery] = useState(initialQuery || '');
   const [submittedQuery, setSubmittedQuery] = useState(initialQuery || '');
   const [products, setProducts] = useState<SearchProduct[]>([]);
+  const [apiGroupedProducts, setApiGroupedProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const groupedProducts = useMemo(() => groupProductsByMother(products as any), [products]);
+  const groupedProducts = useMemo(
+    () => (apiGroupedProducts.length > 0
+      ? adaptCatalogGroupedProducts(apiGroupedProducts as any)
+      : groupProductsByMother(products as any)),
+    [apiGroupedProducts, products]
+  );
 
   useEffect(() => {
     const q = (initialQuery || '').trim();
@@ -41,6 +47,7 @@ export default function SearchClient({ initialQuery }: { initialQuery: string })
         setLoading(true);
         setError(null);
         const data = await catalogService.searchProducts({ q, per_page: 60, page: 1 });
+        setApiGroupedProducts(data.grouped_products || []);
         setProducts((data.products || []) as SearchProduct[]);
       } catch (err: any) {
         console.error('Search failed:', err);
@@ -63,6 +70,7 @@ export default function SearchClient({ initialQuery }: { initialQuery: string })
       setLoading(true);
       setError(null);
       const data = await catalogService.searchProducts({ q, per_page: 60, page: 1 });
+      setApiGroupedProducts(data.grouped_products || []);
       setProducts((data.products || []) as SearchProduct[]);
     } catch (err: any) {
       console.error('Search failed:', err);

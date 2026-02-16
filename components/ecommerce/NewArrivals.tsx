@@ -8,6 +8,7 @@ import { useCart } from '@/app/e-commerce/CartContext';
 import CartSidebar from './cart/CartSidebar';
 import { wishlistUtils } from '@/lib/wishlistUtils';
 import {
+  adaptCatalogGroupedProducts,
   formatGroupedPrice,
   groupProductsByMother,
   GroupedProduct,
@@ -19,14 +20,20 @@ export default function NewArrivals() {
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [rawProducts, setRawProducts] = useState<SimpleProduct[]>([]);
+  const [apiGroupedProducts, setApiGroupedProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [addingGroupKey, setAddingGroupKey] = useState<string | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [wishlistIds, setWishlistIds] = useState<Set<number>>(new Set());
 
   const arrivalGroups = useMemo(
-    () => groupProductsByMother(rawProducts, { useCategoryInKey: false, preferSkuGrouping: false }).slice(0, 8),
-    [rawProducts]
+    () => {
+      if (apiGroupedProducts.length > 0) {
+        return adaptCatalogGroupedProducts(apiGroupedProducts as any).slice(0, 8);
+      }
+      return groupProductsByMother(rawProducts, { useCategoryInKey: false, preferSkuGrouping: false }).slice(0, 8);
+    },
+    [apiGroupedProducts, rawProducts]
   );
 
   useEffect(() => {
@@ -47,11 +54,11 @@ export default function NewArrivals() {
 
         const response = await catalogService.getProducts({
           per_page: 40,
-          sort_by: 'created_at',
-          sort_order: 'desc',
+          sort_by: 'newest',
           in_stock: true,
         });
 
+        setApiGroupedProducts(response.grouped_products || []);
         setRawProducts(response.products as any);
       } catch (error) {
         console.error('Error fetching new arrivals:', error);

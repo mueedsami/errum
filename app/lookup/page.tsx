@@ -175,7 +175,7 @@ async function renderLabelBase64(opts: { code: string; productName: string; pric
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   ctx.font = `800 ${Math.round(hPx * 0.11)}px Arial`;
-  ctx.fillText("Errum BD", centerX, topPad);
+  ctx.fillText("ERRUM BD", centerX, topPad);
 
   // Product name (match BatchPrinter)
   const nameY = topPad + Math.round(hPx * 0.14);
@@ -955,7 +955,7 @@ export default function LookupPage() {
         productName: (params.productName || 'Product').trim(),
         price: safeNum(params.price),
         dpi,
-        brandName: "Errum BD",
+        brandName: "ERRUM BD",
       });
 
       const config = qz.configs.create(printer, {

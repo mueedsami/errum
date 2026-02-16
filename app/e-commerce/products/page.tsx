@@ -11,6 +11,7 @@ import { useCart } from '../CartContext';
 import CartSidebar from '@/components/ecommerce/cart/CartSidebar';
 import { wishlistUtils } from '@/lib/wishlistUtils';
 import {
+  adaptCatalogGroupedProducts,
   formatGroupedPrice,
   groupProductsByMother,
   GroupedProduct,
@@ -21,6 +22,7 @@ export default function ProductsPage() {
   const { addToCart } = useCart();
 
   const [rawProducts, setRawProducts] = useState<Product[]>([]);
+  const [apiGroupedProducts, setApiGroupedProducts] = useState<any[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +33,12 @@ export default function ProductsPage() {
 
   const [wishlistIds, setWishlistIds] = useState<Set<number>>(new Set());
 
-  const groupedProducts = useMemo(() => groupProductsByMother(rawProducts), [rawProducts]);
+  const groupedProducts = useMemo(() => {
+    if (apiGroupedProducts.length > 0) {
+      return adaptCatalogGroupedProducts(apiGroupedProducts as any);
+    }
+    return groupProductsByMother(rawProducts);
+  }, [apiGroupedProducts, rawProducts]);
 
   useEffect(() => {
     fetchProducts();
@@ -55,10 +62,10 @@ export default function ProductsPage() {
 
       const response = await catalogService.getProducts({
         per_page: 100,
-        sort_by: 'created_at',
-        sort_order: 'desc',
+        sort_by: 'newest',
       });
 
+      setApiGroupedProducts(response.grouped_products || []);
       setRawProducts(response.products);
       setPagination(response.pagination);
     } catch (err: any) {

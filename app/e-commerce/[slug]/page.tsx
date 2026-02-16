@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import catalogService, { Product, PaginationMeta, CatalogCategory } from '@/services/catalogService';
 import { ArrowLeft } from 'lucide-react';
 import CategorySidebar from '@/components/ecommerce/category/CategorySidebar';
 import Navigation from '@/components/ecommerce/Navigation';
-import { groupProductsByMother } from '@/lib/ecommerceProductGrouping';
+import { adaptCatalogGroupedProducts, groupProductsByMother } from '@/lib/ecommerceProductGrouping';
 
 // Types for product grouping
 interface ProductVariant {
@@ -45,6 +45,7 @@ export default function CategoryProductsPage() {
   const categoryName = decodeURIComponent(categorySlug);
   
   const [products, setProducts] = useState<Product[]>([]);
+  const [apiGroupedProducts, setApiGroupedProducts] = useState<any[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | null>(null);
   const [categories, setCategories] = useState<CatalogCategory[]>([]);
   const [expandedCategories, setExpandedCategories] = useState<Set<number>>(new Set());
@@ -52,10 +53,8 @@ export default function CategoryProductsPage() {
   const [error, setError] = useState<string | null>(null);
   
   // Filter states
-  const [sortBy, setSortBy] = useState<string>('created_at');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [sortBy, setSortBy] = useState<string>('newest');
   const [currentPage, setCurrentPage] = useState(1);
-  const topAnchorRef = useRef<HTMLDivElement | null>(null);
 
   // Fetch categories on mount
   useEffect(() => {
@@ -67,7 +66,7 @@ export default function CategoryProductsPage() {
     if (categoryName) {
       fetchProducts();
     }
-  }, [categoryName, sortBy, sortOrder, currentPage]);
+  }, [categoryName, sortBy, currentPage, categories]);
 
   const fetchCategories = async () => {
     try {
@@ -84,13 +83,17 @@ export default function CategoryProductsPage() {
       setError(null);
 
       const response = await catalogService.getProducts({
-        category: categoryName,
+        category_id:
+          categories.find((c) =>
+            (c.slug && c.slug.toLowerCase() === categorySlug.toLowerCase()) ||
+            c.name.toLowerCase() === categoryName.toLowerCase()
+          )?.id,
         sort_by: sortBy as any,
-        sort_order: sortOrder,
         page: currentPage,
-        per_page: 100, // Fetch more to properly group
+        per_page: 20,
       });
 
+      setApiGroupedProducts(response.grouped_products || []);
       setProducts(response.products);
       setPagination(response.pagination);
       
@@ -104,7 +107,9 @@ export default function CategoryProductsPage() {
 
   // Group variant rows under one mother product name
   const productGroups = useMemo((): ProductGroup[] => {
-    const grouped = groupProductsByMother(products);
+    const grouped = (apiGroupedProducts.length > 0)
+      ? adaptCatalogGroupedProducts(apiGroupedProducts as any)
+      : groupProductsByMother(products);
 
     return grouped.map((group) => ({
       sku: group.key,
@@ -132,7 +137,7 @@ export default function CategoryProductsPage() {
       lowestPrice: group.lowestPrice,
       highestPrice: group.highestPrice,
     }));
-  }, [products]);
+  }, [products, apiGroupedProducts]);
 
   const handleToggleCategory = (categoryId: number) => {
     setExpandedCategories((prev) => {
@@ -147,21 +152,26 @@ export default function CategoryProductsPage() {
   };
 
   const handleSortChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const value = e.target.value;
-    const [newSortBy, newSortOrder] = value.split('-');
-    setSortBy(newSortBy);
-    setSortOrder(newSortOrder as 'asc' | 'desc');
+    setSortBy(e.target.value);
     setCurrentPage(1);
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    }
   };
 
   const handlePageChange = (page: number) => {
-    if (topAnchorRef.current) {
-      topAnchorRef.current.scrollIntoView({ behavior: 'auto', block: 'start' });
-    } else {
-      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
-    }
-
     setCurrentPage(page);
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+      });
+    }
   };
 
   const handleProductClick = (productId: number) => {
@@ -201,7 +211,6 @@ export default function CategoryProductsPage() {
 
   return (    
     <div className="min-h-screen bg-gray-50">
-      <div ref={topAnchorRef} />
       <Navigation />
       {/* Header */}
       <div className="bg-white border-b">
@@ -232,14 +241,14 @@ export default function CategoryProductsPage() {
               </label>
               <select
                 id="sort"
-                value={`${sortBy}-${sortOrder}`}
+                value={sortBy}
                 onChange={handleSortChange}
                 className="border border-gray-300 rounded-md px-4 py-2 focus:outline-none focus:ring-2 focus:ring-red-800"
               >
-                <option value="created_at-desc">Newest First</option>
-                <option value="created_at-asc">Oldest First</option>
-                <option value="name-asc">Name: A to Z</option>
-                <option value="name-desc">Name: Z to A</option>
+                <option value="newest">Newest First</option>
+                <option value="name">Name: A to Z</option>
+                <option value="price_asc">Price: Low to High</option>
+                <option value="price_desc">Price: High to Low</option>
               </select>
             </div>
           </div>

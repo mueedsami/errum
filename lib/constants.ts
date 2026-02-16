@@ -1,4 +1,4 @@
-export const CLIENT_NAME = "Errum BD" as const;
+export const CLIENT_NAME = "ERRUM BD" as const;
 export const CLIENT_NAME_CAP = "Errum" as const;
 export const CLIENT_WEBSITE = "errumbd.com" as const;
 

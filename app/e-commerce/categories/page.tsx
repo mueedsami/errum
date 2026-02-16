@@ -19,7 +19,7 @@ export default function CategoriesPage() {
         setLoading(true);
         setError(null);
         const data = await catalogService.getCategories();
-        setCategories(data.categories || []);
+        setCategories(Array.isArray(data) ? (data as Category[]) : ((data as any)?.categories || []));
       } catch (err: any) {
         console.error('Failed to fetch categories:', err);
         setError('Failed to load categories. Please try again.');

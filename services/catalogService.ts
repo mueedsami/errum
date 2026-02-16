@@ -1,407 +1,807 @@
-import axiosInstance from '@/lib/axios';
+import api from './api';
+import axios from 'axios';
+import { getBaseProductName, getColorLabel, getSizeLabel } from '@/lib/productNameUtils';
 
-// Types matching the actual backend response
+/**
+ * -----------------------------
+ * Core Catalog Models
+ * -----------------------------
+ */
 export interface ProductImage {
   id: number;
   url: string;
-  alt_text?: string;
   is_primary: boolean;
-  display_order?: number;
+  alt_text?: string;
 }
 
 export interface ProductCategory {
   id: number;
   name: string;
+  description?: string;
+  image_url?: string;
+  product_count?: number;
+  parent_id?: number | null;
+  slug?: string;
 }
 
 export interface Product {
   id: number;
   name: string;
-  sku: string;
   base_name?: string;
-  variation_suffix?: string;
+  variation_suffix?: string | null;
+  sku: string;
+  slug?: string;
   description: string;
   short_description?: string;
-  selling_price: number;
   cost_price: number;
-  stock_quantity: number;
+  selling_price: number;
+  price: number;
+  weight?: number;
+  dimensions?: string;
   in_stock: boolean;
+  stock_quantity: number;
+  category: ProductCategory | string;
   images: ProductImage[];
-  category: ProductCategory | null;
+  tags?: string[];
+  attributes?: { [key: string]: any };
+  ratings?: {
+    average: number;
+    count: number;
+  };
   created_at: string;
+  updated_at: string;
 }
 
-// Simplified product for featured/new arrivals/search results
 export interface SimpleProduct {
   id: number;
   name: string;
   sku: string;
-  base_name?: string;
-  variation_suffix?: string;
   selling_price: number;
+  in_stock: boolean;
+  stock_quantity: number;
   images: ProductImage[];
-  category?: string | ProductCategory | null;
-  in_stock?: boolean;
-  added_days_ago?: number; // Only for new arrivals
-}
-
-export interface CatalogCategory {
-  id: number;
-  name: string;
-  description?: string;
-  image?: string;
-  image_url?: string;
-  color?: string;
-  icon?: string;
-  product_count: number;
-  children?: CatalogCategory[];
 }
 
 export interface PaginationMeta {
   current_page: number;
-  last_page: number;
   per_page: number;
   total: number;
-  from: number | null;
-  to: number | null;
+  last_page: number;
+  has_more_pages: boolean;
 }
 
-export interface ProductsResponse {
-  products: Product[];
+/**
+ * Public grouped catalog structure (Feb 2026 API)
+ */
+export interface CatalogGroupedProduct {
+  base_name: string;
+  description?: string;
+  category: ProductCategory | null;
+  has_variants: boolean;
+  main_variant: Product;
+  variants: Product[]; // variants excluding main_variant
+  total_variants: number;
+  in_stock_variants: number;
+  total_stock: number;
+  min_price: number;
+  max_price: number;
+}
+
+export interface CatalogProductsResponse {
+  products: Product[]; // flattened variants for backward compatibility
+  grouped_products?: CatalogGroupedProduct[];
   pagination: PaginationMeta;
-  filters_applied: {
-    category?: string;
-    min_price?: number;
-    max_price?: number;
-    search?: string;
-    in_stock: boolean;
-    sort_by: string;
-    sort_order: string;
+  meta?: {
+    filters_applied?: { [key: string]: any };
+    query?: string;
+    total_results?: number;
   };
 }
 
 export interface ProductDetailResponse {
   product: Product;
-  related_products: SimpleProduct[]; // Backend returns simplified products
+  related_products: SimpleProduct[];
+}
+
+export interface CategoriesResponse {
+  categories: CatalogCategory[];
+}
+
+export interface SearchProductsResponse {
+  products: Product[];
+  grouped_products?: CatalogGroupedProduct[];
+  pagination: PaginationMeta;
+  meta: {
+    query: string;
+    total_results: number;
+  };
+}
+
+export interface SuggestedProductsResponse {
+  suggested_products: SimpleProduct[];
+}
+
+export interface CartData {
+  id?: number;
+  product_id: number;
+  quantity: number;
+  variant_options?: {
+    color?: string;
+    size?: string;
+    [key: string]: any;
+  };
+  notes?: string;
+}
+
+export interface CartResponse {
+  success: boolean;
+  message: string;
+  data?: any;
 }
 
 export interface GetProductsParams {
-  per_page?: number;
-  page?: number;
-  category?: string;
+  category_id?: number;
+  search?: string;
   min_price?: number;
   max_price?: number;
-  sort_by?: 'created_at' | 'name';
-  sort_order?: 'asc' | 'desc';
-  search?: string;
   in_stock?: boolean;
+  sort_by?: 'price_asc' | 'price_desc' | 'newest' | 'name';
+  per_page?: number;
+  page?: number;
+  featured?: boolean;
+  new_arrivals?: boolean;
 }
 
-export interface SearchParams {
+export interface SearchProductsParams {
   q: string;
+  category_id?: number;
+  min_price?: number;
+  max_price?: number;
+  sort?: string;
   per_page?: number;
   page?: number;
 }
 
-export interface SearchResponse {
-  products: SimpleProduct[]; // Backend returns simplified products
-  suggestions: string[];
-  search_query: string;
-  pagination: PaginationMeta;
+export interface Category {
+  id: number;
+  name: string;
+  slug?: string;
+  product_count?: number;
 }
 
-export interface PriceRange {
-  min_price: number;
-  max_price: number;
+/**
+ * Aliases used by other services/components
+ */
+export interface CatalogImage {
+  id: number;
+  image_url: string;
+  is_primary?: boolean;
+}
+export type CatalogProductImage = ProductImage;
+export interface CatalogCategory {
+  id: number;
+  name: string;
+  slug?: string;
+  image?: string;
+  parent_id?: number | null;
+  is_active?: boolean;
+  product_count?: number;
+  children?: CatalogCategory[];
+  parent?: CatalogCategory | null;
 }
 
-export interface ApiResponse<T> {
-  success: boolean;
-  message?: string;
-  data: T;
-}
+/**
+ * -----------------------------
+ * Internal helpers
+ * -----------------------------
+ */
+const toNumber = (value: any, fallback = 0): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+};
 
-class CatalogService {
-  private baseUrl = '/catalog';
+const normalizeString = (value: any, fallback = ''): string => {
+  if (typeof value === 'string') return value.trim();
+  if (value === null || value === undefined) return fallback;
+  return String(value).trim();
+};
 
-  // Helper to build query string
-  private buildQueryString(params: Record<string, any>): string {
-    const pairs: string[] = [];
-    
-    for (const key in params) {
-      if (params[key] !== undefined && params[key] !== null) {
-        const value = encodeURIComponent(String(params[key]));
-        pairs.push(key + '=' + value);
+const normalizeImage = (image: any, index = 0): ProductImage | null => {
+  if (!image) return null;
+
+  const url =
+    image.url ||
+    image.image_url ||
+    image.src ||
+    image.path ||
+    image.image ||
+    '';
+
+  if (!url || typeof url !== 'string') return null;
+
+  return {
+    id: toNumber(image.id, index + 1),
+    url,
+    is_primary: Boolean(
+      image.is_primary ??
+      image.primary ??
+      (index === 0)
+    ),
+    alt_text: image.alt_text || image.alt || undefined,
+  };
+};
+
+const normalizeImages = (images: any): ProductImage[] => {
+  if (!Array.isArray(images)) return [];
+  return images
+    .map((img, idx) => normalizeImage(img, idx))
+    .filter((img): img is ProductImage => Boolean(img));
+};
+
+const normalizeCategory = (category: any): ProductCategory | null => {
+  if (!category) return null;
+
+  if (typeof category === 'string') {
+    const name = category.trim();
+    if (!name) return null;
+    return {
+      id: 0,
+      name,
+      slug: name.toLowerCase().replace(/\s+/g, '-'),
+    };
+  }
+
+  const id = toNumber(category.id, 0);
+  const name = normalizeString(category.name || category.title || category.label);
+
+  if (!name) return null;
+
+  return {
+    id,
+    name,
+    description: normalizeString(category.description || ''),
+    image_url: category.image_url || category.image || undefined,
+    product_count: toNumber(category.product_count, 0),
+    parent_id: category.parent_id ?? null,
+    slug: category.slug || name.toLowerCase().replace(/\s+/g, '-'),
+  };
+};
+
+const normalizeAttributes = (raw: any, variationSuffix?: string | null) => {
+  const attrs: Record<string, any> =
+    raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? { ...raw }
+      : {};
+
+  // If backend only sends variation_suffix, infer color/size for UI selectors.
+  const suffix = normalizeString(variationSuffix || '');
+  if (suffix && (!attrs.color || !attrs.size)) {
+    const syntheticName = `X${suffix.startsWith('-') ? '' : '-'}${suffix}`;
+    const inferredColor = getColorLabel(syntheticName);
+    const inferredSize = getSizeLabel(syntheticName);
+
+    if (!attrs.color && inferredColor) attrs.color = inferredColor;
+    if (!attrs.size && inferredSize) attrs.size = inferredSize;
+  }
+
+  return Object.keys(attrs).length > 0 ? attrs : undefined;
+};
+
+const normalizeProduct = (
+  raw: any,
+  context?: {
+    base_name?: string;
+    description?: string;
+    category?: ProductCategory | null;
+  }
+): Product => {
+  const category = normalizeCategory(raw?.category) || context?.category || null;
+
+  const name = normalizeString(raw?.name || raw?.product_name || context?.base_name || 'Product');
+  const baseName = normalizeString(raw?.base_name || context?.base_name || getBaseProductName(name));
+  const variationSuffix =
+    raw?.variation_suffix !== undefined && raw?.variation_suffix !== null
+      ? normalizeString(raw?.variation_suffix)
+      : null;
+
+  const sellingPrice = toNumber(raw?.selling_price ?? raw?.price ?? raw?.sale_price, 0);
+  const costPrice = toNumber(raw?.cost_price ?? raw?.regular_price ?? sellingPrice, sellingPrice);
+  const stockQty = toNumber(raw?.stock_quantity ?? raw?.quantity ?? raw?.available_quantity, 0);
+
+  const explicitInStock = raw?.in_stock;
+  const inStock = typeof explicitInStock === 'boolean' ? explicitInStock : stockQty > 0;
+
+  const images = normalizeImages(raw?.images || raw?.product_images || raw?.media || []);
+
+  return {
+    id: toNumber(raw?.id, 0),
+    name,
+    base_name: baseName || undefined,
+    variation_suffix: variationSuffix,
+    sku: normalizeString(raw?.sku || raw?.product_sku || ''),
+    slug: raw?.slug || undefined,
+    description: normalizeString(raw?.description || context?.description || ''),
+    short_description: normalizeString(raw?.short_description || ''),
+    cost_price: costPrice,
+    selling_price: sellingPrice,
+    price: sellingPrice,
+    weight: raw?.weight !== undefined ? toNumber(raw.weight, 0) : undefined,
+    dimensions: raw?.dimensions || undefined,
+    in_stock: inStock,
+    stock_quantity: stockQty,
+    category: category || '',
+    images,
+    tags: Array.isArray(raw?.tags) ? raw.tags : undefined,
+    attributes: normalizeAttributes(raw?.attributes || raw?.custom_fields, variationSuffix),
+    ratings: raw?.ratings
+      ? {
+        average: toNumber(raw.ratings.average, 0),
+        count: toNumber(raw.ratings.count, 0),
       }
-    }
-    
-    return pairs.length > 0 ? '?' + pairs.join('&') : '';
-  }
+      : undefined,
+    created_at: raw?.created_at || new Date().toISOString(),
+    updated_at: raw?.updated_at || new Date().toISOString(),
+  };
+};
 
-  // Normalize image URLs
-  private normalizeImageUrl(url: string): string {
-    if (!url) return '';
-    if (url.startsWith('http')) return url;
-    
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL;
-    return baseUrl + url;
-  }
+const flattenGroupedProducts = (groups: CatalogGroupedProduct[]): Product[] => {
+  const flattened: Product[] = [];
+  const seen = new Set<number>();
 
-  // Normalize product images (for full Product objects)
-  private normalizeProduct(product: any): Product {
-    // Handle both arrays and Laravel collection objects
-    if (product.images) {
-      // Convert to array if it's a collection object
-      const imagesArray = Array.isArray(product.images) 
-        ? product.images 
-        : Object.values(product.images);
-      
-      product.images = imagesArray.map((img: any) => {
-        // Handle nested image object structure
-        const imageUrl = img.url || img.image_url || '';
-        return {
-          ...img,
-          url: this.normalizeImageUrl(imageUrl)
-        };
-      });
-    } else {
-      product.images = [];
-    }
-    return product;
-  }
-
-  // Normalize simple product images (for SimpleProduct objects)
-  private normalizeSimpleProduct(product: any): SimpleProduct {
-    // Handle both arrays and Laravel collection objects
-    if (product.images) {
-      // Convert to array if it's a collection object
-      const imagesArray = Array.isArray(product.images) 
-        ? product.images 
-        : Object.values(product.images);
-      
-      product.images = imagesArray.map((img: any) => {
-        // Handle nested image object structure
-        const imageUrl = img.url || img.image_url || '';
-        return {
-          ...img,
-          url: this.normalizeImageUrl(imageUrl)
-        };
-      });
-    } else {
-      product.images = [];
-    }
-    return product;
-  }
-
-  // Normalize category images
-  private normalizeCategory(category: any): CatalogCategory {
-    if (category.image_url) {
-      category.image_url = this.normalizeImageUrl(category.image_url);
-    }
-    if (category.children && Array.isArray(category.children)) {
-      category.children = category.children.map((child: any) => this.normalizeCategory(child));
-    }
-    return category;
-  }
-
-  /**
-   * GET PRODUCTS (with filters, pagination, sorting)
-   */
-  async getProducts(params: GetProductsParams = {}): Promise<ProductsResponse> {
-    try {
-      const queryString = this.buildQueryString(params);
-      const url = this.baseUrl + '/products' + queryString;
-      
-      const response = await axiosInstance.get<ApiResponse<ProductsResponse>>(url);
-      const data = response.data.data;
-      
-      // Normalize image URLs
-      data.products = data.products.map(product => this.normalizeProduct(product));
-      
-      return data;
-    } catch (error: any) {
-      console.error('❌ Failed to fetch products:', error.response?.data?.message || error.message);
-      throw error;
+  for (const group of groups) {
+    const variants = [group.main_variant, ...(group.variants || [])];
+    for (const variant of variants) {
+      if (!variant || !variant.id || seen.has(variant.id)) continue;
+      seen.add(variant.id);
+      flattened.push(variant);
     }
   }
 
-  /**
-   * GET SINGLE PRODUCT (by ID)
-   */
-  async getProduct(identifier: number): Promise<ProductDetailResponse> {
-    try {
-      const url = this.baseUrl + '/products/' + identifier;
-      
-      const response = await axiosInstance.get<ApiResponse<ProductDetailResponse>>(url);
-      const data = response.data.data;
-      
-      // Normalize image URLs
-      data.product = this.normalizeProduct(data.product);
-      data.related_products = data.related_products.map(product => this.normalizeSimpleProduct(product));
-      
-      return data;
-    } catch (error: any) {
-      console.error('Failed to fetch product:', error.response?.data?.message || error.message);
-      throw error;
-    }
+  return flattened;
+};
+
+const getCategoryKey = (category: ProductCategory | string): string => {
+  if (!category) return 'cat:none';
+  if (typeof category === 'string') return `cat:${category.trim().toLowerCase()}`;
+  if (category.id) return `cat:${category.id}`;
+  return `cat:${(category.name || '').trim().toLowerCase()}`;
+};
+
+const buildGroupedProductsFromFlat = (products: Product[]): CatalogGroupedProduct[] => {
+  const groups = new Map<string, Product[]>();
+
+  products.forEach((product) => {
+    const baseName = normalizeString(product.base_name || getBaseProductName(product.name));
+    const key = `${baseName.toLowerCase()}|${getCategoryKey(product.category)}`;
+
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push({
+      ...product,
+      base_name: baseName,
+    });
+  });
+
+  const groupedProducts: CatalogGroupedProduct[] = [];
+
+  for (const [, variants] of groups.entries()) {
+    if (!variants.length) continue;
+
+    const sorted = [...variants].sort((a, b) => {
+      const aStock = a.in_stock ? 1 : 0;
+      const bStock = b.in_stock ? 1 : 0;
+      if (bStock !== aStock) return bStock - aStock;
+
+      const aPrice = toNumber(a.selling_price, 0);
+      const bPrice = toNumber(b.selling_price, 0);
+      if (bPrice !== aPrice) return bPrice - aPrice;
+
+      return a.id - b.id;
+    });
+
+    const mainVariant = sorted[0];
+    const otherVariants = sorted.slice(1);
+
+    const allPrices = sorted.map((v) => toNumber(v.selling_price, 0));
+    const minPrice = allPrices.length ? Math.min(...allPrices) : 0;
+    const maxPrice = allPrices.length ? Math.max(...allPrices) : 0;
+    const totalStock = sorted.reduce((acc, v) => acc + toNumber(v.stock_quantity, 0), 0);
+    const inStockVariants = sorted.filter((v) => v.in_stock || toNumber(v.stock_quantity, 0) > 0).length;
+
+    groupedProducts.push({
+      base_name: normalizeString(mainVariant.base_name || getBaseProductName(mainVariant.name)),
+      description: mainVariant.description,
+      category: normalizeCategory(mainVariant.category) || null,
+      has_variants: sorted.length > 1,
+      main_variant: mainVariant,
+      variants: otherVariants,
+      total_variants: sorted.length,
+      in_stock_variants: inStockVariants,
+      total_stock: totalStock,
+      min_price: minPrice,
+      max_price: maxPrice,
+    });
   }
 
-  /**
-   * GET CATEGORIES (with product counts and children)
-   */
-  async getCategories(): Promise<CatalogCategory[]> {
-    try {
-      const url = this.baseUrl + '/categories';
-      
-      const response = await axiosInstance.get<ApiResponse<{ categories: CatalogCategory[] }>>(url);
-      const categories = response.data.data.categories;
-      
-      // Normalize category image URLs
-      return categories.map(category => this.normalizeCategory(category));
-    } catch (error: any) {
-      console.warn('Categories endpoint failed:', error.response?.data?.message || error.message);
-      return [];
-    }
+  return groupedProducts;
+};
+
+const normalizeGroupedProduct = (rawGroup: any): CatalogGroupedProduct => {
+  const category = normalizeCategory(rawGroup?.category);
+  const baseName = normalizeString(
+    rawGroup?.base_name ||
+    rawGroup?.main_variant?.base_name ||
+    rawGroup?.mainVariant?.base_name ||
+    rawGroup?.main_variant?.name ||
+    rawGroup?.mainVariant?.name ||
+    'Product'
+  );
+  const description = normalizeString(rawGroup?.description || '');
+
+  const rawMain = rawGroup?.main_variant || rawGroup?.mainVariant || rawGroup?.main || rawGroup?.product || {};
+
+  const mainVariant = normalizeProduct(rawMain, {
+    base_name: baseName,
+    description,
+    category,
+  });
+
+  const rawVariantsArray = Array.isArray(rawGroup?.variants) ? rawGroup.variants : [];
+  const normalizedAllVariants = rawVariantsArray
+    .map((variant: any) =>
+      normalizeProduct(variant, {
+        base_name: baseName,
+        description,
+        category,
+      })
+    )
+    .filter((v: Product) => v.id > 0);
+
+  // API docs indicate variants excludes main. Some implementations may include main, so de-dupe.
+  const variants = normalizedAllVariants.filter((v) => v.id !== mainVariant.id);
+
+  const all = [mainVariant, ...variants];
+
+  const allPrices = all.map((v) => toNumber(v.selling_price, 0));
+  const minPrice = allPrices.length ? Math.min(...allPrices) : 0;
+  const maxPrice = allPrices.length ? Math.max(...allPrices) : 0;
+
+  const totalStock = all.reduce((sum, v) => sum + toNumber(v.stock_quantity, 0), 0);
+  const inStockVariants = all.filter((v) => v.in_stock || toNumber(v.stock_quantity, 0) > 0).length;
+
+  return {
+    base_name: baseName,
+    description,
+    category: category || null,
+    has_variants: rawGroup?.has_variants ?? all.length > 1,
+    main_variant: mainVariant,
+    variants,
+    total_variants: all.length,
+    in_stock_variants: inStockVariants,
+    total_stock: totalStock,
+    min_price: minPrice,
+    max_price: maxPrice,
+  };
+};
+
+const isPaginatorShape = (obj: any): boolean => {
+  return !!obj &&
+    typeof obj === 'object' &&
+    Array.isArray(obj.data) &&
+    (obj.current_page !== undefined || obj.per_page !== undefined || obj.total !== undefined);
+};
+
+const extractPaginator = (raw: any): any => {
+  if (!raw || typeof raw !== 'object') return null;
+  if (isPaginatorShape(raw)) return raw;
+
+  // Sometimes wrapped again in data
+  if (raw.data && isPaginatorShape(raw.data)) return raw.data;
+
+  // Laravel-like wrapper: { products: [], pagination: {...} } handled elsewhere
+  return null;
+};
+
+const normalizePagination = (source: any, itemCount: number): PaginationMeta => {
+  const currentPage = toNumber(source?.current_page ?? source?.page, 1) || 1;
+  const perPage = toNumber(source?.per_page, itemCount || 20) || (itemCount || 20);
+  const total = toNumber(source?.total, itemCount);
+  const lastPage = toNumber(source?.last_page, Math.max(1, Math.ceil((total || itemCount || 1) / Math.max(perPage, 1))));
+
+  return {
+    current_page: currentPage,
+    per_page: perPage,
+    total,
+    last_page: Math.max(1, lastPage),
+    has_more_pages: Boolean(source?.has_more_pages ?? (currentPage < Math.max(1, lastPage))),
+  };
+};
+
+const parseProductsPayload = (payload: any): CatalogProductsResponse => {
+  // 1) Legacy shape: { products: [...], pagination: {...} }
+  if (payload && Array.isArray(payload.products)) {
+    const products = payload.products.map((p: any) => normalizeProduct(p));
+    const groupedProducts = Array.isArray(payload.grouped_products)
+      ? payload.grouped_products.map((g: any) => normalizeGroupedProduct(g))
+      : buildGroupedProductsFromFlat(products);
+
+    return {
+      products,
+      grouped_products: groupedProducts,
+      pagination: normalizePagination(payload.pagination, products.length),
+      meta: payload.meta,
+    };
   }
 
-  /**
-   * GET FEATURED PRODUCTS
-   * Returns simplified product objects
-   */
-  async getFeaturedProducts(limit: number = 8): Promise<{
-    featured_products: SimpleProduct[];
-    total_featured: number;
-  }> {
-    try {
-      const queryString = this.buildQueryString({ limit });
-      const url = this.baseUrl + '/featured-products' + queryString;
-      
-      const response = await axiosInstance.get<ApiResponse<{
-        featured_products: SimpleProduct[];
-        total_featured: number;
-      }>>(url);
-      const data = response.data.data;
-      
-      // Normalize image URLs for simplified products
-      data.featured_products = data.featured_products.map(product => this.normalizeSimpleProduct(product));
-      
-      return data;
-    } catch (error: any) {
-      console.error('Failed to fetch featured products:', error.response?.data?.message || error.message);
-      throw error;
-    }
-  }
+  // 2) Feb 2026 grouped paginator shape
+  const paginator = extractPaginator(payload);
+  if (paginator) {
+    const rows = Array.isArray(paginator.data) ? paginator.data : [];
 
-  /**
-   * GET NEW ARRIVALS
-   * Returns simplified product objects with added_days_ago field
-   */
-  async getNewArrivals(limit: number = 8, days: number = 30): Promise<{
-    new_arrivals: SimpleProduct[];
-    total_new_arrivals: number;
-    days_range: number;
-  }> {
-    try {
-      const queryString = this.buildQueryString({ limit, days });
-      const url = this.baseUrl + '/new-arrivals' + queryString;
-      
-      const response = await axiosInstance.get<ApiResponse<{
-        new_arrivals: SimpleProduct[];
-        total_new_arrivals: number;
-        days_range: number;
-      }>>(url);
-      const data = response.data.data;
-      
-      // Normalize image URLs for simplified products
-      data.new_arrivals = data.new_arrivals.map(product => this.normalizeSimpleProduct(product));
-      
-      return data;
-    } catch (error: any) {
-      console.error('Failed to fetch new arrivals:', error.response?.data?.message || error.message);
-      throw error;
-    }
-  }
+    const looksGrouped = rows.some((row: any) => row && (row.main_variant || row.mainVariant || row.base_name));
 
-  /**
-   * SEARCH PRODUCTS (with suggestions)
-   * Returns simplified product objects
-   */
-  async searchProducts(params: SearchParams): Promise<SearchResponse> {
-    try {
-      const queryString = this.buildQueryString(params);
-      const url = this.baseUrl + '/search' + queryString;
-      
-      const response = await axiosInstance.get<ApiResponse<SearchResponse>>(url);
-      const data = response.data.data;
-      
-      // Normalize image URLs for simplified products
-      data.products = data.products.map(product => this.normalizeSimpleProduct(product));
-      
-      return data;
-    } catch (error: any) {
-      console.error('Failed to search products:', error.response?.data?.message || error.message);
-      throw error;
-    }
-  }
+    if (looksGrouped) {
+      const groupedProducts = rows.map((row: any) => normalizeGroupedProduct(row));
+      const products = flattenGroupedProducts(groupedProducts);
 
-  /**
-   * GET PRICE RANGE (for filtering)
-   */
-  async getPriceRange(): Promise<PriceRange> {
-    try {
-      const url = this.baseUrl + '/price-range';
-      
-      const response = await axiosInstance.get<ApiResponse<PriceRange>>(url);
-      return response.data.data;
-    } catch (error: any) {
-      console.error('Failed to fetch price range:', error.response?.data?.message || error.message);
-      throw error;
-    }
-  }
-
-  /**
-   * ✅ GET SUGGESTED PRODUCTS (top-selling products)
-   * Backend returns best-selling products based on order history
-   * Returns simplified product objects
-   */
-  async getSuggestedProducts(limit: number = 5): Promise<{
-    suggested_products: SimpleProduct[];
-    total_suggested: number;
-  }> {
-    try {
-      const queryString = this.buildQueryString({ limit });
-      const url = this.baseUrl + '/suggested-products' + queryString;
-      
-      console.log('🔍 Fetching suggested products from:', url);
-      
-      const response = await axiosInstance.get<ApiResponse<{
-        suggested_products: SimpleProduct[];
-        total_suggested: number;
-      }>>(url);
-      
-      console.log('📦 Raw API response:', response.data);
-      
-      const data = response.data.data;
-      
-      // Normalize image URLs for simplified products
-      data.suggested_products = data.suggested_products.map(product => this.normalizeSimpleProduct(product));
-      
-      console.log('✅ Normalized suggested products:', data.suggested_products.length);
-      
-      return data;
-    } catch (error: any) {
-      console.error('❌ Failed to fetch suggested products:', error.response?.data?.message || error.message);
-      console.error('Error details:', error.response?.data);
-      
-      // Return empty array on error instead of throwing
       return {
-        suggested_products: [],
-        total_suggested: 0,
+        products,
+        grouped_products: groupedProducts,
+        pagination: normalizePagination(paginator, groupedProducts.length),
+        meta: payload?.meta,
       };
     }
-  }
-}
 
-// Export a singleton instance
-const catalogService = new CatalogService();
+    // Flat paginated rows
+    const products = rows.map((row: any) => normalizeProduct(row));
+    return {
+      products,
+      grouped_products: buildGroupedProductsFromFlat(products),
+      pagination: normalizePagination(paginator, products.length),
+      meta: payload?.meta,
+    };
+  }
+
+  // 3) Bare list fallback
+  if (Array.isArray(payload)) {
+    const products = payload.map((row: any) => normalizeProduct(row));
+    return {
+      products,
+      grouped_products: buildGroupedProductsFromFlat(products),
+      pagination: normalizePagination({}, products.length),
+      meta: undefined,
+    };
+  }
+
+  // 4) Unknown shape fallback
+  return {
+    products: [],
+    grouped_products: [],
+    pagination: normalizePagination({}, 0),
+    meta: undefined,
+  };
+};
+
+/**
+ * -----------------------------
+ * Catalog Service
+ * -----------------------------
+ */
+const catalogService = {
+  async getProducts(params?: GetProductsParams): Promise<CatalogProductsResponse> {
+    try {
+      const response = await api.get('/catalog/products', { params });
+      const payload = response?.data?.data ?? response?.data ?? {};
+      const parsed = parseProductsPayload(payload);
+      return parsed;
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      throw new Error('Failed to fetch products');
+    }
+  },
+
+  async getProduct(productIdentifier: number | string): Promise<ProductDetailResponse> {
+    try {
+      const response = await api.get(`/catalog/products/${productIdentifier}`);
+      const payload = response?.data?.data ?? response?.data ?? {};
+
+      // Legacy shape: { product, related_products }
+      if (payload?.product) {
+        return {
+          product: normalizeProduct(payload.product),
+          related_products: Array.isArray(payload.related_products)
+            ? payload.related_products.map((p: any) => normalizeProduct(p) as SimpleProduct)
+            : [],
+        };
+      }
+
+      // New shape: direct product payload with variants
+      if (payload && (payload.id || payload.sku)) {
+        const category = normalizeCategory(payload.category);
+        const baseName = normalizeString(payload.base_name || getBaseProductName(payload.name || ''));
+        const description = normalizeString(payload.description || '');
+
+        const product = normalizeProduct(payload, {
+          base_name: baseName,
+          description,
+          category,
+        });
+
+        // Attach normalized variants for consumers that want to use the new structure.
+        const variantsRaw = Array.isArray(payload.variants) ? payload.variants : [];
+        const variants = variantsRaw.map((v: any) =>
+          normalizeProduct(v, {
+            base_name: baseName,
+            description,
+            category,
+          })
+        );
+
+        (product as any).variants = variants;
+
+        return {
+          product,
+          related_products: Array.isArray(payload.related_products)
+            ? payload.related_products.map((p: any) => normalizeProduct(p) as SimpleProduct)
+            : [],
+        };
+      }
+
+      throw new Error('Product data missing from response');
+    } catch (error) {
+      console.error('Error fetching product:', error);
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        throw new Error('Product not found');
+      }
+      throw new Error('Failed to fetch product details');
+    }
+  },
+
+  async getCategories(): Promise<CatalogCategory[]> {
+    try {
+      const response = await api.get('/catalog/categories');
+      const payload = response?.data?.data;
+
+      if (Array.isArray(payload)) {
+        return payload;
+      }
+      if (Array.isArray(payload?.categories)) {
+        return payload.categories;
+      }
+      if (Array.isArray(response?.data?.categories)) {
+        return response.data.categories;
+      }
+
+      return [];
+    } catch (error) {
+      console.error('Error fetching categories:', error);
+      throw new Error('Failed to fetch categories');
+    }
+  },
+
+  async searchProducts(params: SearchProductsParams): Promise<SearchProductsResponse> {
+    const mappedParams = {
+      search: params.q,
+      category_id: params.category_id,
+      min_price: params.min_price,
+      max_price: params.max_price,
+      sort_by: params.sort as any,
+      per_page: params.per_page,
+      page: params.page,
+    };
+
+    try {
+      // Preferred: unified public catalog endpoint
+      const response = await api.get('/catalog/products', { params: mappedParams });
+      const payload = response?.data?.data ?? response?.data ?? {};
+      const parsed = parseProductsPayload(payload);
+
+      return {
+        products: parsed.products,
+        grouped_products: parsed.grouped_products,
+        pagination: parsed.pagination,
+        meta: {
+          query: params.q,
+          total_results: parsed.pagination.total,
+        },
+      };
+    } catch (error) {
+      // Backward-compatible fallback
+      try {
+        const response = await api.get('/catalog/search', { params });
+        const payload = response?.data?.data ?? response?.data ?? {};
+        const parsed = parseProductsPayload(payload);
+
+        return {
+          products: parsed.products,
+          grouped_products: parsed.grouped_products,
+          pagination: parsed.pagination,
+          meta: {
+            query: params.q,
+            total_results: parsed.pagination.total,
+          },
+        };
+      } catch (fallbackError) {
+        console.error('Error searching products:', fallbackError || error);
+        throw new Error('Failed to search products');
+      }
+    }
+  },
+
+  async getFeaturedProducts(limit: number = 8): Promise<SimpleProduct[]> {
+    try {
+      const response = await api.get('/catalog/featured-products', {
+        params: { limit }
+      });
+
+      const payload = response?.data?.data ?? response?.data ?? [];
+
+      if (Array.isArray(payload)) {
+        return payload.map((p: any) => normalizeProduct(p) as SimpleProduct);
+      }
+
+      if (Array.isArray(payload?.products)) {
+        return payload.products.map((p: any) => normalizeProduct(p) as SimpleProduct);
+      }
+
+      return [];
+    } catch (error) {
+      console.error('Error fetching featured products:', error);
+      throw new Error('Failed to fetch featured products');
+    }
+  },
+
+  async getSuggestedProducts(limit: number = 4): Promise<SuggestedProductsResponse> {
+    try {
+      const response = await api.get('/catalog/suggested-products', {
+        params: { limit }
+      });
+
+      const payload = response?.data?.data ?? response?.data ?? {};
+
+      if (Array.isArray(payload?.suggested_products)) {
+        return {
+          suggested_products: payload.suggested_products.map((p: any) => normalizeProduct(p) as SimpleProduct),
+        };
+      }
+
+      if (Array.isArray(payload?.products)) {
+        return {
+          suggested_products: payload.products.map((p: any) => normalizeProduct(p) as SimpleProduct),
+        };
+      }
+
+      if (Array.isArray(payload)) {
+        return {
+          suggested_products: payload.map((p: any) => normalizeProduct(p) as SimpleProduct),
+        };
+      }
+
+      return { suggested_products: [] };
+    } catch (error) {
+      console.error('Error fetching suggested products:', error);
+      return { suggested_products: [] };
+    }
+  },
+
+  async addToCart(cartData: CartData): Promise<CartResponse> {
+    try {
+      const response = await api.post('/cart/add', cartData);
+      return response.data;
+    } catch (error) {
+      console.error('Error adding to cart:', error);
+      throw new Error('Failed to add product to cart');
+    }
+  },
+
+  async addToWishlist(productId: number): Promise<{ success: boolean; message: string }> {
+    try {
+      const response = await api.post('/wishlist/add', { product_id: productId });
+      return response.data;
+    } catch (error) {
+      console.error('Error adding to wishlist:', error);
+      throw new Error('Failed to add product to wishlist');
+    }
+  },
+};
+
 export default catalogService;

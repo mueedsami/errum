@@ -1,4 +1,5 @@
 import { getBaseProductName, getColorLabel, getSizeLabel } from '@/lib/productNameUtils';
+import type { CatalogGroupedProduct } from '@/services/catalogService';
 
 export interface GroupedVariant {
   id: number;
@@ -251,4 +252,82 @@ export function formatGroupedPrice(group: GroupedProduct): string {
   }
   const price = Number.isFinite(group.lowestPrice) ? group.lowestPrice : 0;
   return `৳${price.toFixed(2)}`;
+}
+
+/**
+ * Convert backend grouped catalog payload into the existing GroupedProduct shape.
+ * This lets the UI support the new API without refactoring every consumer at once.
+ */
+export function adaptCatalogGroupedProducts(
+  groups: CatalogGroupedProduct[] = []
+): GroupedProduct[] {
+  return (groups || [])
+    .map((group): GroupedProduct | null => {
+      const main = group?.main_variant;
+      if (!main) return null;
+
+      const allVariantsRaw = [main, ...(group.variants || [])].filter(Boolean);
+      const uniqueById = new Map<number, any>();
+      allVariantsRaw.forEach((variant) => {
+        if (!variant?.id) return;
+        if (!uniqueById.has(variant.id)) uniqueById.set(variant.id, variant);
+      });
+
+      const allVariants = Array.from(uniqueById.values());
+      const mappedVariants: GroupedVariant[] = allVariants.map((variant: any) => ({
+        id: Number(variant.id),
+        name: variant.name || '',
+        sku: variant.sku,
+        color: getColorLabel(variant.name || ''),
+        size: getSizeLabel(variant.name || ''),
+        price: toNumber(variant.selling_price),
+        in_stock:
+          typeof variant.in_stock === 'boolean'
+            ? variant.in_stock
+            : toNumber(variant.stock_quantity) > 0,
+        stock_quantity: toNumber(variant.stock_quantity),
+        image: getProductPrimaryImage(variant),
+        raw: variant,
+      }));
+
+      mappedVariants.sort((a, b) => {
+        if (a.in_stock !== b.in_stock) return a.in_stock ? -1 : 1;
+        const ac = (a.color || '').toLowerCase();
+        const bc = (b.color || '').toLowerCase();
+        if (ac !== bc) return ac.localeCompare(bc);
+        const as = (a.size || '').toLowerCase();
+        const bs = (b.size || '').toLowerCase();
+        if (as !== bs) return as.localeCompare(bs);
+        return a.id - b.id;
+      });
+
+      const representative = mappedVariants.find((v) => v.in_stock) || mappedVariants[0];
+
+      const prices = mappedVariants.map((v) => v.price);
+      const lowestPrice = prices.length ? Math.min(...prices) : 0;
+      const highestPrice = prices.length ? Math.max(...prices) : 0;
+      const totalStock = mappedVariants.reduce((sum, v) => sum + toNumber(v.stock_quantity), 0);
+      const inStock = mappedVariants.some((v) => v.in_stock);
+
+      return {
+        key: `group:${(group.base_name || main.base_name || getMotherBaseName(main)).toLowerCase()}::${main.id}`,
+        baseName: group.base_name || getMotherBaseName(main),
+        representativeId: representative?.id || Number(main.id),
+        primaryImage: representative?.image || getProductPrimaryImage(main),
+        variants: mappedVariants,
+        totalVariants: mappedVariants.length,
+        hasVariations: Boolean(group.has_variants || mappedVariants.length > 1),
+        lowestPrice,
+        highestPrice,
+        inStock,
+        totalStock,
+        category:
+          (group.category as any) ||
+          (typeof main.category === 'object'
+            ? ({ id: main.category.id || 0, name: main.category.name || '' } as any)
+            : null),
+        representative: representative?.raw || main,
+      };
+    })
+    .filter((group): group is GroupedProduct => Boolean(group));
 }

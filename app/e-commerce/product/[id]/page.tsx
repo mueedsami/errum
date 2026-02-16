@@ -125,6 +125,61 @@ export default function ProductDetailPage() {
         setProduct(mainProduct);
         setRelatedProducts(response.related_products || []);
 
+        const directVariantsRaw = Array.isArray((mainProduct as any).variants)
+          ? (mainProduct as any).variants
+          : [];
+
+        const buildVariantFromAny = (variant: any): ProductVariant => {
+          const name = variant?.name || '';
+          return {
+            id: Number(variant?.id),
+            name,
+            sku: variant?.sku || `product-${variant?.id}`,
+            color: variant?.attributes?.color || getColorLabel(name),
+            size: variant?.attributes?.size || getSizeLabel(name),
+            selling_price: Number(variant?.selling_price ?? variant?.price ?? 0),
+            in_stock:
+              typeof variant?.in_stock === 'boolean'
+                ? variant.in_stock
+                : Number(variant?.stock_quantity || 0) > 0,
+            stock_quantity: Number(variant?.stock_quantity || 0),
+            images: Array.isArray(variant?.images) ? variant.images : [],
+          };
+        };
+
+        // Prefer backend-provided grouped variants from single-product endpoint
+        if (directVariantsRaw.length > 0) {
+          const deduped = new Map<number, ProductVariant>();
+
+          directVariantsRaw.forEach((variant: any) => {
+            const normalized = buildVariantFromAny(variant);
+            if (!deduped.has(normalized.id)) deduped.set(normalized.id, normalized);
+          });
+
+          const currentVariant = buildVariantFromAny(mainProduct);
+          if (!deduped.has(currentVariant.id)) deduped.set(currentVariant.id, currentVariant);
+
+          const variations = Array.from(deduped.values()).sort((a, b) => {
+            const aColor = (a.color || '').toLowerCase();
+            const bColor = (b.color || '').toLowerCase();
+            const aSize = (a.size || '').toLowerCase();
+            const bSize = (b.size || '').toLowerCase();
+
+            if (aColor !== bColor) return aColor.localeCompare(bColor);
+            return aSize.localeCompare(bSize);
+          });
+
+          setProductVariants(variations);
+          setSelectedVariant(
+            variations.find((v) => v.id === productId) ||
+            variations.find((v) => v.in_stock) ||
+            variations[0] ||
+            null
+          );
+
+          return;
+        }
+
         const allProductsResponse = await catalogService.getProducts({
           // Pull a wider range so we can find sibling variations even when each variation has a unique SKU.
           per_page: 500,

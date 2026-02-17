@@ -99,7 +99,12 @@ const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ categoryId, limit =
   };
 
   const handleImageError = (productId: number) => {
-    setImageErrors((prev) => new Set([...prev, productId]));
+    setImageErrors((prev) => {
+      if (prev.has(productId)) return prev;
+      const next = new Set(prev);
+      next.add(productId);
+      return next;
+    });
   };
 
   const handleProductClick = (product: SimpleProduct) => {
@@ -163,9 +168,11 @@ const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ categoryId, limit =
 
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
           {products.map((product) => {
-            const imageUrl = !imageErrors.has(product.id) && product.images?.[0]?.url
-              ? product.images[0].url
-              : '/images/placeholder-product.jpg';
+            const primaryImage = product.images?.[0]?.url || '';
+            const shouldUseFallback = imageErrors.has(product.id) || !primaryImage;
+            const imageUrl = shouldUseFallback
+              ? '/images/placeholder-product.jpg'
+              : primaryImage;
 
             const additionalVariants = getAdditionalVariantCount(product);
             const stockLabel = getCardStockLabel(product);
@@ -184,7 +191,7 @@ const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ categoryId, limit =
                       alt={product.display_name || product.base_name || product.name}
                       fill
                       className="object-cover group-hover:scale-105 transition-transform duration-300"
-                      onError={() => handleImageError(product.id)}
+                      onError={shouldUseFallback ? undefined : () => handleImageError(product.id)}
                     />
 
                     {additionalVariants > 0 && (

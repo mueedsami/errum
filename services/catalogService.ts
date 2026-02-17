@@ -245,8 +245,14 @@ const toAbsoluteAssetUrl = (value: any): string => {
     return raw;
   }
 
-  // Keep frontend-local placeholders untouched
-  if (/^\/(images|placeholder)/i.test(raw)) {
+  // Keep only known frontend-local placeholder assets untouched.
+  // IMPORTANT: real product images can also arrive as `/images/...` from backend,
+  // so we must not treat every `/images/*` path as local.
+  const isFrontendPlaceholder =
+    /^\/(?:images\/)?placeholder-product\.(?:png|jpe?g|webp|svg)$/i.test(raw) ||
+    /^\/placeholder-product\.(?:png|jpe?g|webp|svg)$/i.test(raw);
+
+  if (isFrontendPlaceholder) {
     return raw;
   }
 

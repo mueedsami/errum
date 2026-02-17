@@ -164,7 +164,12 @@ export default function CategoryPage() {
   }, [activeCategory?.id, categoriesLoading, selectedSort, selectedPriceRange, selectedStock]);
 
   const handleImageError = (productId: number) => {
-    setImageErrors((prev) => new Set([...prev, productId]));
+    setImageErrors((prev) => {
+      if (prev.has(productId)) return prev;
+      const next = new Set(prev);
+      next.add(productId);
+      return next;
+    });
   };
 
   const handleAddToCart = async (product: Product | SimpleProduct) => {
@@ -290,9 +295,11 @@ export default function CategoryPage() {
                 <>
                   <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                     {products.map((product) => {
-                      const imageUrl = !imageErrors.has(product.id) && product.images?.[0]?.url
-                        ? product.images[0].url
-                        : '/images/placeholder-product.jpg';
+                      const primaryImage = product.images?.[0]?.url || '';
+                      const shouldUseFallback = imageErrors.has(product.id) || !primaryImage;
+                      const imageUrl = shouldUseFallback
+                        ? '/images/placeholder-product.jpg'
+                        : primaryImage;
 
                       const stockLabel = getCardStockLabel(product);
                       const hasStock = stockLabel !== 'Out of Stock';
@@ -311,7 +318,7 @@ export default function CategoryPage() {
                               alt={(product as any).display_name || (product as any).base_name || product.name}
                               fill
                               className="object-cover group-hover:scale-105 transition-transform duration-300"
-                              onError={() => handleImageError(product.id)}
+                              onError={shouldUseFallback ? undefined : () => handleImageError(product.id)}
                             />
 
                             <span

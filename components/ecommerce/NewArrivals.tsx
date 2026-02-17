@@ -46,6 +46,7 @@ export default function NewArrivals({ categoryId, limit = 8 }: NewArrivalsProps)
       const params: Record<string, any> = {
         per_page: limit,
         sort_by: 'newest',
+        new_arrivals: true,
       };
 
       if (categoryId) {

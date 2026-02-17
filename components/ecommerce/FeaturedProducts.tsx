@@ -43,17 +43,34 @@ export default function FeaturedProducts({ categoryId, limit = 8 }: FeaturedProd
   const fetchFeaturedProducts = async () => {
     try {
       setIsLoading(true);
-      const params: Record<string, any> = {
-        per_page: limit,
-        sort_by: 'newest',
-      };
+      let displayProducts: SimpleProduct[] = [];
 
       if (categoryId) {
-        params.category_id = categoryId;
+        // Category-specific widget usage: ask catalog API for featured entries in this category.
+        const response = await catalogService.getProducts({
+          category_id: categoryId,
+          per_page: Math.max(limit, 20),
+          sort_by: 'newest',
+          featured: true,
+        });
+        displayProducts = buildCardProductsFromResponse(response);
+      } else {
+        // Home widget usage: use dedicated featured endpoint first so this section
+        // is not identical to New Arrivals.
+        const featured = await catalogService.getFeaturedProducts(Math.max(limit, 20));
+        displayProducts = Array.isArray(featured) ? featured : [];
+
+        // Fallback for backends that don't expose featured endpoint/data yet.
+        if (displayProducts.length === 0) {
+          const fallback = await catalogService.getProducts({
+            per_page: Math.max(limit, 20),
+            sort_by: 'price_desc',
+            featured: true,
+          });
+          displayProducts = buildCardProductsFromResponse(fallback);
+        }
       }
 
-      const response = await catalogService.getProducts(params);
-      const displayProducts = buildCardProductsFromResponse(response);
       setProducts(displayProducts.slice(0, limit));
     } catch (error) {
       console.error('Error fetching featured products:', error);

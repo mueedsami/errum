@@ -7,12 +7,21 @@ import catalogService, { CatalogCategory } from '@/services/catalogService';
 interface CategoryData {
   id: number;
   name: string;
+  slug?: string;
   description?: string;
   image_url?: string;
   color?: string;
   icon?: string;
   productCount: number;
 }
+
+const slugify = (value: string): string =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
 
 export default function OurCategories() {
   const [categories, setCategoriesData] = useState<CategoryData[]>([]);
@@ -37,6 +46,7 @@ export default function OurCategories() {
             allCategories.push({
               id: cat.id,
               name: cat.name,
+              slug: cat.slug,
               description: cat.description,
               image_url: cat.image_url,
               color: cat.color,
@@ -115,7 +125,9 @@ export default function OurCategories() {
             <div 
               key={cat.id} 
               className="group text-center cursor-pointer"
-              onClick={() => router.push(`e-commerce/${encodeURIComponent(cat.name)}`)}
+              onClick={() =>
+                router.push(`/e-commerce/${encodeURIComponent(cat.slug ? slugify(cat.slug) : slugify(cat.name))}`)
+              }
             >
               {/* Category Image */}
               <div className="relative aspect-square rounded-full overflow-hidden mb-5 border-4 border-gray-100 group-hover:border-red-700 transition-all duration-300 shadow-lg group-hover:shadow-2xl bg-gradient-to-br from-indigo-100 to-purple-100">

@@ -36,6 +36,32 @@ interface ProductGroup {
   highestPrice: number;
 }
 
+const slugify = (value: string): string =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+
+const normalizeForMatch = (value: string): string => slugify(decodeURIComponent(String(value || '')));
+
+const flattenCategories = (cats: CatalogCategory[] = []): CatalogCategory[] => {
+  const out: CatalogCategory[] = [];
+
+  const walk = (items: CatalogCategory[]) => {
+    items.forEach((cat) => {
+      out.push(cat);
+      if (Array.isArray(cat.children) && cat.children.length > 0) {
+        walk(cat.children);
+      }
+    });
+  };
+
+  walk(cats);
+  return out;
+};
+
 export default function CategoryProductsPage() {
   const router = useRouter();
   const pathname = usePathname();
@@ -48,6 +74,7 @@ export default function CategoryProductsPage() {
   const [apiGroupedProducts, setApiGroupedProducts] = useState<any[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | null>(null);
   const [categories, setCategories] = useState<CatalogCategory[]>([]);
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +83,37 @@ export default function CategoryProductsPage() {
   const [sortBy, setSortBy] = useState<string>('newest');
   const [currentPage, setCurrentPage] = useState(1);
 
+  const normalizedSlug = useMemo(() => normalizeForMatch(categorySlug), [categorySlug]);
+
+  const allCategories = useMemo(() => flattenCategories(categories), [categories]);
+
+  const matchedCategory = useMemo(() => {
+    return allCategories.find((c) => {
+      const bySlug = c.slug ? normalizeForMatch(c.slug) : '';
+      const byName = normalizeForMatch(c.name || '');
+      return normalizedSlug === bySlug || normalizedSlug === byName;
+    });
+  }, [allCategories, normalizedSlug]);
+
+  const activeCategoryDisplayName = matchedCategory?.name || categoryName;
+
+  const matchesCurrentCategory = (category: any): boolean => {
+    if (!category) return false;
+
+    const incomingId = Number(category?.id || 0);
+    if (matchedCategory?.id && incomingId && incomingId === Number(matchedCategory.id)) {
+      return true;
+    }
+
+    const incomingSlug = normalizeForMatch(
+      category?.slug || category?.name || (typeof category === 'string' ? category : '')
+    );
+
+    if (!incomingSlug) return false;
+
+    return incomingSlug === normalizedSlug;
+  };
+
   // Fetch categories on mount
   useEffect(() => {
     fetchCategories();
@@ -63,10 +121,10 @@ export default function CategoryProductsPage() {
 
   // Fetch products when category or filters change
   useEffect(() => {
-    if (categoryName) {
+    if (categoryName && categoriesLoaded) {
       fetchProducts();
     }
-  }, [categoryName, sortBy, currentPage, categories]);
+  }, [categoryName, sortBy, currentPage, categoriesLoaded, matchedCategory?.id, normalizedSlug]);
 
   const fetchCategories = async () => {
     try {
@@ -74,6 +132,8 @@ export default function CategoryProductsPage() {
       setCategories(categoriesData);
     } catch (err: any) {
       console.error('Failed to fetch categories:', err);
+    } finally {
+      setCategoriesLoaded(true);
     }
   };
 
@@ -83,18 +143,24 @@ export default function CategoryProductsPage() {
       setError(null);
 
       const response = await catalogService.getProducts({
-        category_id:
-          categories.find((c) =>
-            (c.slug && c.slug.toLowerCase() === categorySlug.toLowerCase()) ||
-            c.name.toLowerCase() === categoryName.toLowerCase()
-          )?.id,
+        category_id: matchedCategory?.id,
         sort_by: sortBy as any,
         page: currentPage,
         per_page: 20,
       });
 
-      setApiGroupedProducts(response.grouped_products || []);
-      setProducts(response.products);
+      const groupedProducts = Array.isArray(response.grouped_products) ? response.grouped_products : [];
+      const flatProducts = Array.isArray(response.products) ? response.products : [];
+
+      // Safety net: if backend ignores category_id for some payload shapes,
+      // enforce category filtering on client using id/slug/name.
+      const filteredGrouped = groupedProducts.filter((group: any) => matchesCurrentCategory(group?.category));
+      const filteredFlat = flatProducts.filter((product: any) => matchesCurrentCategory(product?.category));
+
+      const shouldUseFiltered = filteredGrouped.length > 0 || filteredFlat.length > 0;
+
+      setApiGroupedProducts(shouldUseFiltered ? filteredGrouped : groupedProducts);
+      setProducts(shouldUseFiltered ? filteredFlat : flatProducts);
       setPagination(response.pagination);
       
     } catch (err: any) {
@@ -226,7 +292,7 @@ export default function CategoryProductsPage() {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">
-                {categoryName}
+                {activeCategoryDisplayName}
               </h1>
               <p className="mt-2 text-gray-600">
                 {productGroups.length} product {productGroups.length === 1 ? 'group' : 'groups'} found
@@ -263,7 +329,7 @@ export default function CategoryProductsPage() {
             categories={categories}
             expandedCategories={expandedCategories}
             onToggleCategory={handleToggleCategory}
-            activeCategoryName={categoryName}
+            activeCategoryName={activeCategoryDisplayName}
           />
 
           {/* Products Grid */}
@@ -272,7 +338,7 @@ export default function CategoryProductsPage() {
               <div className="text-center py-12">
                 <p className="text-gray-600 text-lg mb-2">No products found in this category</p>
                 <p className="text-sm text-gray-500 mb-4">
-                  Category searched: "{categoryName}"
+                  Category searched: "{activeCategoryDisplayName}"
                 </p>
                 <button
                   onClick={() => router.push('/')}

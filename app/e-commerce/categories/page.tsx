@@ -8,6 +8,14 @@ import Navigation from '@/components/ecommerce/Navigation';
 import Footer from '@/components/ecommerce/Footer';
 import catalogService, { Category } from '@/services/catalogService';
 
+const slugify = (value: string): string =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,7 +69,7 @@ export default function CategoriesPage() {
             {categories.map((cat) => (
               <Link
                 key={cat.id}
-                href={`/e-commerce/${encodeURIComponent(cat.slug || cat.name.toLowerCase().replace(/\s+/g, '-'))}`}
+                href={`/e-commerce/${encodeURIComponent(cat.slug ? slugify(cat.slug) : slugify(cat.name))}`}
                 className="bg-white rounded-xl border hover:border-red-200 hover:shadow-sm transition p-4"
               >
                 <div className="text-gray-900 font-semibold">{cat.name}</div>

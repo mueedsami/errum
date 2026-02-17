@@ -12,6 +12,19 @@ interface CategorySidebarProps {
   activeCategoryName: string;
 }
 
+const slugify = (value: string): string =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+
+const toCategoryPath = (cat: CatalogCategory): string => {
+  const slug = cat.slug ? String(cat.slug).trim() : slugify(cat.name || '');
+  return `/e-commerce/${encodeURIComponent(slug)}`;
+};
+
 export default function CategorySidebar({ 
   categories, 
   expandedCategories, 
@@ -24,7 +37,7 @@ export default function CategorySidebar({
     return cats.map((cat) => {
       const hasSubcategories = cat.children && cat.children.length > 0;
       const isExpanded = expandedCategories.has(cat.id);
-      const isActive = activeCategoryName === cat.name;
+      const isActive = slugify(activeCategoryName) === slugify(cat.slug || cat.name || '');
 
       return (
         <div key={cat.id}>
@@ -37,7 +50,7 @@ export default function CategorySidebar({
               if (hasSubcategories) {
                 onToggleCategory(cat.id);
               } else {
-                router.push(`/e-commerce/${encodeURIComponent(cat.name)}`);
+                router.push(toCategoryPath(cat));
               }
             }}
           >

@@ -2,7 +2,6 @@
 
 import axiosInstance from '@/lib/axios';
 import catalogService from '@/services/catalogService';
-import { toAbsoluteAssetUrl } from '@/lib/assetUrl';
 
 export const GUEST_CART_STORAGE_KEY = 'guest_cart_v1' as const;
 
@@ -58,7 +57,11 @@ function saveGuestCart(cart: GuestCartStorage) {
 
 function normalizeCartProductFromCatalog(product: any): CartProduct {
   const images = Array.isArray(product?.images)
-    ? product.images.map((img: any, idx: number) => normalizeCartImage(img, idx))
+    ? product.images.map((img: any, idx: number) => ({
+        id: Number(img.id || idx + 1),
+        image_url: String(img.image_url || img.thumbnail_url || ''),
+        is_primary: Boolean(img.is_primary),
+      }))
     : [];
 
   return {
@@ -78,44 +81,6 @@ function variantKey(variant_options?: VariantOptions | null): string {
   const color = variant_options.color || '';
   const size = variant_options.size || '';
   return `${color}::${size}`;
-}
-
-
-function normalizeCartImage(image: any, index: number) {
-  const rawUrl =
-    image?.image_url ||
-    image?.url ||
-    image?.thumbnail_url ||
-    image?.path ||
-    image?.image_path ||
-    '';
-
-  const resolved = toAbsoluteAssetUrl(String(rawUrl));
-  return {
-    id: Number(image?.id || index + 1),
-    image_url: resolved || '/placeholder-product.png',
-    is_primary: Boolean(image?.is_primary ?? index === 0),
-  };
-}
-
-function normalizeCartProductImages(product: any): any {
-  if (!product || typeof product !== 'object') return product;
-  const images = Array.isArray(product.images)
-    ? product.images.map((img: any, idx: number) => normalizeCartImage(img, idx))
-    : [];
-
-  return {
-    ...product,
-    images,
-  };
-}
-
-function normalizeCartItem(item: any): any {
-  if (!item || typeof item !== 'object') return item;
-  return {
-    ...item,
-    product: normalizeCartProductImages(item.product),
-  };
 }
 
 export interface CartProduct {
@@ -259,12 +224,7 @@ class CartService {
         throw new Error(response.data.message || 'Failed to get cart');
       }
       
-      return {
-        ...response.data.data,
-        cart_items: Array.isArray(response.data.data?.cart_items)
-          ? response.data.data.cart_items.map((it: any) => normalizeCartItem(it))
-          : [],
-      };
+      return response.data.data;
     } catch (error: any) {
       console.error('Get cart error:', error);
       const errorMessage = error.response?.data?.message || error.message || 'Failed to get cart';
@@ -373,10 +333,7 @@ class CartService {
         throw new Error(response.data.message || 'Failed to add to cart');
       }
       
-      return {
-        ...response.data.data,
-        cart_item: normalizeCartItem(response.data.data?.cart_item),
-      };
+      return response.data.data;
     } catch (error: any) {
       console.error('❌ Add to cart error:', error);
       console.error('Error details:', error.response?.data);

@@ -1,105 +1,171 @@
 'use client';
 
-import React from 'react';
-import { useRouter } from 'next/navigation';
-import { ChevronRight, ChevronDown } from 'lucide-react';
-import { CatalogCategory } from '@/services/catalogService';
+import { useState } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 
-interface CategorySidebarProps {
-  categories: CatalogCategory[];
-  expandedCategories: Set<number>;
-  onToggleCategory: (categoryId: number) => void;
-  activeCategoryName: string;
+interface Category {
+  id: number;
+  name: string;
+  slug?: string;
+  product_count?: number;
+  children?: Category[];
 }
 
-const slugify = (value: string): string =>
-  String(value || '')
-    .trim()
+interface CategorySidebarProps {
+  categories: Category[];
+  activeCategory: string;
+  onCategoryChange: (category: string) => void;
+  selectedPriceRange: string;
+  onPriceRangeChange: (range: string) => void;
+  selectedStock: string;
+  onStockChange: (stock: string) => void;
+}
+
+const slugify = (value: string) =>
+  value
     .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '');
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
 
-const toCategoryPath = (cat: CatalogCategory): string => {
-  const slug = cat.slug ? String(cat.slug).trim() : slugify(cat.name || '');
-  return `/e-commerce/${encodeURIComponent(slug)}`;
-};
-
-export default function CategorySidebar({ 
-  categories, 
-  expandedCategories, 
-  onToggleCategory, 
-  activeCategoryName 
+export default function CategorySidebar({
+  categories,
+  activeCategory,
+  onCategoryChange,
+  selectedPriceRange,
+  onPriceRangeChange,
+  selectedStock,
+  onStockChange,
 }: CategorySidebarProps) {
-  const router = useRouter();
+  const [expandedCategories, setExpandedCategories] = useState<Set<number>>(new Set());
 
-  const renderCategoryTree = (cats: CatalogCategory[], level: number = 0) => {
-    return cats.map((cat) => {
-      const hasSubcategories = cat.children && cat.children.length > 0;
-      const isExpanded = expandedCategories.has(cat.id);
-      const isActive = slugify(activeCategoryName) === slugify(cat.slug || cat.name || '');
+  const toggleCategory = (categoryId: number) => {
+    const newExpanded = new Set(expandedCategories);
+    if (newExpanded.has(categoryId)) {
+      newExpanded.delete(categoryId);
+    } else {
+      newExpanded.add(categoryId);
+    }
+    setExpandedCategories(newExpanded);
+  };
 
-      return (
-        <div key={cat.id}>
-          <div
-            className={`flex items-center justify-between py-2.5 px-3 cursor-pointer transition-colors ${
-              isActive ? 'text-red-700 font-semibold bg-red-50' : 'text-gray-700 hover:text-gray-900 hover:bg-gray-50'
-            }`}
-            style={{ paddingLeft: `${level * 20 + 12}px` }}
-            onClick={() => {
-              if (hasSubcategories) {
-                onToggleCategory(cat.id);
-              } else {
-                router.push(toCategoryPath(cat));
-              }
-            }}
+  const isActive = (category: Category) => {
+    const normalizedActive = decodeURIComponent(activeCategory || '').toLowerCase();
+    const slug = (category.slug || slugify(category.name)).toLowerCase();
+    return normalizedActive === slug || normalizedActive === category.name.toLowerCase();
+  };
+
+  const categoryRouteValue = (category: Category) => category.slug || slugify(category.name);
+
+  const renderCategory = (category: Category, level = 0) => {
+    const hasChildren = category.children && category.children.length > 0;
+    const isExpanded = expandedCategories.has(category.id);
+
+    return (
+      <div key={category.id} className="mb-1">
+        <div
+          className={`flex items-center justify-between p-2 rounded cursor-pointer transition-colors ${
+            isActive(category)
+              ? 'bg-red-100 text-red-700 font-medium'
+              : 'hover:bg-gray-100 text-gray-700'
+          }`}
+          style={{ paddingLeft: `${8 + level * 16}px` }}
+        >
+          <span
+            onClick={() => onCategoryChange(categoryRouteValue(category))}
+            className="flex-1"
           >
-            <span className="flex-1">
-              {cat.name}
-              {cat.product_count > 0 && (
-                <span className="ml-2 text-xs text-gray-500">
-                  ({cat.product_count})
-                </span>
-              )}
-            </span>
-            <div className="flex items-center gap-2">
-              {hasSubcategories && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleCategory(cat.id);
-                  }}
-                  className="p-0.5 hover:bg-gray-200 rounded"
-                >
-                  {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                </button>
-              )}
-            </div>
-          </div>
-          {hasSubcategories && isExpanded && (
-            <div>{renderCategoryTree(cat.children!, level + 1)}</div>
+            {category.name}
+            {category.product_count !== undefined && (
+              <span className="text-sm text-gray-500 ml-1">({category.product_count})</span>
+            )}
+          </span>
+          {hasChildren && (
+            <button
+              onClick={() => toggleCategory(category.id)}
+              className="p-1 hover:bg-gray-200 rounded"
+            >
+              {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
           )}
         </div>
-      );
-    });
+        {hasChildren && isExpanded && (
+          <div className="mt-1">
+            {category.children!.map(child => renderCategory(child, level + 1))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
-    <aside className="w-64 flex-shrink-0 hidden lg:block">
-      <div className="bg-white border border-gray-200 rounded-lg sticky top-4">
-        <div className="p-6 border-b">
-          <h3 className="text-lg font-bold text-gray-900">PRODUCT CATEGORIES</h3>
-        </div>
-        <div className="p-4 max-h-[600px] overflow-y-auto">
-          {categories.length > 0 ? (
-            renderCategoryTree(categories)
-          ) : (
-            <p className="text-sm text-gray-500 text-center py-4">
-              No categories available
-            </p>
-          )}
+    <div className="space-y-6">
+      <div className="bg-white rounded-lg shadow-sm p-4">
+        <h3 className="font-semibold text-gray-900 mb-4">Categories</h3>
+        <div className="space-y-1">
+          <div
+            className={`p-2 rounded cursor-pointer transition-colors ${
+              activeCategory === 'all'
+                ? 'bg-red-100 text-red-700 font-medium'
+                : 'hover:bg-gray-100 text-gray-700'
+            }`}
+            onClick={() => onCategoryChange('all')}
+          >
+            All Categories
+          </div>
+          {categories.map(category => renderCategory(category))}
         </div>
       </div>
-    </aside>
+
+      <div className="bg-white rounded-lg shadow-sm p-4">
+        <h3 className="font-semibold text-gray-900 mb-4">Price Range</h3>
+        <div className="space-y-2">
+          {[
+            { value: 'all', label: 'All Prices' },
+            { value: '0-500', label: 'Under ৳500' },
+            { value: '500-1000', label: '৳500 - ৳1,000' },
+            { value: '1000-2000', label: '৳1,000 - ৳2,000' },
+            { value: '2000-5000', label: '৳2,000 - ৳5,000' },
+            { value: '5000-999999', label: 'Above ৳5,000' },
+          ].map((range) => (
+            <label key={range.value} className="flex items-center cursor-pointer">
+              <input
+                type="radio"
+                name="priceRange"
+                value={range.value}
+                checked={selectedPriceRange === range.value}
+                onChange={(e) => onPriceRangeChange(e.target.value)}
+                className="mr-2 text-red-600 focus:ring-red-500"
+              />
+              <span className="text-sm text-gray-700">{range.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow-sm p-4">
+        <h3 className="font-semibold text-gray-900 mb-4">Availability</h3>
+        <div className="space-y-2">
+          {[
+            { value: 'all', label: 'All Products' },
+            { value: 'in_stock', label: 'In Stock' },
+            { value: 'out_of_stock', label: 'Out of Stock' },
+          ].map((stock) => (
+            <label key={stock.value} className="flex items-center cursor-pointer">
+              <input
+                type="radio"
+                name="stock"
+                value={stock.value}
+                checked={selectedStock === stock.value}
+                onChange={(e) => onStockChange(e.target.value)}
+                className="mr-2 text-red-600 focus:ring-red-500"
+              />
+              <span className="text-sm text-gray-700">{stock.label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }

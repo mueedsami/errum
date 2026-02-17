@@ -27,6 +27,57 @@ const normalize = (s: string) =>
 const isNumeric = (s: string) => /^\d+$/.test(s.trim());
 const isSizeToken = (s: string) => SIZE_TOKENS.has(s.trim().toUpperCase());
 
+const extractMarketSizePairs = (value: string): string[] => {
+  const text = normalize(value)
+    .replace(/[|,;/]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!text) return [];
+
+  const pairs: string[] = [];
+  const seen = new Set<string>();
+  const re = /(US|EU|UK|BD|CM|MM)\s*[:\-]?\s*(\d{1,3}(?:\.\d+)?)/gi;
+  let match: RegExpExecArray | null;
+
+  while ((match = re.exec(text)) !== null) {
+    const market = String(match[1] || '').toUpperCase();
+    const size = String(match[2] || '').trim();
+    if (!market || !size) continue;
+
+    const key = `${market}-${size}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    pairs.push(`${market} ${size}`);
+  }
+
+  // Useful fallback for values like "40 US 7" (EU is implied by footwear sizing).
+  if (pairs.length > 0) {
+    const hasUS = pairs.some((p) => p.startsWith('US '));
+    const hasEU = pairs.some((p) => p.startsWith('EU '));
+
+    if (hasUS && !hasEU) {
+      const twoDigit = text.match(/\b(3\d|4\d|5\d|60)\b/);
+      if (twoDigit) {
+        const inferred = `EU ${twoDigit[1]}`;
+        if (!seen.has(`EU-${twoDigit[1]}`)) {
+          pairs.unshift(inferred);
+        }
+      }
+    }
+  }
+
+  return pairs;
+};
+
+const hasMarketSize = (value: string): boolean => extractMarketSizePairs(value).length > 0;
+
+const toMarketSizeLabel = (value: string): string | undefined => {
+  const pairs = extractMarketSizePairs(value);
+  if (!pairs.length) return undefined;
+  return pairs.join(' / ');
+};
+
 const isNumericSize = (s: string) => {
   // Treat 2-3 digit numbers as size codes (e.g., 36, 38, 40, 42).
   // Single-digit numbers are typically variation/color codes in many catalogs.
@@ -46,6 +97,8 @@ function isVariantLikeToken(token: string): boolean {
   const t = (token || '').trim();
   if (!t) return false;
   if (t.length > 8) return false;
+
+  if (hasMarketSize(t)) return true;
 
   if (isSizeToken(t) || isNumericSize(t) || isNumeric(t)) return true;
 
@@ -187,7 +240,7 @@ export function getColorLabel(name: string): string | undefined {
     const secondLast = parts[parts.length - 2];
 
     // If last is size, color is previous part
-    if (isSizeToken(last) || isNumericSize(last)) {
+    if (isSizeToken(last) || isNumericSize(last) || hasMarketSize(last)) {
       if (!secondLast) return undefined;
       if (isNumeric(secondLast) && Number(secondLast) <= 20) return `Color ${Number(secondLast)}`;
       return secondLast.trim();
@@ -197,7 +250,7 @@ export function getColorLabel(name: string): string | undefined {
     if (isNumeric(last) && Number(last) <= 20) return `Color ${Number(last)}`;
 
     // Last is typical color string
-    if (!isSizeToken(last)) return last.trim();
+    if (!isSizeToken(last) && !hasMarketSize(last)) return last.trim();
 
     return undefined;
   }
@@ -230,8 +283,17 @@ export function getSizeLabel(name: string): string | undefined {
   if (parts.length > 1) {
     const last = parts[parts.length - 1];
     if (isSizeToken(last) || isNumericSize(last)) return last.trim();
+
+    const marketSize = toMarketSizeLabel(last);
+    if (marketSize) return marketSize;
+
     return undefined;
   }
+
+  // Fallback when the whole name carries market sizes without " - " separators,
+  // e.g. "Air Max Black EU 40 US 7".
+  const wholeNameMarketSize = toMarketSizeLabel(normalized);
+  if (wholeNameMarketSize) return wholeNameMarketSize;
 
   // Compact suffix fallback (no spaces around '-')
   const compact = extractCompactSuffix(normalized);

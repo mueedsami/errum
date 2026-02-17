@@ -1,7 +1,6 @@
 import api from '@/lib/axios';
 import axios from 'axios';
 import { getBaseProductName, getColorLabel, getSizeLabel } from '@/lib/productNameUtils';
-import { toAbsoluteAssetUrl } from '@/lib/assetUrl';
 
 /**
  * -----------------------------
@@ -30,6 +29,12 @@ export interface Product {
   name: string;
   base_name?: string;
   variation_suffix?: string | null;
+  display_name?: string;
+  option_label?: string;
+  has_variants?: boolean;
+  total_variants?: number;
+  variants?: Product[];
+  description?: string;
   sku: string;
   slug?: string;
   description: string;
@@ -56,10 +61,18 @@ export interface Product {
 export interface SimpleProduct {
   id: number;
   name: string;
+  base_name?: string;
+  variation_suffix?: string | null;
+  display_name?: string;
+  option_label?: string;
+  has_variants?: boolean;
+  total_variants?: number;
+  variants?: Product[];
   sku: string;
   selling_price: number;
   in_stock: boolean;
   stock_quantity: number;
+  category?: ProductCategory | string | null;
   images: ProductImage[];
 }
 
@@ -167,7 +180,14 @@ export interface Category {
   id: number;
   name: string;
   slug?: string;
+  description?: string;
+  image?: string;
+  image_url?: string;
+  color?: string;
+  icon?: string;
   product_count?: number;
+  parent_id?: number | null;
+  children?: Category[];
 }
 
 /**
@@ -183,13 +203,21 @@ export interface CatalogCategory {
   id: number;
   name: string;
   slug?: string;
+  description?: string;
   image?: string;
+  image_url?: string;
+  color?: string;
+  icon?: string;
   parent_id?: number | null;
   is_active?: boolean;
   product_count?: number;
   children?: CatalogCategory[];
   parent?: CatalogCategory | null;
 }
+
+// Backward-compatible aliases for older imports
+export type GroupedProduct = CatalogGroupedProduct;
+export type ProductResponse = CatalogProductsResponse;
 
 /**
  * -----------------------------
@@ -207,25 +235,52 @@ const normalizeString = (value: any, fallback = ''): string => {
   return String(value).trim();
 };
 
+
+const toAbsoluteAssetUrl = (value: any): string => {
+  const raw = normalizeString(value || '');
+  if (!raw) return '';
+
+  // Already absolute URL (http://, https://, protocol-relative, data URI)
+  if (/^(https?:)?\/\//i.test(raw) || /^data:/i.test(raw)) {
+    return raw;
+  }
+
+  // Keep frontend-local placeholders untouched
+  if (/^\/(images|placeholder)/i.test(raw)) {
+    return raw;
+  }
+
+  const apiBase = normalizeString(process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
+  const appBase = normalizeString(process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/$/, '');
+
+  const backendBase =
+    (apiBase ? apiBase.replace(/\/api(?:\/v\d+)?$/i, '') : '') ||
+    appBase ||
+    '';
+
+  if (!backendBase) return raw;
+
+  const path = raw.startsWith('/') ? raw : `/${raw}`;
+  return `${backendBase}${path}`;
+};
+
 const normalizeImage = (image: any, index = 0): ProductImage | null => {
   if (!image) return null;
 
-  const rawUrl =
+  const url = toAbsoluteAssetUrl(
     image.url ||
     image.image_url ||
     image.src ||
     image.path ||
     image.image ||
-    image.thumbnail_url ||
-    '';
+    ''
+  );
 
-  if (!rawUrl || typeof rawUrl !== 'string') return null;
-
-  const absoluteUrl = toAbsoluteAssetUrl(rawUrl);
+  if (!url || typeof url !== 'string') return null;
 
   return {
     id: toNumber(image.id, index + 1),
-    url: absoluteUrl || '/placeholder-product.png',
+    url,
     is_primary: Boolean(
       image.is_primary ??
       image.primary ??
@@ -264,7 +319,7 @@ const normalizeCategory = (category: any): ProductCategory | null => {
     id,
     name,
     description: normalizeString(category.description || ''),
-    image_url: toAbsoluteAssetUrl(category.image_url || category.image) || undefined,
+    image_url: toAbsoluteAssetUrl(category.image_url || category.image || undefined),
     product_count: toNumber(category.product_count, 0),
     parent_id: category.parent_id ?? null,
     slug: category.slug || name.toLowerCase().replace(/\s+/g, '-'),
@@ -322,6 +377,10 @@ const normalizeProduct = (
     name,
     base_name: baseName || undefined,
     variation_suffix: variationSuffix,
+    display_name: normalizeString(raw?.display_name || '' ) || undefined,
+    option_label: normalizeString(raw?.option_label || '' ) || undefined,
+    has_variants: raw?.has_variants !== undefined ? Boolean(raw?.has_variants) : undefined,
+    total_variants: raw?.total_variants !== undefined ? toNumber(raw?.total_variants, 0) : undefined,
     sku: normalizeString(raw?.sku || raw?.product_sku || ''),
     slug: raw?.slug || undefined,
     description: normalizeString(raw?.description || context?.description || ''),
@@ -585,6 +644,44 @@ const parseProductsPayload = (payload: any): CatalogProductsResponse => {
   };
 };
 
+
+const normalizeCatalogCategoryTree = (raw: any): CatalogCategory | null => {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const name = normalizeString(raw.name || raw.title || raw.label || '');
+  if (!name) return null;
+
+  const childrenRaw = Array.isArray(raw.children) ? raw.children : [];
+  const children = childrenRaw
+    .map((child: any) => normalizeCatalogCategoryTree(child))
+    .filter((child): child is CatalogCategory => Boolean(child));
+
+  return {
+    id: toNumber(raw.id, 0),
+    name,
+    slug: normalizeString(raw.slug || name.toLowerCase().replace(/\s+/g, '-')),
+    description: normalizeString(raw.description || '') || undefined,
+    image: toAbsoluteAssetUrl(raw.image || raw.image_url || undefined) || undefined,
+    image_url: toAbsoluteAssetUrl(raw.image_url || raw.image || undefined) || undefined,
+    color: normalizeString(raw.color || '') || undefined,
+    icon: normalizeString(raw.icon || '') || undefined,
+    parent_id: raw.parent_id ?? null,
+    is_active: raw.is_active !== undefined ? Boolean(raw.is_active) : undefined,
+    product_count: toNumber(raw.product_count, 0),
+    children,
+    parent: null,
+  };
+};
+
+const linkCategoryParents = (nodes: CatalogCategory[], parent: CatalogCategory | null = null) => {
+  nodes.forEach((node) => {
+    node.parent = parent;
+    if (Array.isArray(node.children) && node.children.length > 0) {
+      linkCategoryParents(node.children, node);
+    }
+  });
+};
+
 /**
  * -----------------------------
  * Catalog Service
@@ -691,17 +788,17 @@ const catalogService = {
       const response = await api.get('/catalog/categories');
       const payload = response?.data?.data;
 
-      if (Array.isArray(payload)) {
-        return payload;
-      }
-      if (Array.isArray(payload?.categories)) {
-        return payload.categories;
-      }
-      if (Array.isArray(response?.data?.categories)) {
-        return response.data.categories;
-      }
+      const rawCategories =
+        (Array.isArray(payload) ? payload : null) ||
+        (Array.isArray(payload?.categories) ? payload.categories : null) ||
+        (Array.isArray(response?.data?.categories) ? response.data.categories : []);
 
-      return [];
+      const normalized = (rawCategories || [])
+        .map((cat: any) => normalizeCatalogCategoryTree(cat))
+        .filter((cat): cat is CatalogCategory => Boolean(cat));
+
+      linkCategoryParents(normalized);
+      return normalized;
     } catch (error) {
       console.error('Error fetching categories:', error);
       throw new Error('Failed to fetch categories');

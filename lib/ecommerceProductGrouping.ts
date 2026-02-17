@@ -1,6 +1,5 @@
 import { getBaseProductName, getColorLabel, getSizeLabel } from '@/lib/productNameUtils';
 import type { CatalogGroupedProduct } from '@/services/catalogService';
-import { toAbsoluteAssetUrl } from '@/lib/assetUrl';
 
 export interface GroupedVariant {
   id: number;
@@ -55,14 +54,7 @@ const toNumber = (value: any): number => {
 export function getProductPrimaryImage(product: any): string {
   const images = Array.isArray(product?.images) ? product.images : [];
   const primary = images.find((img: any) => !!img?.is_primary) || images[0];
-  const raw =
-    primary?.url ||
-    primary?.image_url ||
-    primary?.thumbnail_url ||
-    primary?.path ||
-    primary?.image_path ||
-    '';
-  return toAbsoluteAssetUrl(raw) || '/placeholder-product.png';
+  return primary?.url || '/placeholder-product.png';
 }
 
 export function getMotherBaseName(product: any): string {

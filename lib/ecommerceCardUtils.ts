@@ -13,8 +13,8 @@ const dedupeVariants = (variants: SimpleProduct[]): SimpleProduct[] => {
     const key = variant.id
       ? `id:${variant.id}`
       : variant.sku
-      ? `sku:${variant.sku}`
-      : `${variant.name}|${variant.base_name || ''}`;
+        ? `sku:${variant.sku}`
+        : `${variant.name}|${variant.base_name || ''}`;
 
     if (seen.has(key)) return;
     seen.add(key);
@@ -42,11 +42,11 @@ const groupToCardProduct = (group: GroupedProduct): SimpleProduct => {
       description: group.description || '',
       images: [],
       category: group.category,
-      inStock: false,
+      in_stock: false,
       has_variants: false,
       total_variants: 1,
       variants: [],
-    } as SimpleProduct;
+    };
   }
 
   return {
@@ -67,11 +67,20 @@ const groupToCardProduct = (group: GroupedProduct): SimpleProduct => {
  * This prevents duplicate cards when the API returns grouped catalog payloads.
  */
 export const buildCardProductsFromResponse = (response: ProductResponse): SimpleProduct[] => {
-  if (response.groupedProducts && response.groupedProducts.length > 0) {
-    return response.groupedProducts.map(groupToCardProduct);
+  const grouped =
+    (Array.isArray((response as any)?.grouped_products)
+      ? ((response as any).grouped_products as GroupedProduct[])
+      : null) ||
+    (Array.isArray((response as any)?.groupedProducts)
+      ? ((response as any).groupedProducts as GroupedProduct[])
+      : []);
+
+  if (grouped.length > 0) {
+    return grouped.map(groupToCardProduct);
   }
 
-  return response.products || [];
+  const flat = Array.isArray(response?.products) ? response.products : [];
+  return dedupeVariants(flat as SimpleProduct[]);
 };
 
 export const getVariantListForCard = (product: SimpleProduct): SimpleProduct[] => {

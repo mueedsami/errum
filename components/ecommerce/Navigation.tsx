@@ -153,6 +153,15 @@ const Navbar = () => {
     }
   };
 
+  const categorySlug = (category: { name: string; slug?: string }) =>
+    category.slug ||
+    category.name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-');
+
   return (
     <nav className="bg-white/90 backdrop-blur border-b border-gray-100 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -189,7 +198,7 @@ const Navbar = () => {
                     {categories.map((category) => (
                       <div key={category.id}>
                         <Link
-                          href={`/e-commerce/${encodeURIComponent(category.name)}`}
+                          href={`/e-commerce/${encodeURIComponent(categorySlug(category))}`}
                           className="block px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 transition"
                         >
                           {category.name}
@@ -206,7 +215,7 @@ const Navbar = () => {
                             {category.children.map((child) => (
                               <Link
                                 key={child.id}
-                                href={`/e-commerce/${encodeURIComponent(child.name)}`}
+                                href={`/e-commerce/${encodeURIComponent(categorySlug(child))}`}
                                 className="block px-4 py-1.5 text-xs text-gray-600 hover:bg-red-50 hover:text-red-700 transition rounded-md"
                               >
                                 {child.name}
@@ -448,7 +457,7 @@ const Navbar = () => {
                   <div key={category.id} className="mb-2">
                     <div className="flex items-center justify-between">
                       <Link
-                        href={`/e-commerce/${encodeURIComponent(category.name)}`}
+                        href={`/e-commerce/${encodeURIComponent(categorySlug(category))}`}
                         className="flex-1 py-2 text-gray-700 hover:text-red-700"
                         onClick={() => setIsOpen(false)}
                       >
@@ -481,7 +490,7 @@ const Navbar = () => {
                           {category.children.map((child) => (
                             <Link
                               key={child.id}
-                              href={`/e-commerce/${encodeURIComponent(child.name)}`}
+                              href={`/e-commerce/${encodeURIComponent(categorySlug(child))}`}
                               className="block py-1.5 text-sm text-gray-600 hover:text-red-700"
                               onClick={() => setIsOpen(false)}
                             >

@@ -1,167 +1,128 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useRouter } from 'next/navigation';
-import catalogService, { CatalogCategory } from '@/services/catalogService';
+import Image from 'next/image';
+import { CatalogCategory } from '@/services/catalogService';
 
-interface CategoryData {
-  id: number;
-  name: string;
-  slug?: string;
-  description?: string;
-  image_url?: string;
-  color?: string;
-  icon?: string;
-  productCount: number;
+interface OurCategoriesProps {
+  categories: CatalogCategory[];
+  loading?: boolean;
 }
 
-const slugify = (value: string): string =>
-  String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, ' and ')
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/g, '');
+const categoryIcons = [
+  '👚', '👕', '👖', '👗', '🧥', '👔', '👟', '👠',
+  '👜', '🎒', '💍', '⌚', '🕶️', '👒', '🧢', '🧣'
+];
 
-export default function OurCategories() {
-  const [categories, setCategoriesData] = useState<CategoryData[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+const defaultColors = [
+  'from-pink-100 to-rose-100',
+  'from-blue-100 to-cyan-100',
+  'from-green-100 to-emerald-100',
+  'from-purple-100 to-violet-100',
+  'from-yellow-100 to-amber-100',
+  'from-indigo-100 to-blue-100',
+  'from-red-100 to-pink-100',
+  'from-orange-100 to-red-100'
+];
+
+const slugify = (value: string) =>
+  value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+
+const OurCategories: React.FC<OurCategoriesProps> = ({ categories, loading = false }) => {
   const router = useRouter();
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-
-        // Fetch categories using the PUBLIC catalog service (no auth required)
-        const categoriesData = await catalogService.getCategories();
-
-        // Flatten all categories and subcategories
-        const allCategories: CategoryData[] = [];
-
-        const flattenCategories = (cats: CatalogCategory[]) => {
-          cats.forEach(cat => {
-            allCategories.push({
-              id: cat.id,
-              name: cat.name,
-              slug: cat.slug,
-              description: cat.description,
-              image_url: cat.image_url,
-              color: cat.color,
-              icon: cat.icon,
-              productCount: cat.product_count || 0,
-            });
-
-            if (cat.children && cat.children.length > 0) {
-              flattenCategories(cat.children);
-            }
-          });
-        };
-
-        flattenCategories(categoriesData);
-
-        setCategoriesData(allCategories);
-      } catch (err: any) {
-        console.error('Error fetching categories:', err);
-        setError(err.message || 'Failed to load categories');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchData();
-  }, []);
+  const displayCategories = categories.slice(0, 8);
 
   if (loading) {
     return (
-      <section className="py-20 bg-white">
+      <section className="py-8 bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <p className="text-gray-600">Loading categories...</p>
+          <h2 className="text-2xl font-bold text-gray-900 mb-6">Our Categories</h2>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+            {[...Array(8)].map((_, i) => (
+              <div key={i} className="bg-white rounded-lg p-4 animate-pulse">
+                <div className="w-12 h-12 bg-gray-200 rounded-full mx-auto mb-3"></div>
+                <div className="h-4 bg-gray-200 rounded mb-2"></div>
+                <div className="h-3 bg-gray-200 rounded w-2/3 mx-auto"></div>
+              </div>
+            ))}
           </div>
         </div>
       </section>
     );
   }
 
-  if (error) {
-    return (
-      <section className="py-20 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <p className="text-red-600">Error: {error}</p>
-          </div>
-        </div>
-      </section>
-    );
-  }
-
-  if (categories.length === 0) {
-    return (
-      <section className="py-20 bg-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="text-center">
-            <p className="text-gray-600">No categories available</p>
-          </div>
-        </div>
-      </section>
-    );
+  if (displayCategories.length === 0) {
+    return null;
   }
 
   return (
-    <section className="py-20 bg-white">
+    <section className="py-8 bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Section Header */}
-        <div className="text-center mb-16">
-          <h2 className="text-4xl md:text-5xl font-bold text-gray-900 mb-4">Our Categories</h2>
-          <p className="text-lg text-gray-600">Browse through our curated collections</p>
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold text-gray-900">Our Categories</h2>
+          <button
+            onClick={() => router.push('/e-commerce/categories')}
+            className="text-red-700 hover:text-red-800 font-medium text-sm"
+          >
+            View All →
+          </button>
         </div>
 
-        {/* Categories Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-8">
-          {categories.map((cat) => (
-            <div 
-              key={cat.id} 
-              className="group text-center cursor-pointer"
-              onClick={() =>
-                router.push(`/e-commerce/${encodeURIComponent(cat.slug ? slugify(cat.slug) : slugify(cat.name))}`)
-              }
-            >
-              {/* Category Image */}
-              <div className="relative aspect-square rounded-full overflow-hidden mb-5 border-4 border-gray-100 group-hover:border-red-700 transition-all duration-300 shadow-lg group-hover:shadow-2xl bg-gradient-to-br from-indigo-100 to-purple-100">
-                {cat.image_url ? (
-                  <>
-                    <img
-                      src={cat.image_url}
-                      alt={cat.name}
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-                    />
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all duration-300" />
-                  </>
-                ) : (
-                  <>
-                    {/* Fallback to first letter if no image */}
-                    <div className="w-full h-full flex items-center justify-center">
-                      <span className="text-6xl font-bold text-indigo-600 group-hover:scale-110 transition-transform duration-300">
-                        {cat.name.charAt(0).toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-all duration-300" />
-                  </>
-                )}
-              </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-4">
+          {displayCategories.map((cat, index) => {
+            const hasImage = Boolean(cat.image || cat.image_url);
+            const imageSrc = cat.image || cat.image_url || '';
+            const icon = cat.icon || categoryIcons[index % categoryIcons.length];
+            const colorClass = cat.color || defaultColors[index % defaultColors.length];
 
-              {/* Category Info */}
-              <h3 className="font-bold text-gray-900 mb-1 text-lg group-hover:text-red-700 transition-colors">
-                {cat.name}
-              </h3>
-              <p className="text-sm text-gray-500">{cat.productCount} Products</p>
-            </div>
-          ))}
+            return (
+              <div
+                key={cat.id}
+                onClick={() => router.push(`/e-commerce/${encodeURIComponent(cat.slug || slugify(cat.name))}`)}
+                className="group cursor-pointer"
+              >
+                <div className="bg-white rounded-lg p-4 text-center hover:shadow-md transition-all duration-300 border border-gray-100 group-hover:border-red-200">
+                  <div className="mb-3">
+                    {hasImage ? (
+                      <div className="w-12 h-12 mx-auto relative rounded-full overflow-hidden bg-gray-100">
+                        <Image
+                          src={imageSrc}
+                          alt={cat.name}
+                          fill
+                          className="object-cover group-hover:scale-110 transition-transform duration-300"
+                        />
+                      </div>
+                    ) : (
+                      <div className={`w-12 h-12 mx-auto rounded-full bg-gradient-to-br ${colorClass} flex items-center justify-center text-xl group-hover:scale-110 transition-transform duration-300`}>
+                        {icon}
+                      </div>
+                    )}
+                  </div>
+
+                  <h3 className="font-medium text-sm text-gray-900 group-hover:text-red-700 transition-colors line-clamp-2 mb-1">
+                    {cat.name}
+                  </h3>
+
+                  {cat.product_count !== undefined && (
+                    <p className="text-xs text-gray-500">
+                      {cat.product_count} items
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </section>
   );
-}
+};
+
+export default OurCategories;

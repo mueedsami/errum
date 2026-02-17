@@ -11,8 +11,8 @@ import CartSidebar from '@/components/ecommerce/cart/CartSidebar';
 import { useCart } from '@/app/e-commerce/CartContext';
 import catalogService, {
   CatalogCategory,
-  ProductResponse,
   GetProductsParams,
+  PaginationMeta,
   SimpleProduct,
 } from '@/services/catalogService';
 import {
@@ -22,17 +22,19 @@ import {
   getCardStockLabel,
 } from '@/lib/ecommerceCardUtils';
 
+type ProductSort = NonNullable<GetProductsParams['sort_by']>;
+
 export default function ProductsPage() {
   const router = useRouter();
 
   const [categories, setCategories] = useState<CatalogCategory[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const [sortBy, setSortBy] = useState<string>('newest');
+  const [sortBy, setSortBy] = useState<ProductSort>('newest');
   const [isLoading, setIsLoading] = useState(false);
 
   const [products, setProducts] = useState<SimpleProduct[]>([]);
-  const [pagination, setPagination] = useState<ProductResponse['pagination'] | null>(null);
+  const [pagination, setPagination] = useState<PaginationMeta | null>(null);
 
   const [isCartOpen, setIsCartOpen] = useState(false);
   const { addToCart } = useCart();
@@ -63,16 +65,14 @@ export default function ProductsPage() {
       };
 
       if (selectedCategory !== 'all') {
-        params.category_id = parseInt(selectedCategory, 10);
+        params.category_id = Number(selectedCategory);
       }
 
       if (searchTerm.trim()) {
         params.search = searchTerm.trim();
       }
 
-      if (sortBy) {
-        params.sort_by = sortBy;
-      }
+      params.sort_by = sortBy;
 
       const response = await catalogService.getProducts(params);
       const cardProducts = buildCardProductsFromResponse(response);
@@ -94,7 +94,7 @@ export default function ProductsPage() {
     }
 
     try {
-      await addToCart(product, 1);
+      await addToCart(product.id, 1);
       setIsCartOpen(true);
     } catch (error) {
       console.error('Error adding to cart:', error);
@@ -148,7 +148,7 @@ export default function ProductsPage() {
               <div className="relative">
                 <select
                   value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value)}
+                  onChange={(e) => setSortBy(e.target.value as ProductSort)}
                   className="w-full pl-4 pr-8 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 appearance-none bg-white"
                 >
                   <option value="newest">Newest</option>
@@ -195,7 +195,7 @@ export default function ProductsPage() {
 
                       {additionalVariants > 0 && (
                         <span className="absolute top-2 left-2 bg-purple-600 text-white text-xs px-2 py-1 rounded-full">
-                          +{additionalVariants} variants available
+                          +{additionalVariants} variation options
                         </span>
                       )}
 
@@ -204,8 +204,8 @@ export default function ProductsPage() {
                           stockLabel === 'In Stock'
                             ? 'bg-green-100 text-green-700'
                             : hasStock
-                            ? 'bg-amber-100 text-amber-700'
-                            : 'bg-red-100 text-red-700'
+                              ? 'bg-amber-100 text-amber-700'
+                              : 'bg-red-100 text-red-700'
                         }`}
                       >
                         {stockLabel}
@@ -226,7 +226,7 @@ export default function ProductsPage() {
                         onClick={() => handleAddToCart(product)}
                         className="mt-3 w-full bg-red-600 text-white py-2 rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
                       >
-                        {product.has_variants ? 'Select Option' : 'Add to Cart'}
+                        {product.has_variants ? 'Select Variation' : 'Add to Cart'}
                       </button>
                     </div>
                   </div>

@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import cartService from '@/services/cartService';
+import { toAbsoluteAssetUrl } from '@/lib/assetUrl';
 
 export type CartSidebarItem = {
   id: number; // cart item id
@@ -34,7 +35,7 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 function pickImage(product: any): string | undefined {
   const images = product?.images || [];
   const primary = images.find((i: any) => i?.is_primary) || images[0];
-  return primary?.image_url;
+  return toAbsoluteAssetUrl(primary?.image_url || primary?.url || primary?.thumbnail_url);
 }
 
 export function CartProvider({ children }: { children: React.ReactNode }) {

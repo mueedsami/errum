@@ -1,6 +1,7 @@
 import api from '@/lib/axios';
 import axios from 'axios';
 import { getBaseProductName, getColorLabel, getSizeLabel } from '@/lib/productNameUtils';
+import { toAbsoluteAssetUrl } from '@/lib/assetUrl';
 
 /**
  * -----------------------------
@@ -209,19 +210,22 @@ const normalizeString = (value: any, fallback = ''): string => {
 const normalizeImage = (image: any, index = 0): ProductImage | null => {
   if (!image) return null;
 
-  const url =
+  const rawUrl =
     image.url ||
     image.image_url ||
     image.src ||
     image.path ||
     image.image ||
+    image.thumbnail_url ||
     '';
 
-  if (!url || typeof url !== 'string') return null;
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+
+  const absoluteUrl = toAbsoluteAssetUrl(rawUrl);
 
   return {
     id: toNumber(image.id, index + 1),
-    url,
+    url: absoluteUrl || '/placeholder-product.png',
     is_primary: Boolean(
       image.is_primary ??
       image.primary ??
@@ -260,7 +264,7 @@ const normalizeCategory = (category: any): ProductCategory | null => {
     id,
     name,
     description: normalizeString(category.description || ''),
-    image_url: category.image_url || category.image || undefined,
+    image_url: toAbsoluteAssetUrl(category.image_url || category.image) || undefined,
     product_count: toNumber(category.product_count, 0),
     parent_id: category.parent_id ?? null,
     slug: category.slug || name.toLowerCase().replace(/\s+/g, '-'),

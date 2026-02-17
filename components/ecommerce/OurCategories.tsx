@@ -3,10 +3,10 @@
 import React from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { CatalogCategory } from '@/services/catalogService';
+import catalogService, { CatalogCategory } from '@/services/catalogService';
 
 interface OurCategoriesProps {
-  categories: CatalogCategory[];
+  categories?: CatalogCategory[];
   loading?: boolean;
 }
 
@@ -34,12 +34,53 @@ const slugify = (value: string) =>
     .replace(/\s+/g, '-')
     .replace(/-+/g, '-');
 
-const OurCategories: React.FC<OurCategoriesProps> = ({ categories, loading = false }) => {
+const OurCategories: React.FC<OurCategoriesProps> = ({ categories: categoriesProp, loading = false }) => {
   const router = useRouter();
+  const [categories, setCategories] = React.useState<CatalogCategory[]>(categoriesProp || []);
+  const [isFetching, setIsFetching] = React.useState<boolean>(!categoriesProp);
 
-  const displayCategories = categories.slice(0, 8);
+  React.useEffect(() => {
+    if (categoriesProp && Array.isArray(categoriesProp)) {
+      setCategories(categoriesProp);
+      setIsFetching(false);
+    }
+  }, [categoriesProp]);
 
-  if (loading) {
+  React.useEffect(() => {
+    // If categories are passed from parent, don't fetch again.
+    if (categoriesProp && Array.isArray(categoriesProp)) return;
+
+    let active = true;
+
+    const fetchCategories = async () => {
+      try {
+        setIsFetching(true);
+        const data = await catalogService.getCategories();
+        if (active) {
+          setCategories(Array.isArray(data) ? data : []);
+        }
+      } catch (error) {
+        console.error('Failed to load categories for home section:', error);
+        if (active) {
+          setCategories([]);
+        }
+      } finally {
+        if (active) {
+          setIsFetching(false);
+        }
+      }
+    };
+
+    fetchCategories();
+
+    return () => {
+      active = false;
+    };
+  }, [categoriesProp]);
+
+  const displayCategories = (categories || []).slice(0, 8);
+
+  if (loading || isFetching) {
     return (
       <section className="py-8 bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

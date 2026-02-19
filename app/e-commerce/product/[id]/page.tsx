@@ -296,6 +296,15 @@ const getCategoryName = (category: Product['category'] | null | undefined): stri
   return value || undefined;
 };
 
+
+const getNewestKey = (product: SimpleProduct): number => {
+  const variantIds = Array.isArray((product as any).variants)
+    ? ((product as any).variants as any[]).map((v) => Number(v?.id) || 0)
+    : [];
+  const selfId = Number(product?.id) || 0;
+  return Math.max(selfId, ...variantIds);
+};
+
 export default function ProductDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -348,7 +357,7 @@ export default function ProductDetailPage() {
         const response = await catalogService.getSuggestedProducts(4);
 
         if (response.suggested_products && response.suggested_products.length > 0) {
-          setSuggestedProducts(response.suggested_products);
+          setSuggestedProducts([...response.suggested_products].sort((a, b) => getNewestKey(b) - getNewestKey(a)));
         } else {
           setSuggestedProducts([]);
         }
@@ -380,7 +389,7 @@ export default function ProductDetailPage() {
         const mainProduct = response.product;
 
         setProduct(mainProduct);
-        setRelatedProducts(response.related_products || []);
+        setRelatedProducts([...(response.related_products || [])].sort((a, b) => getNewestKey(b) - getNewestKey(a)));
 
         const directVariantsRaw = Array.isArray((mainProduct as any).variants)
           ? (mainProduct as any).variants

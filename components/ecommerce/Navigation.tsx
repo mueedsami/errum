@@ -170,7 +170,7 @@ const Navbar = () => {
           <div className="flex-shrink-0">
             <Link href="/e-commerce" className="flex items-center space-x-2">
               <div className="text-gray-900 font-bold text-2xl tracking-tight">
-                ER<span className="text-red-700">RUM</span>
+                ER<span className="text-neutral-900">RUM</span>
               </div>
             </Link>
           </div>
@@ -179,14 +179,14 @@ const Navbar = () => {
           <div className="hidden md:flex items-center space-x-8">
             <Link
               href="/e-commerce"
-              className="text-gray-700 hover:text-red-700 transition text-sm font-medium"
+              className="text-gray-700 hover:text-neutral-900 transition text-sm font-medium"
             >
               Home
             </Link>
 
             {/* Categories Dropdown */}
             <div className="relative group">
-              <button className="text-gray-700 hover:text-red-700 transition flex items-center text-sm font-medium">
+              <button className="text-gray-700 hover:text-neutral-900 transition flex items-center text-sm font-medium">
                 Categories
                 <ChevronDown className="ml-1 h-4 w-4" />
               </button>
@@ -199,7 +199,7 @@ const Navbar = () => {
                       <div key={category.id}>
                         <Link
                           href={`/e-commerce/${encodeURIComponent(categorySlug(category))}`}
-                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 transition"
+                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-neutral-50 hover:text-neutral-900 transition"
                         >
                           {category.name}
                           {category.product_count > 0 && (
@@ -216,7 +216,7 @@ const Navbar = () => {
                               <Link
                                 key={child.id}
                                 href={`/e-commerce/${encodeURIComponent(categorySlug(child))}`}
-                                className="block px-4 py-1.5 text-xs text-gray-600 hover:bg-red-50 hover:text-red-700 transition rounded-md"
+                                className="block px-4 py-1.5 text-xs text-gray-600 hover:bg-neutral-50 hover:text-neutral-900 transition rounded-md"
                               >
                                 {child.name}
                                 {child.product_count > 0 && (
@@ -237,21 +237,21 @@ const Navbar = () => {
 
             {/* <Link
               href="/e-commerce/products"
-              className="text-gray-700 hover:text-red-700 transition text-sm font-medium"
+              className="text-gray-700 hover:text-neutral-900 transition text-sm font-medium"
             >
               All Products
             </Link> */}
 
             <Link
               href="/e-commerce/about"
-              className="text-gray-700 hover:text-red-700 transition text-sm font-medium"
+              className="text-gray-700 hover:text-neutral-900 transition text-sm font-medium"
             >
               About
             </Link>
 
             <Link
               href="/e-commerce/contact"
-              className="text-gray-700 hover:text-red-700 transition text-sm font-medium"
+              className="text-gray-700 hover:text-neutral-900 transition text-sm font-medium"
             >
               Contact
             </Link>
@@ -261,7 +261,7 @@ const Navbar = () => {
           <div className="hidden md:flex items-center space-x-4">
             <Link
               href="/e-commerce/search"
-              className="text-gray-700 hover:text-red-700 transition"
+              className="text-gray-700 hover:text-neutral-900 transition"
               aria-label="Search"
             >
               <Search className="h-5 w-5" />
@@ -272,7 +272,7 @@ const Navbar = () => {
               <div className="relative" ref={dropdownRef}>
                 <button
                   onClick={() => setShowUserDropdown(!showUserDropdown)}
-                  className="flex items-center gap-2 text-gray-700 hover:text-red-700 transition"
+                  className="flex items-center gap-2 text-gray-700 hover:text-neutral-900 transition"
                 >
                   <User className="h-5 w-5" />
                   <span className="text-sm font-medium">
@@ -285,7 +285,7 @@ const Navbar = () => {
                   <div className="absolute right-0 mt-3 w-52 bg-white rounded-xl shadow-xl ring-1 ring-gray-100 py-2 z-50">
                     <Link
                       href="/e-commerce/my-account"
-                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 transition"
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-neutral-50 hover:text-neutral-900 transition"
                       onClick={() => setShowUserDropdown(false)}
                     >
                       <User className="h-4 w-4" />
@@ -293,7 +293,7 @@ const Navbar = () => {
                     </Link>
                     <Link
                       href="/e-commerce/orders"
-                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 transition"
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-neutral-50 hover:text-neutral-900 transition"
                       onClick={() => setShowUserDropdown(false)}
                     >
                       <Package className="h-4 w-4" />
@@ -301,7 +301,7 @@ const Navbar = () => {
                     </Link>
                     <Link
                       href="/e-commerce/wishlist"
-                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 transition"
+                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-neutral-50 hover:text-neutral-900 transition"
                       onClick={() => setShowUserDropdown(false)}
                     >
                       <Heart className="h-4 w-4" />
@@ -310,7 +310,7 @@ const Navbar = () => {
                     <hr className="my-2 border-gray-100" />
                     <button
                       onClick={handleLogout}
-                      className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-red-50 hover:text-red-700 transition text-left"
+                      className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-neutral-50 hover:text-neutral-900 transition text-left"
                     >
                       <LogOut className="h-4 w-4" />
                       Logout
@@ -321,7 +321,7 @@ const Navbar = () => {
             ) : (
               <Link
                 href="/e-commerce/login"
-                className="text-gray-700 hover:text-red-700 transition"
+                className="text-gray-700 hover:text-neutral-900 transition"
                 aria-label="Login"
               >
                 <User className="h-5 w-5" />
@@ -330,12 +330,12 @@ const Navbar = () => {
 
             <Link
               href="/e-commerce/cart"
-              className="text-gray-700 hover:text-red-700 transition relative"
+              className="text-gray-700 hover:text-neutral-900 transition relative"
               aria-label="Cart"
             >
               <ShoppingCart className="h-5 w-5" />
               {cartCount > 0 && (
-                <span className="absolute -top-2 -right-2 bg-red-700 text-white text-xs rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center">
+                <span className="absolute -top-2 -right-2 bg-neutral-900 text-white text-xs rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center">
                   {cartCount > 99 ? '99+' : cartCount}
                 </span>
               )}
@@ -346,7 +346,7 @@ const Navbar = () => {
           <div className="md:hidden">
             <button
               onClick={toggleMobileMenu}
-              className="text-gray-700 hover:text-red-700 focus:outline-none"
+              className="text-gray-700 hover:text-neutral-900 focus:outline-none"
               aria-label="Toggle menu"
             >
               {isOpen ? (
@@ -367,8 +367,8 @@ const Navbar = () => {
             {isAuthenticated ? (
               <div className="border-b border-gray-100 pb-4 mb-4">
                 <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-red-50 rounded-full flex items-center justify-center">
-                    <User className="h-5 w-5 text-red-700" />
+                  <div className="w-10 h-10 bg-neutral-50 rounded-full flex items-center justify-center">
+                    <User className="h-5 w-5 text-neutral-900" />
                   </div>
                   <div>
                     <div className="font-medium text-gray-900">
@@ -382,7 +382,7 @@ const Navbar = () => {
                 <div className="space-y-2">
                   <Link
                     href="/e-commerce/my-account"
-                    className="flex items-center gap-2 py-2 text-gray-700 hover:text-red-700"
+                    className="flex items-center gap-2 py-2 text-gray-700 hover:text-neutral-900"
                     onClick={() => setIsOpen(false)}
                   >
                     <User className="h-4 w-4" />
@@ -390,7 +390,7 @@ const Navbar = () => {
                   </Link>
                   <Link
                     href="/e-commerce/orders"
-                    className="flex items-center gap-2 py-2 text-gray-700 hover:text-red-700"
+                    className="flex items-center gap-2 py-2 text-gray-700 hover:text-neutral-900"
                     onClick={() => setIsOpen(false)}
                   >
                     <Package className="h-4 w-4" />
@@ -398,7 +398,7 @@ const Navbar = () => {
                   </Link>
                   <Link
                     href="/e-commerce/wishlist"
-                    className="flex items-center gap-2 py-2 text-gray-700 hover:text-red-700"
+                    className="flex items-center gap-2 py-2 text-gray-700 hover:text-neutral-900"
                     onClick={() => setIsOpen(false)}
                   >
                     <Heart className="h-4 w-4" />
@@ -409,7 +409,7 @@ const Navbar = () => {
                       setIsOpen(false);
                       handleLogout();
                     }}
-                    className="flex items-center gap-2 py-2 text-gray-700 hover:text-red-700 w-full text-left"
+                    className="flex items-center gap-2 py-2 text-gray-700 hover:text-neutral-900 w-full text-left"
                   >
                     <LogOut className="h-4 w-4" />
                     Logout
@@ -420,7 +420,7 @@ const Navbar = () => {
               <div className="border-b border-gray-100 pb-4 mb-4">
                 <Link
                   href="/e-commerce/login"
-                  className="flex items-center gap-2 py-2 text-gray-700 hover:text-red-700"
+                  className="flex items-center gap-2 py-2 text-gray-700 hover:text-neutral-900"
                   onClick={() => setIsOpen(false)}
                 >
                   <User className="h-5 w-5" />
@@ -431,7 +431,7 @@ const Navbar = () => {
 
             <Link
               href="/e-commerce"
-              className="block py-2 text-gray-700 hover:text-red-700 transition"
+              className="block py-2 text-gray-700 hover:text-neutral-900 transition"
               onClick={() => setIsOpen(false)}
             >
               Home
@@ -458,7 +458,7 @@ const Navbar = () => {
                     <div className="flex items-center justify-between">
                       <Link
                         href={`/e-commerce/${encodeURIComponent(categorySlug(category))}`}
-                        className="flex-1 py-2 text-gray-700 hover:text-red-700"
+                        className="flex-1 py-2 text-gray-700 hover:text-neutral-900"
                         onClick={() => setIsOpen(false)}
                       >
                         {category.name}
@@ -471,7 +471,7 @@ const Navbar = () => {
                       {category.children && category.children.length > 0 && (
                         <button
                           onClick={() => handleDropdownToggle(category.id)}
-                          className="p-2 text-gray-700 hover:text-red-700"
+                          className="p-2 text-gray-700 hover:text-neutral-900"
                         >
                           <ChevronDown
                             className={`h-4 w-4 transition-transform ${
@@ -491,7 +491,7 @@ const Navbar = () => {
                             <Link
                               key={child.id}
                               href={`/e-commerce/${encodeURIComponent(categorySlug(child))}`}
-                              className="block py-1.5 text-sm text-gray-600 hover:text-red-700"
+                              className="block py-1.5 text-sm text-gray-600 hover:text-neutral-900"
                               onClick={() => setIsOpen(false)}
                             >
                               {child.name}
@@ -511,7 +511,7 @@ const Navbar = () => {
 
             {/* <Link
               href="/e-commerce/products"
-              className="block py-2 text-gray-700 hover:text-red-700 transition"
+              className="block py-2 text-gray-700 hover:text-neutral-900 transition"
               onClick={() => setIsOpen(false)}
             >
               All Products
@@ -519,7 +519,7 @@ const Navbar = () => {
 
             <Link
               href="/e-commerce/about"
-              className="block py-2 text-gray-700 hover:text-red-700 transition"
+              className="block py-2 text-gray-700 hover:text-neutral-900 transition"
               onClick={() => setIsOpen(false)}
             >
               About
@@ -527,7 +527,7 @@ const Navbar = () => {
 
             <Link
               href="/e-commerce/contact"
-              className="block py-2 text-gray-700 hover:text-red-700 transition"
+              className="block py-2 text-gray-700 hover:text-neutral-900 transition"
               onClick={() => setIsOpen(false)}
             >
               Contact
@@ -537,7 +537,7 @@ const Navbar = () => {
             <div className="flex items-center space-x-4 pt-4 border-t border-gray-100">
               <Link
                 href="/e-commerce/search"
-                className="text-gray-700 hover:text-red-700 transition"
+                className="text-gray-700 hover:text-neutral-900 transition"
                 onClick={() => setIsOpen(false)}
                 aria-label="Search"
               >
@@ -546,13 +546,13 @@ const Navbar = () => {
 
               <Link
                 href="/e-commerce/cart"
-                className="text-gray-700 hover:text-red-700 transition relative"
+                className="text-gray-700 hover:text-neutral-900 transition relative"
                 onClick={() => setIsOpen(false)}
                 aria-label="Cart"
               >
                 <ShoppingCart className="h-5 w-5" />
                 {cartCount > 0 && (
-                  <span className="absolute -top-2 -right-2 bg-red-700 text-white text-xs rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center">
+                  <span className="absolute -top-2 -right-2 bg-neutral-900 text-white text-xs rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center">
                     {cartCount > 99 ? '99+' : cartCount}
                   </span>
                 )}

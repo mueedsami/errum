@@ -110,7 +110,7 @@ const OurCategories: React.FC<OurCategoriesProps> = ({ categories: categoriesPro
           <h2 className="text-2xl font-bold text-gray-900">Our Categories</h2>
           <button
             onClick={() => router.push('/e-commerce/categories')}
-            className="text-red-700 hover:text-red-800 font-medium text-sm"
+            className="text-neutral-900 hover:text-neutral-900 font-medium text-sm"
           >
             View All →
           </button>
@@ -147,7 +147,7 @@ const OurCategories: React.FC<OurCategoriesProps> = ({ categories: categoriesPro
                     )}
                   </div>
 
-                  <h3 className="font-medium text-sm text-gray-900 group-hover:text-red-700 transition-colors line-clamp-2 mb-1">
+                  <h3 className="font-medium text-sm text-gray-900 group-hover:text-neutral-900 transition-colors line-clamp-2 mb-1">
                     {cat.name}
                   </h3>
 

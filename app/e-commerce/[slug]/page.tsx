@@ -106,15 +106,29 @@ export default function CategoryPage() {
       };
 
       if (!activeCategory?.id) {
-        setProducts([]);
-        setTotalPages(1);
-        setCurrentPage(1);
-        setActiveCategoryName(decodeURIComponent(categorySlug || '').replace(/-/g, ' '));
+        // Category might be missing from the tree (or slug mismatch). Try a graceful fallback
+        // using the raw slug/name so the page doesn't go empty.
+        const fallbackCategory = decodeURIComponent(categorySlug || '').replace(/-/g, ' ').trim();
+        setActiveCategoryName(fallbackCategory || '');
         setError(null);
+
+        const fallbackParams: any = {
+          ...params,
+          category: categorySlug || fallbackCategory,
+        };
+        delete fallbackParams.category_id;
+
+        const fallbackResponse = await catalogService.getProducts(fallbackParams);
+        const fallbackCards = buildCardProductsFromResponse(fallbackResponse);
+        setProducts(fallbackCards);
+
+        setCurrentPage(fallbackResponse.pagination.current_page);
+        setTotalPages(fallbackResponse.pagination.last_page);
         return;
       }
 
       params.category_id = activeCategory.id;
+      params.category = activeCategory.slug || activeCategory.name;
 
       if (selectedStock === 'in_stock') {
         params.in_stock = true;
@@ -126,19 +140,19 @@ export default function CategoryPage() {
         if (!Number.isNaN(max)) params.max_price = max;
       }
 
-      const response = await catalogService.getProducts(params);
-      const cardProducts = buildCardProductsFromResponse(response);
+      let response = await catalogService.getProducts(params);
+      let cardProducts = buildCardProductsFromResponse(response);
 
-      const strictlyFiltered = cardProducts.filter((p) => {
-        const cat = (p as any).category;
-        if (!cat) return false;
-        if (typeof cat === 'string') {
-          return normalizeKey(cat) === normalizeKey(activeCategory.name);
-        }
-        return Number(cat.id) === Number(activeCategory.id);
-      });
+      // Fallback for older API versions: try slug/name based filtering if id-based filtering returns empty.
+      if (cardProducts.length === 0 && (activeCategory?.slug || activeCategory?.name)) {
+        const fallbackParams: any = { ...params };
+        delete fallbackParams.category_id;
+        fallbackParams.category = activeCategory.slug || activeCategory.name;
+        response = await catalogService.getProducts(fallbackParams);
+        cardProducts = buildCardProductsFromResponse(response);
+      }
 
-      setProducts(strictlyFiltered);
+      setProducts(cardProducts);
       setCurrentPage(response.pagination.current_page);
       setTotalPages(response.pagination.last_page);
       setActiveCategoryName(activeCategory.name);

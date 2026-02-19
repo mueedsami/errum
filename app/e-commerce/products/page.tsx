@@ -24,6 +24,15 @@ import {
 
 type ProductSort = NonNullable<GetProductsParams['sort_by']>;
 
+
+const getNewestKey = (product: SimpleProduct): number => {
+  const variantIds = Array.isArray((product as any).variants)
+    ? ((product as any).variants as any[]).map((v) => Number(v?.id) || 0)
+    : [];
+  const selfId = Number(product?.id) || 0;
+  return Math.max(selfId, ...variantIds);
+};
+
 export default function ProductsPage() {
   const router = useRouter();
 
@@ -66,6 +75,10 @@ export default function ProductsPage() {
 
       if (selectedCategory !== 'all') {
         params.category_id = Number(selectedCategory);
+        const cat = categories.find((c) => String(c.id) === String(selectedCategory));
+        if (cat) {
+          params.category = cat.slug || cat.name;
+        }
       }
 
       if (searchTerm.trim()) {
@@ -75,7 +88,10 @@ export default function ProductsPage() {
       params.sort_by = sortBy;
 
       const response = await catalogService.getProducts(params);
-      const cardProducts = buildCardProductsFromResponse(response);
+      let cardProducts = buildCardProductsFromResponse(response);
+      if (sortBy === 'newest') {
+        cardProducts = [...cardProducts].sort((a, b) => getNewestKey(b) - getNewestKey(a));
+      }
 
       setProducts(cardProducts);
       setPagination(response.pagination);

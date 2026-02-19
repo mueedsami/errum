@@ -155,6 +155,12 @@ export interface CartResponse {
 
 export interface GetProductsParams {
   category_id?: number;
+  category?: string;
+  category_slug?: string;
+  sort_order?: 'asc' | 'desc';
+  sort?: string;
+  order?: 'asc' | 'desc';
+  direction?: 'asc' | 'desc';
   search?: string;
   min_price?: number;
   max_price?: number;
@@ -696,7 +702,41 @@ const linkCategoryParents = (nodes: CatalogCategory[], parent: CatalogCategory |
 const catalogService = {
   async getProducts(params?: GetProductsParams): Promise<CatalogProductsResponse> {
     try {
-      const response = await api.get('/catalog/products', { params });
+      const requestParams: Record<string, any> = { ...(params || {}) };
+
+      // Backwards/forwards compatible category filters:
+      // Some backends expect `category` (slug/name) while others use `category_id`.
+      if (!requestParams.category && !requestParams.category_slug && requestParams.category_id) {
+        // Keep category_id, but allow servers that also accept `category_id` + `category` to work.
+        // (CategoryPage sets these explicitly.)
+      }
+
+      // Backwards/forwards compatible sort mapping:
+      // Different API versions have used different parameter names.
+      const sortBy = requestParams.sort_by;
+      if (sortBy === 'newest') {
+        requestParams.sort_order = requestParams.sort_order || 'desc';
+        requestParams.sort = requestParams.sort || 'created_at';
+        requestParams.order = requestParams.order || 'desc';
+        requestParams.direction = requestParams.direction || 'desc';
+      } else if (sortBy === 'price_asc') {
+        requestParams.sort = requestParams.sort || 'selling_price';
+        requestParams.order = requestParams.order || 'asc';
+        requestParams.sort_order = requestParams.sort_order || 'asc';
+        requestParams.direction = requestParams.direction || 'asc';
+      } else if (sortBy === 'price_desc') {
+        requestParams.sort = requestParams.sort || 'selling_price';
+        requestParams.order = requestParams.order || 'desc';
+        requestParams.sort_order = requestParams.sort_order || 'desc';
+        requestParams.direction = requestParams.direction || 'desc';
+      } else if (sortBy === 'name') {
+        requestParams.sort = requestParams.sort || 'name';
+        requestParams.order = requestParams.order || 'asc';
+        requestParams.sort_order = requestParams.sort_order || 'asc';
+        requestParams.direction = requestParams.direction || 'asc';
+      }
+
+      const response = await api.get('/catalog/products', { params: requestParams });
       const payload = response?.data?.data ?? response?.data ?? {};
       const parsed = parseProductsPayload(payload);
       return parsed;

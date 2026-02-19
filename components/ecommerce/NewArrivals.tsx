@@ -18,6 +18,15 @@ interface NewArrivalsProps {
   limit?: number;
 }
 
+
+const getNewestKey = (product: SimpleProduct): number => {
+  const variantIds = Array.isArray((product as any).variants)
+    ? ((product as any).variants as any[]).map((v) => Number(v?.id) || 0)
+    : [];
+  const selfId = Number(product?.id) || 0;
+  return Math.max(selfId, ...variantIds);
+};
+
 const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8 }) => {
   const router = useRouter();
   const [products, setProducts] = useState<SimpleProduct[]>([]);
@@ -35,13 +44,14 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8 }) => {
     try {
       const response = await catalogService.getProducts({
         page: 1,
-        per_page: Math.max(limit * 2, 16), // fetch extra to ensure deduped cards can still fill limit
+        per_page: Math.max(limit * 5, 40), // fetch extra to ensure deduped cards can still fill limit
         category_id: categoryId,
         sort_by: 'newest',
       });
 
-      const cardProducts = buildCardProductsFromResponse(response).slice(0, limit);
-      setProducts(cardProducts);
+      const rawCards = buildCardProductsFromResponse(response);
+      const sortedCards = [...rawCards].sort((a, b) => getNewestKey(b) - getNewestKey(a));
+      setProducts(sortedCards.slice(0, limit));
     } catch (error) {
       console.error('Error fetching new arrivals:', error);
       setProducts([]);
@@ -112,7 +122,7 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8 }) => {
           <h2 className="text-2xl font-bold text-gray-900">New Arrivals</h2>
           <button
             onClick={() => router.push('/e-commerce/products')}
-            className="text-red-700 hover:text-red-800 font-medium text-sm"
+            className="text-neutral-900 hover:text-neutral-700 font-medium text-sm"
           >
             View All →
           </button>

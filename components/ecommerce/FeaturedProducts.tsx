@@ -18,6 +18,14 @@ interface FeaturedProductsProps {
   limit?: number;
 }
 
+const getNewestKey = (product: SimpleProduct): number => {
+  const variantIds = Array.isArray((product as any).variants)
+    ? ((product as any).variants as any[]).map((v) => Number(v?.id) || 0)
+    : [];
+  const selfId = Number(product?.id) || 0;
+  return Math.max(selfId, ...variantIds);
+};
+
 const pickMainVariant = (variants: SimpleProduct[]): SimpleProduct => {
   const sorted = [...variants].sort((a, b) => {
     const aStock = Number(a.stock_quantity || 0) > 0 ? 1 : 0;
@@ -78,7 +86,8 @@ const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ categoryId, limit =
   const fetchFeaturedProducts = async () => {
     setIsLoading(true);
     try {
-      const featuredRaw = await catalogService.getFeaturedProducts(Math.max(limit * 3, 18));
+      const featuredRawUnsorted = await catalogService.getFeaturedProducts(Math.max(limit * 5, 30));
+      const featuredRaw = [...featuredRawUnsorted].sort((a, b) => Number(b?.id || 0) - Number(a?.id || 0));
 
       const filteredByCategory = categoryId
         ? featuredRaw.filter((p) => {
@@ -88,8 +97,9 @@ const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ categoryId, limit =
           })
         : featuredRaw;
 
-      const groupedCards = groupFeaturedVariants(filteredByCategory).slice(0, limit);
-      setProducts(groupedCards);
+      const groupedCardsRaw = groupFeaturedVariants(filteredByCategory);
+      const groupedCards = [...groupedCardsRaw].sort((a, b) => getNewestKey(b) - getNewestKey(a));
+      setProducts(groupedCards.slice(0, limit));
     } catch (error) {
       console.error('Error fetching featured products:', error);
       setProducts([]);
@@ -160,7 +170,7 @@ const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ categoryId, limit =
           <h2 className="text-2xl font-bold text-gray-900">Featured Products</h2>
           <button
             onClick={() => router.push('/e-commerce/products')}
-            className="text-red-700 hover:text-red-800 font-medium text-sm"
+            className="text-neutral-900 hover:text-neutral-700 font-medium text-sm"
           >
             View All →
           </button>

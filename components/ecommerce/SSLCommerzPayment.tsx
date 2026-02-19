@@ -96,7 +96,7 @@ export default function SSLCommerzPayment({
       case 'initializing':
         return (
           <div className="text-center py-6">
-            <Loader2 className="animate-spin h-12 w-12 text-red-700 mx-auto mb-4" />
+            <Loader2 className="animate-spin h-12 w-12 text-neutral-900 mx-auto mb-4" />
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Preparing Payment Gateway</h3>
             <p className="text-gray-600">Creating your order and connecting to SSLCommerz...</p>
           </div>
@@ -106,8 +106,8 @@ export default function SSLCommerzPayment({
         return (
           <div className="text-center py-6">
             <div className="relative">
-              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-red-700 mx-auto mb-4"></div>
-              <CreditCard className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-red-700" size={24} />
+              <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-neutral-900 mx-auto mb-4"></div>
+              <CreditCard className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-neutral-900" size={24} />
             </div>
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Redirecting to Payment Gateway</h3>
             <p className="text-gray-600">You will be redirected to SSLCommerz shortly...</p>
@@ -137,8 +137,8 @@ export default function SSLCommerzPayment({
     <div className="bg-white rounded-lg shadow-md p-6">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6 pb-6 border-b">
-        <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center">
-          <CreditCard className="text-red-700" size={24} />
+        <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center">
+          <CreditCard className="text-neutral-900" size={24} />
         </div>
         <div>
           <h3 className="text-lg font-bold text-gray-900">SSLCommerz Payment Gateway</h3>
@@ -148,15 +148,15 @@ export default function SSLCommerzPayment({
 
       {/* Error Display */}
       {error && (
-        <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-          <AlertCircle className="text-red-600 flex-shrink-0 mt-0.5" size={20} />
+        <div className="mb-6 bg-rose-50 border border-rose-200 rounded-lg p-4 flex items-start gap-3">
+          <AlertCircle className="text-rose-600 flex-shrink-0 mt-0.5" size={20} />
           <div className="flex-1">
-            <h4 className="font-semibold text-red-900 mb-1">Payment Error</h4>
-            <p className="text-red-700 text-sm">{error}</p>
+            <h4 className="font-semibold text-rose-900 mb-1">Payment Error</h4>
+            <p className="text-neutral-900 text-sm">{error}</p>
           </div>
           <button
             onClick={() => setError(null)}
-            className="text-red-600 hover:text-red-800 cursor-pointer"
+            className="text-rose-600 hover:text-neutral-900 cursor-pointer"
             type="button"
           >
             ✕
@@ -169,7 +169,7 @@ export default function SSLCommerzPayment({
         <div className="bg-gray-50 rounded-lg p-4">
           <div className="flex justify-between items-center mb-3">
             <span className="text-gray-700 font-medium">Total Amount</span>
-            <span className="text-2xl font-bold text-red-700">
+            <span className="text-2xl font-bold text-neutral-900">
               ৳{totalAmount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}
             </span>
           </div>
@@ -250,7 +250,7 @@ export default function SSLCommerzPayment({
           type="button"
           onClick={handlePayment}
           disabled={isProcessing}
-          className="w-full bg-red-700 text-white py-3 rounded-lg font-semibold hover:bg-red-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full bg-neutral-900 text-white py-3 rounded-lg font-semibold hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
         >
           {isProcessing ? (
             <>
@@ -281,11 +281,11 @@ export default function SSLCommerzPayment({
       {/* Terms */}
       <p className="text-xs text-gray-500 text-center mt-4">
         By proceeding, you agree to our{' '}
-        <a href="/terms" className="text-red-700 hover:underline cursor-pointer">
+        <a href="/terms" className="text-neutral-900 hover:underline cursor-pointer">
           Terms & Conditions
         </a>{' '}
         and{' '}
-        <a href="/privacy" className="text-red-700 hover:underline cursor-pointer">
+        <a href="/privacy" className="text-neutral-900 hover:underline cursor-pointer">
           Privacy Policy
         </a>
       </p>

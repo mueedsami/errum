@@ -4,7 +4,6 @@ import { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Navigation from '@/components/ecommerce/Navigation';
-import Footer from '@/components/ecommerce/Footer';
 import CartSidebar from '@/components/ecommerce/cart/CartSidebar';
 import CategorySidebar from '@/components/ecommerce/category/CategorySidebar';
 import { useCart } from '@/app/e-commerce/CartContext';
@@ -243,9 +242,7 @@ export default function CategoryPage() {
               </div>
             </div>
           </div>
-        </div>
-        <Footer />
-      </>
+        </div></>
     );
   }
 
@@ -281,7 +278,7 @@ export default function CategoryPage() {
                 <select
                   value={selectedSort}
                   onChange={(e) => setSelectedSort(e.target.value)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-200"
                 >
                   <option value="newest">Newest First</option>
                   <option value="price_asc">Price: Low to High</option>
@@ -292,10 +289,10 @@ export default function CategoryPage() {
 
               {error ? (
                 <div className="text-center py-12">
-                  <p className="text-red-600 mb-4">{error}</p>
+                  <p className="text-rose-600 mb-4">{error}</p>
                   <button
                     onClick={() => fetchProducts(currentPage)}
-                    className="px-6 py-2 bg-red-700 text-white rounded-lg hover:bg-red-800"
+                    className="px-6 py-2 bg-neutral-900 text-white rounded-lg hover:bg-neutral-800"
                   >
                     Try Again
                   </button>
@@ -341,7 +338,7 @@ export default function CategoryPage() {
                                   ? 'bg-green-100 text-green-700'
                                   : hasStock
                                   ? 'bg-amber-100 text-amber-700'
-                                  : 'bg-red-100 text-red-700'
+                                  : 'bg-rose-50 text-neutral-900'
                               }`}
                             >
                               {stockLabel}
@@ -350,19 +347,19 @@ export default function CategoryPage() {
 
                           <div className="p-4">
                             <h3
-                              className="font-semibold text-gray-900 mb-2 line-clamp-2 cursor-pointer hover:text-red-700"
+                              className="font-semibold text-gray-900 mb-2 line-clamp-2 cursor-pointer hover:text-neutral-900"
                               onClick={() => handleProductClick(product.id)}
                             >
                               {(product as any).display_name || (product as any).base_name || product.name}
                             </h3>
 
                             <div className="mb-3">
-                              <span className="text-lg font-bold text-red-700">{getCardPriceText(product)}</span>
+                              <span className="text-lg font-bold text-neutral-900">{getCardPriceText(product)}</span>
                             </div>
 
                             <button
                               onClick={() => handleAddToCart(product)}
-                              className="w-full bg-red-700 text-white py-2 px-4 rounded-lg hover:bg-red-800 transition-colors"
+                              className="w-full bg-neutral-900 text-white py-2 px-4 rounded-lg hover:bg-neutral-800 transition-colors"
                             >
                               {(product as any).has_variants ? 'Select Variation' : 'Add to Cart'}
                             </button>
@@ -389,7 +386,7 @@ export default function CategoryPage() {
                             key={pageNum}
                             onClick={() => handlePageChange(pageNum)}
                             className={`px-4 py-2 rounded-lg ${
-                              currentPage === pageNum ? 'bg-red-700 text-white' : 'border border-gray-300 hover:bg-gray-50'
+                              currentPage === pageNum ? 'bg-neutral-900 text-white' : 'border border-gray-300 hover:bg-gray-50'
                             }`}
                           >
                             {pageNum}
@@ -411,10 +408,7 @@ export default function CategoryPage() {
             </main>
           </div>
         </div>
-      </div>
-
-      <Footer />
-      <CartSidebar isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} />
+      </div><CartSidebar isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} />
     </>
   );
 }

@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { ChevronDown, Filter, ShoppingBag } from 'lucide-react';
 
 import Navigation from '@/components/ecommerce/Navigation';
-import Footer from '@/components/ecommerce/Footer';
 import CartSidebar from '@/components/ecommerce/cart/CartSidebar';
 import { useCart } from '@/app/e-commerce/CartContext';
 import catalogService, {
@@ -123,7 +122,7 @@ export default function ProductsPage() {
 
   return (
     <>
-      <div className="min-h-screen bg-white">
+      <div className="min-h-screen bg-transparent">
         <Navigation />
 
         <div className="max-w-7xl mx-auto px-4 py-8">
@@ -140,7 +139,7 @@ export default function ProductsPage() {
                   placeholder="Search products..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-200"
                 />
               </div>
 
@@ -149,7 +148,7 @@ export default function ProductsPage() {
                 <select
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full pl-10 pr-8 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 appearance-none bg-white"
+                  className="w-full pl-10 pr-8 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-200 appearance-none bg-white"
                 >
                   <option value="all">All Categories</option>
                   {categories.map((category) => (
@@ -165,7 +164,7 @@ export default function ProductsPage() {
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as ProductSort)}
-                  className="w-full pl-4 pr-8 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-500 appearance-none bg-white"
+                  className="w-full pl-4 pr-8 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-200 appearance-none bg-white"
                 >
                   <option value="newest">Newest</option>
                   <option value="name">Name</option>
@@ -179,7 +178,7 @@ export default function ProductsPage() {
 
           {isLoading ? (
             <div className="text-center py-12">
-              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-red-700" />
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-neutral-900" />
               <p className="mt-4 text-gray-600">Loading products...</p>
             </div>
           ) : products.length === 0 ? (
@@ -221,7 +220,7 @@ export default function ProductsPage() {
                             ? 'bg-green-100 text-green-700'
                             : hasStock
                               ? 'bg-amber-100 text-amber-700'
-                              : 'bg-red-100 text-red-700'
+                              : 'bg-rose-50 text-neutral-900'
                         }`}
                       >
                         {stockLabel}
@@ -231,16 +230,16 @@ export default function ProductsPage() {
                     <div className="p-4 text-center">
                       <h3
                         onClick={() => navigateToProduct(product.id)}
-                        className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 group-hover:text-red-600 transition-colors cursor-pointer"
+                        className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 group-hover:text-rose-600 transition-colors cursor-pointer"
                       >
                         {product.display_name || product.base_name || product.name}
                       </h3>
 
-                      <span className="text-lg font-bold text-red-700">{getCardPriceText(product)}</span>
+                      <span className="text-lg font-bold text-neutral-900">{getCardPriceText(product)}</span>
 
                       <button
                         onClick={() => handleAddToCart(product)}
-                        className="mt-3 w-full bg-red-600 text-white py-2 rounded-md text-sm font-medium hover:bg-red-700 transition-colors"
+                        className="mt-3 w-full bg-rose-600 text-white py-2 rounded-md text-sm font-medium hover:bg-neutral-900 transition-colors"
                       >
                         {product.has_variants ? 'Select Variation' : 'Add to Cart'}
                       </button>
@@ -256,10 +255,7 @@ export default function ProductsPage() {
               Page {pagination.current_page} of {pagination.last_page}
             </div>
           )}
-        </div>
-
-        <Footer />
-      </div>
+        </div></div>
 
       <CartSidebar isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} />
     </>

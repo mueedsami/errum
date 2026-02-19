@@ -59,14 +59,14 @@ export default function ProductCard({ product, onCartOpen }: ProductCardProps) {
 
   return (
     <div
-      className="group rounded-2xl bg-white border border-gray-100 overflow-hidden transition-all duration-300 hover:shadow-xl hover:shadow-black/5"
+      className="group rounded-2xl bg-white border border-neutral-200 overflow-hidden transition-all duration-300 hover:shadow-xl hover:shadow-black/5"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
       {/* Image area */}
       <div
         onClick={() => navigateToProduct(product.variations[0].id)}
-        className="relative aspect-square overflow-hidden bg-gray-50 cursor-pointer"
+        className="relative aspect-square overflow-hidden bg-neutral-50 cursor-pointer"
       >
         <img
           src={product.image}
@@ -84,7 +84,7 @@ export default function ProductCard({ product, onCartOpen }: ProductCardProps) {
               e.stopPropagation();
               // placeholder for wishlist interaction if you add later
             }}
-            className="h-9 w-9 rounded-full bg-white/95 backdrop-blur border border-gray-100 shadow-sm flex items-center justify-center text-gray-700 hover:text-red-700 transition"
+            className="h-9 w-9 rounded-full bg-white/95 backdrop-blur border border-neutral-200 shadow-sm flex items-center justify-center text-neutral-700 hover:text-neutral-900 transition"
             aria-label="Wishlist"
           >
             <Heart className="h-4 w-4" />
@@ -95,7 +95,7 @@ export default function ProductCard({ product, onCartOpen }: ProductCardProps) {
               e.stopPropagation();
               navigateToProduct(product.variations[0].id);
             }}
-            className="h-9 w-9 rounded-full bg-white/95 backdrop-blur border border-gray-100 shadow-sm flex items-center justify-center text-gray-700 hover:text-gray-900 transition"
+            className="h-9 w-9 rounded-full bg-white/95 backdrop-blur border border-neutral-200 shadow-sm flex items-center justify-center text-neutral-700 hover:text-neutral-900 transition"
             aria-label="Quick view"
           >
             <Eye className="h-4 w-4" />
@@ -104,7 +104,7 @@ export default function ProductCard({ product, onCartOpen }: ProductCardProps) {
 
         {/* Bottom add-to-cart bar (premium minimal) */}
         <div
-          className={`absolute inset-x-3 bottom-3 rounded-xl border border-gray-100 bg-white/95 backdrop-blur px-3 py-2 shadow-sm transition-all duration-300 ${
+          className={`absolute inset-x-3 bottom-3 rounded-xl border border-neutral-200 bg-white/95 backdrop-blur px-3 py-2 shadow-sm transition-all duration-300 ${
             isHovered ? "translate-y-0 opacity-100" : "translate-y-2 opacity-0"
           }`}
         >
@@ -123,13 +123,13 @@ export default function ProductCard({ product, onCartOpen }: ProductCardProps) {
       <div className="p-4">
         <h3
           onClick={() => navigateToProduct(product.variations[0].id)}
-          className="text-sm sm:text-[15px] font-semibold text-gray-900 line-clamp-2 cursor-pointer hover:text-red-700 transition"
+          className="text-sm sm:text-[15px] font-semibold text-neutral-900 line-clamp-2 cursor-pointer hover:text-neutral-900 transition"
         >
           {product.baseName}
         </h3>
 
         <div className="mt-2 flex items-center justify-between">
-          <span className="text-base font-bold text-red-700">{priceText}</span>
+          <span className="text-base font-bold text-amber-600">{priceText}</span>
 
         </div>
       </div>

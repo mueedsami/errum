@@ -17,8 +17,10 @@ export default function EcommerceLayout({
         <Suspense fallback={null}>
           <ScrollToTopOnRouteChange />
         </Suspense>
+        <div className="ec-root min-h-screen">
         {children}
         <Footer />
+        </div>
       </CartProvider>
     </CustomerAuthProvider>
   );

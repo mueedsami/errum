@@ -216,7 +216,7 @@ export default function CartItem({ item, onQuantityChange, onRemove, isUpdating:
             <p className="text-xs text-gray-500 mb-1">
               ৳{price.toLocaleString('en-BD', { minimumFractionDigits: 2 })} each
             </p>
-            <p className="text-sm font-bold text-red-700">
+            <p className="text-sm font-bold text-neutral-900">
               ৳{itemTotal.toLocaleString('en-BD', { minimumFractionDigits: 2 })}
             </p>
           </div>

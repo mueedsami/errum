@@ -756,12 +756,12 @@ export default function ProductDetailPage() {
   // ---------------------------
   if (loading) {
     return (
-      <div className="min-h-screen bg-white">
+      <div className="min-h-screen bg-transparent">
         <Navigation />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto"></div>
-            <p className="mt-4 text-gray-600 text-sm">Loading product...</p>
+            <p className="mt-4 text-neutral-600 text-sm">Loading product...</p>
           </div>
         </div>
       </div>
@@ -770,14 +770,14 @@ export default function ProductDetailPage() {
 
   if (error || !product || !selectedVariant) {
     return (
-      <div className="min-h-screen bg-white">
+      <div className="min-h-screen bg-transparent">
         <Navigation />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-gray-900 mb-3">
+            <h1 className="text-2xl font-bold text-neutral-900 mb-3">
               Product Not Found
             </h1>
-            <p className="text-gray-600 mb-6 text-sm">{error}</p>
+            <p className="text-neutral-600 mb-6 text-sm">{error}</p>
             <button
               onClick={() => router.back()}
               className="inline-flex items-center justify-center rounded-xl bg-gray-900 px-5 py-3 text-xs font-semibold text-white hover:bg-black transition"
@@ -823,7 +823,7 @@ export default function ProductDetailPage() {
   // Premium UI
   // ---------------------------
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-transparent">
       <Navigation />
 
       <CartSidebar
@@ -834,22 +834,22 @@ export default function ProductDetailPage() {
       {/* Premium breadcrumb bar */}
       <div className="border-b border-gray-100 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center gap-2 text-[11px] sm:text-xs text-gray-500">
+          <div className="flex items-center gap-2 text-[11px] sm:text-xs text-neutral-500">
             <button
               onClick={() => router.push('/e-commerce')}
-              className="hover:text-gray-900 transition"
+              className="hover:text-neutral-900 transition"
             >
               Home
             </button>
             <span className="text-gray-300">/</span>
             <button
               onClick={() => router.back()}
-              className="hover:text-gray-900 transition"
+              className="hover:text-neutral-900 transition"
             >
               {getCategoryName(product.category) || 'Products'}
             </button>
             <span className="text-gray-300">/</span>
-            <span className="text-gray-900 font-medium">{baseName}</span>
+            <span className="text-neutral-900 font-medium">{baseName}</span>
           </div>
         </div>
       </div>
@@ -858,7 +858,7 @@ export default function ProductDetailPage() {
       <div className="relative">
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute -top-24 -left-24 h-72 w-72 rounded-full bg-rose-100/50 blur-3xl" />
-          <div className="absolute top-24 -right-24 h-96 w-96 rounded-full bg-red-100/40 blur-3xl" />
+          <div className="absolute top-24 -right-24 h-96 w-96 rounded-full bg-rose-50/40 blur-3xl" />
           <div className="absolute inset-0 bg-gradient-to-b from-white via-white to-white" />
         </div>
 
@@ -895,7 +895,7 @@ export default function ProductDetailPage() {
                 )}
 
                 {!selectedVariant.in_stock && (
-                  <div className="absolute top-4 left-4 rounded-xl bg-red-600 text-white px-3 py-1.5 text-[10px] sm:text-xs font-bold tracking-wide">
+                  <div className="absolute top-4 left-4 rounded-xl bg-rose-600 text-white px-3 py-1.5 text-[10px] sm:text-xs font-bold tracking-wide">
                     OUT OF STOCK
                   </div>
                 )}
@@ -916,7 +916,7 @@ export default function ProductDetailPage() {
                       className={`aspect-square rounded-2xl overflow-hidden border bg-white transition-all ${
                         selectedImageIndex === index
                           ? 'border-gray-900 ring-1 ring-gray-900'
-                          : 'border-gray-100 hover:border-gray-200 hover:bg-gray-50'
+                          : 'border-gray-100 hover:border-neutral-200 hover:bg-neutral-50'
                       }`}
                     >
                       <img
@@ -935,26 +935,26 @@ export default function ProductDetailPage() {
               <div className="rounded-3xl border border-gray-100 bg-white shadow-sm p-6 sm:p-8">
                 {/* Title */}
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-gray-400">
+                  <p className="text-[10px] uppercase tracking-widest text-neutral-400">
                     Errum Collection
                   </p>
-                  <h1 className="mt-2 text-2xl sm:text-3xl font-bold text-gray-900">
+                  <h1 className="mt-2 text-2xl sm:text-3xl font-bold text-neutral-900">
                     {baseName}
                   </h1>
                 </div>
 
                 {/* Price */}
                 <div className="mt-5 flex flex-wrap items-center gap-3">
-                  <span className="text-2xl sm:text-3xl font-bold text-gray-900">
+                  <span className="text-2xl sm:text-3xl font-bold text-amber-600">
                     {formatBDT(sellingPrice)}
                   </span>
 
                   {costPrice > sellingPrice && sellingPrice > 0 && (
                     <>
-                      <span className="text-sm sm:text-base text-gray-400 line-through">
+                      <span className="text-sm sm:text-base text-neutral-400 line-through">
                         {formatBDT(costPrice)}
                       </span>
-                      <span className="text-[10px] sm:text-xs font-semibold text-red-700 bg-red-50 border border-red-100 px-2.5 py-1 rounded-full">
+                      <span className="text-[10px] sm:text-xs font-semibold text-neutral-900 bg-neutral-50 border border-rose-200 px-2.5 py-1 rounded-full">
                         Save {discountPercent}%
                       </span>
                     </>
@@ -971,9 +971,9 @@ export default function ProductDetailPage() {
                       </span>
                     </div>
                   ) : (
-                    <div className="inline-flex items-center gap-2 rounded-full bg-red-50 border border-red-100 px-3 py-1">
-                      <span className="h-1.5 w-1.5 rounded-full bg-red-600" />
-                      <span className="text-[10px] sm:text-xs font-medium text-red-700">
+                    <div className="inline-flex items-center gap-2 rounded-full bg-neutral-50 border border-rose-200 px-3 py-1">
+                      <span className="h-1.5 w-1.5 rounded-full bg-rose-600" />
+                      <span className="text-[10px] sm:text-xs font-medium text-neutral-900">
                         Out of stock
                       </span>
                     </div>
@@ -982,7 +982,7 @@ export default function ProductDetailPage() {
 
                 {/* SKU */}
                 {selectedVariant.sku && (
-                  <div className="mt-4 text-[11px] text-gray-500">
+                  <div className="mt-4 text-[11px] text-neutral-500">
                     SKU: <span className="font-semibold text-gray-800">{selectedVariant.sku}</span>
                   </div>
                 )}
@@ -990,10 +990,10 @@ export default function ProductDetailPage() {
                 {/* Description */}
                 {(product.short_description || product.description) && (
                   <div className="mt-6 border-t border-gray-100 pt-5">
-                    <h3 className="text-xs font-semibold text-gray-900 tracking-wide uppercase">
+                    <h3 className="text-xs font-semibold text-neutral-900 tracking-wide uppercase">
                       Description
                     </h3>
-                    <p className="mt-2 text-sm text-gray-600 leading-relaxed">
+                    <p className="mt-2 text-sm text-neutral-600 leading-relaxed">
                       {product.short_description || product.description}
                     </p>
                   </div>
@@ -1002,10 +1002,10 @@ export default function ProductDetailPage() {
                 {/* Unified Variation Options */}
                 {hasMultipleVariants && (
                   <div className="mt-6">
-                    <label className="block text-xs font-semibold text-gray-900 mb-3 tracking-wide uppercase">
+                    <label className="block text-xs font-semibold text-neutral-900 mb-3 tracking-wide uppercase">
                       Variations ({productVariants.length})
                       {selectedVariationLabel && (
-                        <span className="ml-2 font-normal text-gray-500 normal-case tracking-normal">
+                        <span className="ml-2 font-normal text-neutral-500 normal-case tracking-normal">
                           (Selected: {selectedVariationLabel})
                         </span>
                       )}
@@ -1025,8 +1025,8 @@ export default function ProductDetailPage() {
                               isSelected
                                 ? 'border-gray-900 bg-gray-900 text-white'
                                 : isAvailable
-                                ? 'border-gray-200 bg-white text-gray-800 hover:border-gray-300 hover:bg-gray-50'
-                                : 'border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed line-through'
+                                ? 'border-neutral-200 bg-white text-gray-800 hover:border-neutral-300 hover:bg-neutral-50'
+                                : 'border-gray-100 bg-neutral-50 text-neutral-400 cursor-not-allowed line-through'
                             }`}
                             title={variant.sku || label}
                           >
@@ -1041,14 +1041,14 @@ export default function ProductDetailPage() {
                 {/* Quantity + Actions */}
                 <div className="mt-7">
                   <div className="flex items-center justify-between gap-4">
-                    <label className="text-xs font-semibold text-gray-900 tracking-wide uppercase">
+                    <label className="text-xs font-semibold text-neutral-900 tracking-wide uppercase">
                       Quantity
                     </label>
-                    <div className="flex items-center rounded-xl border border-gray-200 bg-white">
+                    <div className="flex items-center rounded-xl border border-neutral-200 bg-white">
                       <button
                         onClick={() => handleQuantityChange(-1)}
                         disabled={quantity <= 1}
-                        className="p-2.5 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                        className="p-2.5 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
                         aria-label="Decrease quantity"
                       >
                         <Minus size={16} />
@@ -1059,7 +1059,7 @@ export default function ProductDetailPage() {
                       <button
                         onClick={() => handleQuantityChange(1)}
                         disabled={quantity >= stockQty}
-                        className="p-2.5 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                        className="p-2.5 hover:bg-neutral-50 disabled:opacity-50 disabled:cursor-not-allowed transition"
                         aria-label="Increase quantity"
                       >
                         <Plus size={16} />
@@ -1076,7 +1076,7 @@ export default function ProductDetailPage() {
                         flex items-center justify-center gap-2 transition-all
                         ${isAdding
                           ? 'bg-emerald-600 text-white'
-                          : 'bg-gray-900 text-white hover:bg-black disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed'
+                          : 'bg-gray-900 text-white hover:bg-black disabled:bg-gray-200 disabled:text-neutral-400 disabled:cursor-not-allowed'
                         }
                       `}
                     >
@@ -1088,8 +1088,8 @@ export default function ProductDetailPage() {
                       onClick={handleToggleWishlist}
                       className={`rounded-xl border px-3.5 py-3.5 transition-all ${
                         isInWishlist
-                          ? 'border-red-200 bg-red-50 text-red-700'
-                          : 'border-gray-200 bg-white text-gray-700 hover:border-red-200 hover:bg-red-50 hover:text-red-700'
+                          ? 'border-rose-200 bg-neutral-50 text-neutral-900'
+                          : 'border-neutral-200 bg-white text-neutral-700 hover:border-rose-200 hover:bg-neutral-50 hover:text-neutral-900'
                       }`}
                       aria-label="Wishlist"
                     >
@@ -1098,7 +1098,7 @@ export default function ProductDetailPage() {
 
                     <button
                       onClick={handleShare}
-                      className="rounded-xl border border-gray-200 bg-white px-3.5 py-3.5 text-gray-700 hover:bg-gray-50 transition"
+                      className="rounded-xl border border-neutral-200 bg-white px-3.5 py-3.5 text-neutral-700 hover:bg-neutral-50 transition"
                       aria-label="Share"
                     >
                       <Share2 size={18} />
@@ -1110,16 +1110,16 @@ export default function ProductDetailPage() {
                 <div className="mt-6 border-t border-gray-100 pt-5 space-y-2 text-[11px] sm:text-xs">
                   {product.category && (
                     <div className="flex justify-between">
-                      <span className="text-gray-500">Category</span>
+                      <span className="text-neutral-500">Category</span>
                       <span className="font-semibold text-gray-800">
                         {getCategoryName(product.category) || 'N/A'}
                       </span>
                     </div>
                   )}
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Availability</span>
+                    <span className="text-neutral-500">Availability</span>
                     <span className={`font-semibold ${
-                      selectedVariant.in_stock && stockQty > 0 ? 'text-emerald-700' : 'text-red-700'
+                      selectedVariant.in_stock && stockQty > 0 ? 'text-emerald-700' : 'text-neutral-900'
                     }`}>
                       {selectedVariant.in_stock && stockQty > 0
                         ? `In Stock (${stockQty})`
@@ -1131,7 +1131,7 @@ export default function ProductDetailPage() {
               </div>
 
               {/* Subtle trust strip */}
-              <div className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5 text-xs text-gray-600">
+              <div className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5 text-xs text-neutral-600">
                 <div className="flex flex-wrap gap-x-6 gap-y-2">
                   <span>Premium selection</span>
                   <span>Authentic sourcing</span>
@@ -1146,10 +1146,10 @@ export default function ProductDetailPage() {
           <div className="mt-14 md:mt-20">
             <div className="flex items-end justify-between gap-4 mb-6">
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-gray-400">
+                <p className="text-[10px] uppercase tracking-widest text-neutral-400">
                   Curated for you
                 </p>
-                <h2 className="text-xl sm:text-2xl font-bold text-gray-900">
+                <h2 className="text-xl sm:text-2xl font-bold text-neutral-900">
                   You may also like
                 </h2>
               </div>
@@ -1163,7 +1163,7 @@ export default function ProductDetailPage() {
 
             {!loadingSuggestions && suggestedProducts.length === 0 && (
               <div className="bg-white rounded-2xl border border-gray-100 p-10 text-center">
-                <p className="text-gray-500 text-sm">
+                <p className="text-neutral-500 text-sm">
                   No suggested products available at the moment.
                 </p>
               </div>
@@ -1182,7 +1182,7 @@ export default function ProductDetailPage() {
                       className="group bg-white rounded-2xl border border-gray-100 overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
                       onClick={() => router.push(`/e-commerce/product/${item.id}`)}
                     >
-                      <div className="relative aspect-square bg-gray-50">
+                      <div className="relative aspect-square bg-neutral-50">
                         <img
                           src={itemImage}
                           alt={item.name}
@@ -1190,7 +1190,7 @@ export default function ProductDetailPage() {
                         />
 
                         {!item.in_stock && (
-                          <div className="absolute top-3 left-3 bg-red-600 text-white px-2.5 py-1 rounded-full text-[10px] font-bold">
+                          <div className="absolute top-3 left-3 bg-rose-600 text-white px-2.5 py-1 rounded-full text-[10px] font-bold">
                             OUT OF STOCK
                           </div>
                         )}
@@ -1200,8 +1200,8 @@ export default function ProductDetailPage() {
                             onClick={(e) => handleToggleSuggestedWishlist(item, e)}
                             className={`p-2 rounded-full shadow-sm border transition ${
                               isItemInWishlist
-                                ? 'bg-red-600 text-white border-red-600'
-                                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                                ? 'bg-rose-600 text-white border-rose-600'
+                                : 'bg-white text-neutral-700 border-neutral-200 hover:bg-neutral-50'
                             }`}
                             title={isItemInWishlist ? 'Remove from wishlist' : 'Add to wishlist'}
                           >
@@ -1213,12 +1213,12 @@ export default function ProductDetailPage() {
                       </div>
 
                       <div className="p-4">
-                        <h3 className="text-sm font-semibold text-gray-900 line-clamp-2 min-h-[2.5rem]">
+                        <h3 className="text-sm font-semibold text-neutral-900 line-clamp-2 min-h-[2.5rem]">
                           {item.name}
                         </h3>
 
                         <div className="mt-3 flex items-center justify-between">
-                          <span className="text-base font-bold text-gray-900">
+                          <span className="text-base font-bold text-neutral-900">
                             {formatBDT(sp)}
                           </span>
 
@@ -1228,7 +1228,7 @@ export default function ProductDetailPage() {
                             className={`p-2.5 rounded-full transition ${
                               item.in_stock
                                 ? 'bg-gray-900 text-white hover:bg-black'
-                                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                : 'bg-neutral-100 text-neutral-400 cursor-not-allowed'
                             }`}
                             title={item.in_stock ? 'Add to cart' : 'Out of stock'}
                           >
@@ -1247,26 +1247,26 @@ export default function ProductDetailPage() {
           <div className="mt-14 md:mt-18 border-t border-gray-100 pt-10">
             <div className="grid md:grid-cols-3 gap-6">
               <div className="bg-white p-6 rounded-2xl border border-gray-100">
-                <h3 className="font-bold text-gray-900 mb-2 text-sm">
+                <h3 className="font-bold text-neutral-900 mb-2 text-sm">
                   Free Shipping
                 </h3>
-                <p className="text-gray-600 text-sm">
+                <p className="text-neutral-600 text-sm">
                   Free shipping on all orders over ৳5,000
                 </p>
               </div>
               <div className="bg-white p-6 rounded-2xl border border-gray-100">
-                <h3 className="font-bold text-gray-900 mb-2 text-sm">
+                <h3 className="font-bold text-neutral-900 mb-2 text-sm">
                   Easy Returns
                 </h3>
-                <p className="text-gray-600 text-sm">
+                <p className="text-neutral-600 text-sm">
                   30-day return policy for all products
                 </p>
               </div>
               <div className="bg-white p-6 rounded-2xl border border-gray-100">
-                <h3 className="font-bold text-gray-900 mb-2 text-sm">
+                <h3 className="font-bold text-neutral-900 mb-2 text-sm">
                   Secure Payment
                 </h3>
-                <p className="text-gray-600 text-sm">
+                <p className="text-neutral-600 text-sm">
                   100% secure payment processing
                 </p>
               </div>

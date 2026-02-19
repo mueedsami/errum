@@ -35,7 +35,7 @@ export default function Footer() {
       {/* Soft background glow */}
       <div className="pointer-events-none absolute inset-0">
         <div className="absolute -top-24 left-10 h-64 w-64 rounded-full bg-rose-500/10 blur-3xl" />
-        <div className="absolute bottom-0 right-0 h-72 w-72 rounded-full bg-red-500/10 blur-3xl" />
+        <div className="absolute bottom-0 right-0 h-72 w-72 rounded-full bg-rose-500/10 blur-3xl" />
       </div>
 
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -177,7 +177,7 @@ export default function Footer() {
           <div className="flex items-center gap-3 text-xs text-gray-500">
             <Link
               href="/e-commerce/order-tracking"
-              className="text-xs text-white rounded-md bg-neutral-900 hover:bg-neutral-900 border border-red-600 px-3 py-1.5 transition"
+              className="text-xs text-white rounded-md bg-neutral-900 hover:bg-neutral-900 border border-rose-600 px-3 py-1.5 transition"
             >
               Track Order
             </Link>

@@ -22,8 +22,8 @@ const defaultColors = [
   'from-purple-100 to-violet-100',
   'from-yellow-100 to-amber-100',
   'from-indigo-100 to-blue-100',
-  'from-red-100 to-pink-100',
-  'from-orange-100 to-red-100'
+  'from-rose-50 to-pink-100',
+  'from-orange-100 to-rose-50'
 ];
 
 const slugify = (value: string) =>
@@ -129,7 +129,7 @@ const OurCategories: React.FC<OurCategoriesProps> = ({ categories: categoriesPro
                 onClick={() => router.push(`/e-commerce/${encodeURIComponent(cat.slug || slugify(cat.name))}`)}
                 className="group cursor-pointer"
               >
-                <div className="bg-white rounded-lg p-4 text-center hover:shadow-md transition-all duration-300 border border-gray-100 group-hover:border-red-200">
+                <div className="bg-white rounded-lg p-4 text-center hover:shadow-md transition-all duration-300 border border-gray-100 group-hover:border-rose-200">
                   <div className="mb-3">
                     {hasImage ? (
                       <div className="w-12 h-12 mx-auto relative rounded-full overflow-hidden bg-gray-100">

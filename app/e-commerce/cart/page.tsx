@@ -226,12 +226,12 @@ export default function CartPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-white">
+      <div className="min-h-screen bg-transparent">
         <Navigation />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
           <div className="text-center">
-            <Loader2 className="animate-spin h-12 w-12 text-red-700 mx-auto mb-4" />
-            <p className="text-gray-600">Loading your cart...</p>
+            <Loader2 className="animate-spin h-12 w-12 text-neutral-900 mx-auto mb-4" />
+            <p className="text-neutral-600">Loading your cart...</p>
           </div>
         </div>
       </div>
@@ -240,16 +240,16 @@ export default function CartPage() {
 
   if (error && !cart) {
     return (
-      <div className="min-h-screen bg-white">
+      <div className="min-h-screen bg-transparent">
         <Navigation />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
           <div className="text-center">
-            <AlertCircle className="h-24 w-24 text-red-500 mx-auto mb-4" />
-            <h1 className="text-3xl font-bold text-gray-900 mb-4">Error Loading Cart</h1>
-            <p className="text-gray-600 mb-8">{error}</p>
+            <AlertCircle className="h-24 w-24 text-rose-600 mx-auto mb-4" />
+            <h1 className="text-3xl font-bold text-neutral-900 mb-4">Error Loading Cart</h1>
+            <p className="text-neutral-600 mb-8">{error}</p>
             <button
               onClick={fetchCart}
-              className="bg-red-700 text-white px-8 py-3 rounded font-semibold hover:bg-red-800 transition-colors"
+              className="bg-neutral-900 text-white px-8 py-3 rounded-lg font-semibold hover:bg-neutral-800 transition-colors"
             >
               Try Again
             </button>
@@ -261,16 +261,16 @@ export default function CartPage() {
 
   if (!cart?.cart_items || cart.cart_items.length === 0) {
     return (
-      <div className="min-h-screen bg-white">
+      <div className="min-h-screen bg-transparent">
         <Navigation />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
           <div className="text-center">
-            <ShoppingCart className="h-24 w-24 text-gray-300 mx-auto mb-4" />
-            <h1 className="text-3xl font-bold text-gray-900 mb-4">Your cart is empty</h1>
-            <p className="text-gray-600 mb-8">Add some products to get started!</p>
+            <ShoppingCart className="h-24 w-24 text-neutral-300 mx-auto mb-4" />
+            <h1 className="text-3xl font-bold text-neutral-900 mb-4">Your cart is empty</h1>
+            <p className="text-neutral-600 mb-8">Add some products to get started!</p>
             <button
               onClick={() => router.push('/e-commerce')}
-              className="bg-red-700 text-white px-8 py-3 rounded font-semibold hover:bg-red-800 transition-colors"
+              className="bg-neutral-900 text-white px-8 py-3 rounded-lg font-semibold hover:bg-neutral-800 transition-colors"
             >
               Continue Shopping
             </button>
@@ -281,19 +281,19 @@ export default function CartPage() {
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-transparent">
       <Navigation />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         
         {/* Free Shipping Progress */}
         {remaining > 0 && (
-          <div className="mb-8 p-6 border-2 border-dashed border-gray-300 rounded-lg">
-            <p className="text-gray-700 mb-3">
-              Add <span className="font-bold text-red-700">৳{remaining.toFixed(2)}</span> to cart and get free shipping!
+          <div className="mb-8 p-6 border-2 border-dashed border-neutral-300 rounded-lg-xl">
+            <p className="text-neutral-700 mb-3">
+              Add <span className="font-bold text-amber-600">৳{remaining.toFixed(2)}</span> to cart and get free shipping!
             </p>
-            <div className="w-full bg-gray-200 rounded-full h-3">
+            <div className="w-full bg-neutral-200 rounded-lg-full h-3">
               <div 
-                className="bg-red-700 h-3 rounded-full transition-all duration-300"
+                className="bg-neutral-900 h-3 rounded-lg-full transition-all duration-300"
                 style={{ width: `${progress}%` }}
               />
             </div>
@@ -310,9 +310,9 @@ export default function CartPage() {
                   type="checkbox"
                   checked={selectedItems.size === cart.cart_items.length && cart.cart_items.length > 0}
                   onChange={toggleSelectAll}
-                  className="w-5 h-5 cursor-pointer accent-red-700"
+                  className="w-5 h-5 cursor-pointer accent-neutral-900"
                 />
-                <span className="text-gray-700 font-medium">
+                <span className="text-neutral-700 font-medium">
                   SELECT ALL ({cart.cart_items.length} ITEM{cart.cart_items.length !== 1 ? 'S' : ''})
                 </span>
               </label>
@@ -320,7 +320,7 @@ export default function CartPage() {
                 <button
                   onClick={handleDeleteSelected}
                   disabled={selectedItems.size === 0 || isUpdating.size > 0}
-                  className="flex items-center gap-2 text-gray-600 hover:text-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 text-neutral-600 hover:text-rose-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {isUpdating.size > 0 ? (
                     <Loader2 size={18} className="animate-spin" />
@@ -332,7 +332,7 @@ export default function CartPage() {
                 <button
                   onClick={handleClearCart}
                   disabled={isUpdating.size > 0}
-                  className="flex items-center gap-2 text-gray-600 hover:text-red-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ml-4"
+                  className="flex items-center gap-2 text-neutral-600 hover:text-rose-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ml-4"
                 >
                   <X size={18} />
                   <span className="text-sm font-medium">CLEAR CART</span>
@@ -341,7 +341,7 @@ export default function CartPage() {
             </div>
 
             {/* Table Header */}
-            <div className="hidden md:grid grid-cols-12 gap-4 pb-4 border-b font-semibold text-gray-900">
+            <div className="hidden md:grid grid-cols-12 gap-4 pb-4 border-b font-semibold text-neutral-900">
               <div className="col-span-1"></div>
               <div className="col-span-5">PRODUCT</div>
               <div className="col-span-2 text-center">PRICE</div>
@@ -375,7 +375,7 @@ export default function CartPage() {
                         checked={selectedItems.has(item.id)}
                         onChange={() => toggleSelectItem(item.id)}
                         disabled={isItemUpdating}
-                        className="w-5 h-5 cursor-pointer accent-red-700 disabled:cursor-not-allowed"
+                        className="w-5 h-5 cursor-pointer accent-neutral-900 disabled:cursor-not-allowed"
                       />
                     </div>
 
@@ -385,7 +385,7 @@ export default function CartPage() {
                         <img
                           src={productImage}
                           alt={item.product.name}
-                          className="w-24 h-24 object-cover rounded"
+                          className="w-24 h-24 object-cover rounded-lg"
                           onError={(e) => {
                             if (!e.currentTarget.src.includes('/placeholder-product.png')) {
                         e.currentTarget.src = '/placeholder-product.png';
@@ -395,29 +395,29 @@ export default function CartPage() {
                         <button
                           onClick={() => handleRemoveItem(item.id)}
                           disabled={isItemUpdating}
-                          className="absolute -top-2 -right-2 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="absolute -top-2 -right-2 p-1 bg-white rounded-lg-full shadow-md hover:bg-neutral-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {isItemUpdating ? (
-                            <Loader2 size={16} className="text-gray-500 animate-spin" />
+                            <Loader2 size={16} className="text-neutral-500 animate-spin" />
                           ) : (
-                            <X size={16} className="text-gray-500" />
+                            <X size={16} className="text-neutral-500" />
                           )}
                         </button>
                       </div>
                       <div>
-                        <h3 className="font-semibold text-gray-900">
+                        <h3 className="font-semibold text-neutral-900">
                           {item.product.name}
                         </h3>
                         
                         {item.variant_options && (
                           <div className="flex gap-2 mt-1">
                             {item.variant_options.color && (
-                              <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
+                              <span className="text-xs bg-neutral-100 text-neutral-700 px-2 py-1 rounded-lg">
                                 Color: {item.variant_options.color}
                               </span>
                             )}
                             {item.variant_options.size && (
-                              <span className="text-xs bg-gray-100 text-gray-700 px-2 py-1 rounded">
+                              <span className="text-xs bg-neutral-100 text-neutral-700 px-2 py-1 rounded-lg">
                                 Size: {item.variant_options.size}
                               </span>
                             )}
@@ -425,14 +425,14 @@ export default function CartPage() {
                         )}
                         
                         {item.product.category && (
-                          <p className="text-sm text-gray-500 mt-1">
+                          <p className="text-sm text-neutral-500 mt-1">
                             {typeof item.product.category === 'string' 
                               ? item.product.category 
                               : item.product.category}
                           </p>
                         )}
                         {!item.product.in_stock && (
-                          <p className="text-sm text-red-600 font-medium mt-1">
+                          <p className="text-sm text-rose-600 font-medium mt-1">
                             Out of Stock
                           </p>
                         )}
@@ -442,7 +442,7 @@ export default function CartPage() {
                           </p>
                         )}
                         {item.notes && (
-                          <p className="text-sm text-gray-500 mt-1 italic">
+                          <p className="text-sm text-neutral-500 mt-1 italic">
                             Note: {item.notes}
                           </p>
                         )}
@@ -452,18 +452,18 @@ export default function CartPage() {
                     {/* Price */}
                     <div className="md:col-span-2 text-left md:text-center">
                       <span className="md:hidden font-semibold mr-2">Price:</span>
-                      <span className="text-gray-900">
+                      <span className="text-neutral-900">
                         ৳{price.toLocaleString('en-BD', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
 
                     {/* Quantity */}
                     <div className="md:col-span-2 flex justify-start md:justify-center">
-                      <div className="flex items-center border border-gray-300 rounded">
+                      <div className="flex items-center border border-neutral-300 rounded-lg">
                         <button
                           onClick={() => handleUpdateQuantity(item.id, item.quantity - 1)}
                           disabled={isItemUpdating || item.quantity <= 1}
-                          className="px-3 py-2 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="px-3 py-2 hover:bg-neutral-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           -
                         </button>
@@ -477,14 +477,14 @@ export default function CartPage() {
                             }
                           }}
                           disabled={isItemUpdating}
-                          className="w-16 text-center border-x border-gray-300 outline-none py-2 disabled:bg-gray-50"
+                          className="w-16 text-center border-x border-neutral-300 outline-none py-2 disabled:bg-neutral-50"
                           min="1"
                           max={item.product.stock_quantity}
                         />
                         <button
                           onClick={() => handleUpdateQuantity(item.id, item.quantity + 1)}
                           disabled={isItemUpdating || item.quantity >= item.product.stock_quantity}
-                          className="px-3 py-2 hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="px-3 py-2 hover:bg-neutral-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           +
                         </button>
@@ -494,7 +494,7 @@ export default function CartPage() {
                     {/* Subtotal */}
                     <div className="md:col-span-2 text-left md:text-right">
                       <span className="md:hidden font-semibold mr-2">Subtotal:</span>
-                      <span className="font-bold text-red-700">
+                      <span className="font-bold text-amber-600">
                         ৳{itemTotal.toLocaleString('en-BD', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
@@ -510,7 +510,7 @@ export default function CartPage() {
                 value={couponCode}
                 onChange={(e) => setCouponCode(e.target.value)}
                 placeholder="Coupon code"
-                className="flex-1 px-4 py-3 border border-gray-300 rounded outline-none focus:ring-2 focus:ring-red-700"
+                className="flex-1 px-4 py-3 border border-neutral-300 rounded-lg outline-none focus:ring-2 focus:ring-neutral-200"
               />
               <button 
                 onClick={() => {
@@ -518,7 +518,7 @@ export default function CartPage() {
                   alert('Coupon functionality coming soon!');
                 }}
                 disabled={!couponCode.trim()}
-                className="bg-red-700 text-white px-8 py-3 rounded font-semibold hover:bg-red-800 transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                className="bg-neutral-900 text-white px-8 py-3 rounded-lg font-semibold hover:bg-neutral-800 transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 APPLY COUPON
               </button>
@@ -527,26 +527,26 @@ export default function CartPage() {
 
           {/* Cart Totals */}
           <div className="lg:w-96">
-            <div className="bg-white border border-gray-200 rounded-lg p-6 sticky top-4">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">CART TOTALS</h2>
+            <div className="bg-white border border-neutral-200 rounded-lg-xl p-6 sticky top-4">
+              <h2 className="text-2xl font-bold text-neutral-900 mb-6">CART TOTALS</h2>
               
               <div className="space-y-4">
                 <div className="flex justify-between py-3 border-b">
-                  <span className="text-gray-700">Subtotal ({selectedItems.size} items)</span>
-                  <span className="font-semibold text-gray-900">
+                  <span className="text-neutral-700">Subtotal ({selectedItems.size} items)</span>
+                  <span className="font-semibold text-neutral-900">
                     ৳{subtotal.toLocaleString('en-BD', { minimumFractionDigits: 2 })}
                   </span>
                 </div>
 
                 <div className="py-3 border-b">
                   <div className="flex justify-between mb-2">
-                    <span className="text-gray-700">
-                      ঢাকার ভিতরে: <span className="text-red-700 font-semibold">৳60.00</span>
+                    <span className="text-neutral-700">
+                      ঢাকার ভিতরে: <span className="text-neutral-900 font-semibold">৳60.00</span>
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-700">Shipping</span>
-                    <span className="font-semibold text-gray-900">
+                    <span className="text-neutral-700">Shipping</span>
+                    <span className="font-semibold text-neutral-900">
                       {shippingFee > 0 ? (
                         `৳${shippingFee.toFixed(2)}`
                       ) : (
@@ -558,15 +558,15 @@ export default function CartPage() {
                     onClick={() => {
                       alert('Address change functionality coming soon!');
                     }}
-                    className="text-sm text-red-700 hover:underline mt-2"
+                    className="text-sm text-neutral-900 hover:underline mt-2"
                   >
                     Change address
                   </button>
                 </div>
 
                 <div className="flex justify-between py-4">
-                  <span className="text-xl font-bold text-gray-900">Total</span>
-                  <span className="text-2xl font-bold text-red-700">
+                  <span className="text-xl font-bold text-neutral-900">Total</span>
+                  <span className="text-2xl font-bold text-amber-600">
                     ৳{total.toLocaleString('en-BD', { minimumFractionDigits: 2 })}
                   </span>
                 </div>
@@ -574,7 +574,7 @@ export default function CartPage() {
                 <button 
                   onClick={handleProceedToCheckout}
                   disabled={selectedItems.size === 0 || isUpdating.size > 0}
-                  className="w-full bg-red-700 text-white py-4 rounded font-bold text-lg hover:bg-red-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-neutral-900 text-white py-4 rounded-lg font-bold text-lg hover:bg-neutral-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isUpdating.size > 0 ? (
                     <span className="flex items-center justify-center gap-2">
@@ -588,7 +588,7 @@ export default function CartPage() {
 
                 <button
                   onClick={() => router.push('/e-commerce')}
-                  className="w-full bg-white text-red-700 border-2 border-red-700 py-3 rounded font-semibold hover:bg-red-50 transition-colors mt-3"
+                  className="w-full bg-white text-neutral-900 border-2 border-neutral-900 py-3 rounded-lg font-semibold hover:bg-neutral-50 transition-colors mt-3"
                 >
                   Continue Shopping
                 </button>

@@ -216,7 +216,7 @@ const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ categoryId, limit =
                           ? 'bg-green-100 text-green-700'
                           : hasStock
                             ? 'bg-amber-100 text-amber-700'
-                            : 'bg-red-100 text-red-700'
+                            : 'bg-rose-50 text-neutral-900'
                       }`}
                     >
                       {stockLabel}
@@ -229,12 +229,12 @@ const FeaturedProducts: React.FC<FeaturedProductsProps> = ({ categoryId, limit =
                     </h3>
 
                     <div className="mb-3">
-                      <span className="text-lg font-bold text-red-700">{getCardPriceText(product)}</span>
+                      <span className="text-lg font-bold text-neutral-900">{getCardPriceText(product)}</span>
                     </div>
 
                     <button
                       onClick={(e) => handleAddToCart(product, e)}
-                      className="w-full bg-red-700 hover:bg-red-800 text-white py-2 px-4 rounded-md text-sm font-medium transition-colors"
+                      className="w-full bg-neutral-900 hover:bg-neutral-800 text-white py-2 px-4 rounded-md text-sm font-medium transition-colors"
                     >
                       {product.has_variants ? 'Select Variation' : 'Add to Cart'}
                     </button>

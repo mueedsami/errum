@@ -52,7 +52,7 @@ export default function MyAccountOrdersPage() {
           />
           <button
             onClick={load}
-            className="bg-red-700 text-white px-4 py-2 rounded-md text-sm hover:bg-red-800"
+            className="bg-neutral-900 text-white px-4 py-2 rounded-md text-sm hover:bg-neutral-800"
           >
             Search
           </button>
@@ -80,7 +80,7 @@ export default function MyAccountOrdersPage() {
       </button>
 
       {error ? (
-        <div className="border border-red-200 bg-red-50 text-red-700 rounded-md p-3 text-sm mb-4">
+        <div className="border border-rose-200 bg-rose-50 text-neutral-900 rounded-md p-3 text-sm mb-4">
           {error}
         </div>
       ) : null}
@@ -108,7 +108,7 @@ export default function MyAccountOrdersPage() {
                   <td className="p-3">{o.total_amount}৳</td>
                   <td className="p-3">
                     <Link
-                      className="text-red-700 hover:underline"
+                      className="text-neutral-900 hover:underline"
                       href={`/e-commerce/my-account/orders/${o.order_number}`}
                     >
                       View

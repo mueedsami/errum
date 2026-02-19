@@ -6,11 +6,9 @@ import HeroSection from '@/components/ecommerce/HeroSection';
 import OurCategories from '@/components/ecommerce/OurCategories';
 import FeaturedProducts from '@/components/ecommerce/FeaturedProducts';
 import NewArrivals from '@/components/ecommerce/NewArrivals';
-import Footer from '@/components/ecommerce/Footer';
-
 export default function HomePage() {
   return (
-    <div className="bg-white min-h-screen">
+    <div className="bg-transparent min-h-screen">
       {/* Navigation Bar */}
       <Navigation />
       
@@ -27,7 +25,7 @@ export default function HomePage() {
       <NewArrivals />
             
       {/* Footer */}
-      {/* <Footer /> */}
+      {/**/}
     </div>
   );
 }

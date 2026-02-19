@@ -52,7 +52,7 @@ export default function OrderConfirmationPage() {
         <Navigation />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
           <div className="text-center">
-            <Loader2 className="animate-spin h-12 w-12 text-red-700 mx-auto mb-4" />
+            <Loader2 className="animate-spin h-12 w-12 text-neutral-900 mx-auto mb-4" />
             <p className="text-gray-600">Loading order details...</p>
           </div>
         </div>
@@ -70,7 +70,7 @@ export default function OrderConfirmationPage() {
             <p className="text-gray-600 mb-8">{error}</p>
             <button
               onClick={() => router.push('/')}
-              className="bg-red-700 text-white px-8 py-3 rounded-lg font-semibold hover:bg-red-800 transition-colors"
+              className="bg-neutral-900 text-white px-8 py-3 rounded-lg font-semibold hover:bg-neutral-800 transition-colors"
             >
               Return to Home
             </button>
@@ -100,7 +100,7 @@ export default function OrderConfirmationPage() {
           
           <div className="bg-gray-50 rounded-lg p-4 inline-block">
             <p className="text-sm text-gray-600 mb-1">Order Number</p>
-            <p className="text-2xl font-bold text-red-700">{order.order_number}</p>
+            <p className="text-2xl font-bold text-neutral-900">{order.order_number}</p>
           </div>
 
           {order.estimated_delivery && (
@@ -114,7 +114,7 @@ export default function OrderConfirmationPage() {
         <div className="flex flex-wrap gap-4 mb-8 print:hidden">
           <button
             onClick={() => router.push(`/e-commerce/order-tracking/${order.order_number}`)}
-            className="flex-1 bg-red-700 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-800 transition-colors flex items-center justify-center gap-2"
+            className="flex-1 bg-neutral-900 text-white px-6 py-3 rounded-lg font-semibold hover:bg-neutral-800 transition-colors flex items-center justify-center gap-2"
           >
             <Package size={20} />
             Track Order
@@ -145,7 +145,7 @@ export default function OrderConfirmationPage() {
             {/* Order Info */}
             <div>
               <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                <Package className="text-red-700" size={20} />
+                <Package className="text-neutral-900" size={20} />
                 Order Information
               </h3>
               <div className="space-y-2 text-sm">
@@ -181,7 +181,7 @@ export default function OrderConfirmationPage() {
             {/* Shipping Address */}
             <div>
               <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
-                <MapPin className="text-red-700" size={20} />
+                <MapPin className="text-neutral-900" size={20} />
                 Shipping Address
               </h3>
               <div className="text-sm text-gray-700">
@@ -267,7 +267,7 @@ export default function OrderConfirmationPage() {
               
               <div className="border-t pt-2 flex justify-between text-xl font-bold text-gray-900">
                 <span>Total</span>
-                <span className="text-red-700">৳{order.total_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</span>
+                <span className="text-neutral-900">৳{order.total_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</span>
               </div>
             </div>
           </div>

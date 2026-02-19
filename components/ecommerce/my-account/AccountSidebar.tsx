@@ -56,7 +56,7 @@ export default function AccountSidebar() {
                 active ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-700 hover:bg-gray-50'
               }`}
             >
-              <Icon size={20} className={active ? 'text-red-700' : 'text-gray-500'} />
+              <Icon size={20} className={active ? 'text-neutral-900' : 'text-gray-500'} />
               <span>{item.label}</span>
             </button>
           );

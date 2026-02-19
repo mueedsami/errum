@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { wishlistUtils, WishlistItem } from '@/lib/wishlistUtils';
 import { useCart } from '@/app/e-commerce/CartContext';
 import Navigation from '@/components/ecommerce/Navigation';
-import Footer from '@/components/ecommerce/Footer';
 import CartSidebar from '@/components/ecommerce/cart/CartSidebar';
 
 export default function WishlistPage() {
@@ -82,16 +81,14 @@ export default function WishlistPage() {
                 </p>
                 <button 
                   onClick={() => router.push('/e-commerce')}
-                  className="bg-red-700 text-white px-8 py-3 rounded-lg font-semibold hover:bg-red-800 transition-colors"
+                  className="bg-neutral-900 text-white px-8 py-3 rounded-lg font-semibold hover:bg-neutral-800 transition-colors"
                 >
                   Continue Shopping
                 </button>
               </div>
             </div>
           </div>
-        </div>
-        <Footer />
-      </>
+        </div></>
     );
   }
 
@@ -114,7 +111,7 @@ export default function WishlistPage() {
             </h1>
             <button
               onClick={handleClearAll}
-              className="text-red-600 hover:text-red-700 font-medium text-sm transition-colors"
+              className="text-rose-600 hover:text-neutral-900 font-medium text-sm transition-colors"
             >
               Clear All
             </button>
@@ -146,21 +143,21 @@ export default function WishlistPage() {
                       e.stopPropagation();
                       handleRemove(item.id);
                     }}
-                    className="absolute top-3 right-3 p-2 bg-white rounded-full shadow-lg hover:bg-red-50 transition-colors z-10"
+                    className="absolute top-3 right-3 p-2 bg-white rounded-full shadow-lg hover:bg-rose-50 transition-colors z-10"
                     title="Remove from wishlist"
                   >
-                    <X size={16} className="text-gray-700 hover:text-red-600" />
+                    <X size={16} className="text-gray-700 hover:text-rose-600" />
                   </button>
                 </div>
 
                 <div className="p-4">
                   <h3 
                     onClick={() => handleNavigateToProduct(item.id)}
-                    className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 min-h-[2.5rem] hover:text-red-600 cursor-pointer transition-colors"
+                    className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 min-h-[2.5rem] hover:text-rose-600 cursor-pointer transition-colors"
                   >
                     {item.name}
                   </h3>
-                  <p className="text-lg font-bold text-red-700 mb-4">
+                  <p className="text-lg font-bold text-neutral-900 mb-4">
                     {item.price.toLocaleString()}.00৳
                   </p>
                   
@@ -170,7 +167,7 @@ export default function WishlistPage() {
                     className={`w-full py-2.5 rounded-lg font-semibold text-sm transition-colors flex items-center justify-center gap-2 ${
                       addingToCartId === item.id
                         ? 'bg-green-600 text-white'
-                        : 'bg-red-700 text-white hover:bg-red-800'
+                        : 'bg-neutral-900 text-white hover:bg-neutral-800'
                     }`}
                   >
                     {addingToCartId === item.id ? (
@@ -187,9 +184,7 @@ export default function WishlistPage() {
             ))}
           </div>
         </div>
-      </div>
-      <Footer />
-      <CartSidebar isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} />
+      </div><CartSidebar isOpen={isCartOpen} onClose={() => setIsCartOpen(false)} />
     </>
   );
 }

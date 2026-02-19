@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { Search as SearchIcon, Loader2, AlertCircle } from 'lucide-react';
 
 import Navigation from '@/components/ecommerce/Navigation';
-import Footer from '@/components/ecommerce/Footer';
 import catalogService from '@/services/catalogService';
 import { adaptCatalogGroupedProducts, formatGroupedPrice, groupProductsByMother } from '@/lib/ecommerceProductGrouping';
 
@@ -96,12 +95,12 @@ export default function SearchClient({ initialQuery }: { initialQuery: string })
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search products..."
-              className="w-full rounded-xl border border-gray-300 bg-white py-3 pl-12 pr-28 text-sm outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100"
+              className="w-full rounded-xl border border-gray-300 bg-white py-3 pl-12 pr-28 text-sm outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-50"
             />
             <SearchIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <button
               type="submit"
-              className="absolute right-2 top-1/2 -translate-y-1/2 bg-red-700 hover:bg-red-800 text-white text-sm font-medium px-4 py-2 rounded-lg"
+              className="absolute right-2 top-1/2 -translate-y-1/2 bg-neutral-900 hover:bg-neutral-800 text-white text-sm font-medium px-4 py-2 rounded-lg"
             >
               Search
             </button>
@@ -116,15 +115,15 @@ export default function SearchClient({ initialQuery }: { initialQuery: string })
         )}
 
         {error && (
-          <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-            <AlertCircle className="text-red-600 flex-shrink-0 mt-0.5" size={20} />
-            <p className="text-red-700 text-sm">{error}</p>
+          <div className="mb-6 bg-rose-50 border border-rose-200 rounded-lg p-4 flex items-start gap-3">
+            <AlertCircle className="text-rose-600 flex-shrink-0 mt-0.5" size={20} />
+            <p className="text-neutral-900 text-sm">{error}</p>
           </div>
         )}
 
         {loading ? (
           <div className="text-center py-20">
-            <Loader2 className="animate-spin h-10 w-10 text-red-700 mx-auto mb-3" />
+            <Loader2 className="animate-spin h-10 w-10 text-neutral-900 mx-auto mb-3" />
             <p className="text-gray-600">Searching products...</p>
           </div>
         ) : groupedProducts.length === 0 ? (
@@ -143,13 +142,13 @@ export default function SearchClient({ initialQuery }: { initialQuery: string })
                   ? 'bg-green-100 text-green-700'
                   : stockLabel === 'Available in other variants'
                   ? 'bg-amber-100 text-amber-700'
-                  : 'bg-red-100 text-red-700';
+                  : 'bg-rose-50 text-neutral-900';
 
               return (
                 <Link
                   key={group.key}
                   href={`/e-commerce/product/${mainVariant.id}`}
-                  className="bg-white rounded-xl border hover:border-red-200 hover:shadow-sm transition overflow-hidden"
+                  className="bg-white rounded-xl border hover:border-rose-200 hover:shadow-sm transition overflow-hidden"
                 >
                   <div className="aspect-square bg-gray-100 relative">
                     {group.primaryImage ? (
@@ -177,16 +176,13 @@ export default function SearchClient({ initialQuery }: { initialQuery: string })
                   </div>
                   <div className="p-3">
                     <div className="text-sm font-medium text-gray-900 line-clamp-2">{group.baseName}</div>
-                    <div className="mt-1 text-red-700 font-semibold">{formatGroupedPrice(group)}</div>
+                    <div className="mt-1 text-neutral-900 font-semibold">{formatGroupedPrice(group)}</div>
                   </div>
                 </Link>
               );
             })}
           </div>
         )}
-      </div>
-
-      <Footer />
-    </div>
+      </div></div>
   );
 }

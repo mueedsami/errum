@@ -98,11 +98,11 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
             {remaining > 0 ? (
               <div>
                 <p className="text-sm text-gray-600 mb-2">
-                  Add <span className="font-bold text-red-700">৳{remaining.toFixed(2)}</span> to cart and get free shipping!
+                  Add <span className="font-bold text-neutral-900">৳{remaining.toFixed(2)}</span> to cart and get free shipping!
                 </p>
                 <div className="w-full bg-gray-200 rounded-full h-2">
                   <div 
-                    className="bg-red-700 h-2 rounded-full transition-all duration-300"
+                    className="bg-neutral-900 h-2 rounded-full transition-all duration-300"
                     style={{ width: `${progress}%` }}
                   />
                 </div>
@@ -118,7 +118,7 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
             {/* Subtotal */}
             <div className="flex items-center justify-between">
               <span className="text-lg font-semibold text-gray-900">Subtotal:</span>
-              <span className="text-2xl font-bold text-red-700">
+              <span className="text-2xl font-bold text-neutral-900">
                 ৳{subtotal.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </span>
             </div>
@@ -133,7 +133,7 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
               </button>
               <button
                 onClick={handleCheckout}
-                className="w-full bg-red-700 text-white py-3 rounded font-semibold hover:bg-red-800 transition-colors"
+                className="w-full bg-neutral-900 text-white py-3 rounded font-semibold hover:bg-neutral-800 transition-colors"
               >
                 CHECKOUT
               </button>

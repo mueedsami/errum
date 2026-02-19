@@ -12,7 +12,7 @@ export default function HeroSection() {
       {/* Minimal premium background */}
       <div className="absolute inset-0">
         <div className="absolute -top-24 -left-24 h-96 w-96 rounded-full bg-rose-100/60 blur-3xl" />
-        <div className="absolute -bottom-28 -right-24 h-[28rem] w-[28rem] rounded-full bg-red-100/50 blur-3xl" />
+        <div className="absolute -bottom-28 -right-24 h-[28rem] w-[28rem] rounded-full bg-rose-50/50 blur-3xl" />
         <div
           className="absolute inset-0 opacity-[0.05]"
           style={{
@@ -28,9 +28,9 @@ export default function HeroSection() {
           {/* Left content */}
           <div className="space-y-7">
             {/* Tiny premium badge */}
-            <div className="inline-flex items-center gap-2 rounded-full border border-red-100 bg-red-50 px-3.5 py-1.5">
-              <Sparkles className="h-3.5 w-3.5 text-red-700" />
-              <span className="text-[11px] sm:text-xs font-semibold tracking-wide text-red-800">
+            <div className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3.5 py-1.5">
+              <Sparkles className="h-3.5 w-3.5 text-neutral-900" />
+              <span className="text-[11px] sm:text-xs font-semibold tracking-wide text-rose-800">
                 Signature Drops
               </span>
             </div>
@@ -38,7 +38,7 @@ export default function HeroSection() {
             <div className="space-y-4">
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold leading-[1.05] text-gray-900 text-balance">
                 {BRAND}{" "}
-                <span className="bg-gradient-to-r from-red-800 to-rose-500 bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-neutral-900 to-amber-600 bg-clip-text text-transparent">
                   Lifestyle
                 </span>{" "}
                 essentials for everyday style
@@ -56,15 +56,15 @@ export default function HeroSection() {
             {/* Minimal trust line */}
             <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs sm:text-sm text-gray-500">
               <span className="inline-flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-red-700" />
+                <span className="h-1.5 w-1.5 rounded-full bg-neutral-900" />
                 Comfort-first picks
               </span>
               <span className="inline-flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-red-700" />
+                <span className="h-1.5 w-1.5 rounded-full bg-neutral-900" />
                 Premium finishing
               </span>
               <span className="inline-flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-red-700" />
+                <span className="h-1.5 w-1.5 rounded-full bg-neutral-900" />
                 Nationwide delivery
               </span>
             </div>
@@ -115,7 +115,7 @@ export default function HeroSection() {
             </div>
 
             {/* Subtle side accent */}
-            <div className="pointer-events-none absolute -right-10 top-1/2 hidden h-40 w-40 -translate-y-1/2 rotate-12 rounded-[2rem] bg-gradient-to-br from-rose-100 to-red-50 lg:block" />
+            <div className="pointer-events-none absolute -right-10 top-1/2 hidden h-40 w-40 -translate-y-1/2 rotate-12 rounded-[2rem] bg-gradient-to-br from-neutral-100 to-amber-50 lg:block" />
           </div>
         </div>
       </div>

@@ -2,20 +2,19 @@
 
 import React from 'react';
 import Navigation from '@/components/ecommerce/Navigation';
-import Footer from '@/components/ecommerce/Footer';
 import Link from 'next/link';
 import { CheckCircle2, ShieldCheck, Truck, Gem, Sparkles, HeartHandshake } from 'lucide-react';
 
 export default function AboutPage() {
   return (
-    <div className="bg-white min-h-screen">
+    <div className="bg-transparent min-h-screen">
       <Navigation />
 
       {/* Hero */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0">
           <div className="absolute -top-24 -left-24 h-96 w-96 rounded-full bg-rose-100/60 blur-3xl" />
-          <div className="absolute -bottom-28 -right-24 h-[28rem] w-[28rem] rounded-full bg-red-100/50 blur-3xl" />
+          <div className="absolute -bottom-28 -right-24 h-[28rem] w-[28rem] rounded-full bg-rose-50/50 blur-3xl" />
           <div
             className="absolute inset-0 opacity-[0.05]"
             style={{
@@ -27,9 +26,9 @@ export default function AboutPage() {
 
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-14 pb-12 md:pt-20 md:pb-16">
           <div className="max-w-3xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-red-100 bg-red-50 px-3.5 py-1.5">
-              <Sparkles className="h-4 w-4 text-red-700" />
-              <span className="text-xs font-semibold tracking-wide text-red-800">ERRUM</span>
+            <div className="inline-flex items-center gap-2 rounded-full border border-rose-200 bg-rose-50 px-3.5 py-1.5">
+              <Sparkles className="h-4 w-4 text-neutral-900" />
+              <span className="text-xs font-semibold tracking-wide text-rose-800">ERRUM</span>
             </div>
 
             <h1 className="mt-5 text-4xl sm:text-5xl font-bold leading-[1.05] text-gray-900">
@@ -58,15 +57,15 @@ export default function AboutPage() {
 
             <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-500">
               <span className="inline-flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-red-700" />
+                <span className="h-1.5 w-1.5 rounded-full bg-neutral-900" />
                 Comfort-first design
               </span>
               <span className="inline-flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-red-700" />
+                <span className="h-1.5 w-1.5 rounded-full bg-neutral-900" />
                 Premium finishing
               </span>
               <span className="inline-flex items-center gap-2">
-                <span className="h-1.5 w-1.5 rounded-full bg-red-700" />
+                <span className="h-1.5 w-1.5 rounded-full bg-neutral-900" />
                 Nationwide delivery
               </span>
             </div>
@@ -79,7 +78,7 @@ export default function AboutPage() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="rounded-2xl border border-gray-200 p-6 bg-white">
             <div className="flex items-center gap-3">
-              <Gem className="h-5 w-5 text-red-700" />
+              <Gem className="h-5 w-5 text-neutral-900" />
               <h3 className="font-semibold text-gray-900">Quality that lasts</h3>
             </div>
             <p className="mt-3 text-sm text-gray-600">
@@ -89,7 +88,7 @@ export default function AboutPage() {
 
           <div className="rounded-2xl border border-gray-200 p-6 bg-white">
             <div className="flex items-center gap-3">
-              <ShieldCheck className="h-5 w-5 text-red-700" />
+              <ShieldCheck className="h-5 w-5 text-neutral-900" />
               <h3 className="font-semibold text-gray-900">Comfort-first fit</h3>
             </div>
             <p className="mt-3 text-sm text-gray-600">
@@ -99,7 +98,7 @@ export default function AboutPage() {
 
           <div className="rounded-2xl border border-gray-200 p-6 bg-white">
             <div className="flex items-center gap-3">
-              <HeartHandshake className="h-5 w-5 text-red-700" />
+              <HeartHandshake className="h-5 w-5 text-neutral-900" />
               <h3 className="font-semibold text-gray-900">Support you can trust</h3>
             </div>
             <p className="mt-3 text-sm text-gray-600">
@@ -131,25 +130,25 @@ export default function AboutPage() {
 
               <ul className="mt-4 space-y-3 text-sm text-gray-700">
                 <li className="flex gap-3">
-                  <CheckCircle2 className="h-5 w-5 text-red-700 mt-0.5" />
+                  <CheckCircle2 className="h-5 w-5 text-neutral-900 mt-0.5" />
                   <span>
                     <span className="font-semibold">Everyday essentials:</span> shoes, clothing, watches, and bags curated for daily use.
                   </span>
                 </li>
                 <li className="flex gap-3">
-                  <CheckCircle2 className="h-5 w-5 text-red-700 mt-0.5" />
+                  <CheckCircle2 className="h-5 w-5 text-neutral-900 mt-0.5" />
                   <span>
                     <span className="font-semibold">Premium look, practical feel:</span> clean styles that match work, casual, and outings.
                   </span>
                 </li>
                 <li className="flex gap-3">
-                  <CheckCircle2 className="h-5 w-5 text-red-700 mt-0.5" />
+                  <CheckCircle2 className="h-5 w-5 text-neutral-900 mt-0.5" />
                   <span>
                     <span className="font-semibold">Consistency:</span> sizing guidance, product details, and smooth customer experience.
                   </span>
                 </li>
                 <li className="flex gap-3">
-                  <CheckCircle2 className="h-5 w-5 text-red-700 mt-0.5" />
+                  <CheckCircle2 className="h-5 w-5 text-neutral-900 mt-0.5" />
                   <span>
                     <span className="font-semibold">Value:</span> strong quality-to-price balance without compromising on style.
                   </span>
@@ -170,7 +169,7 @@ export default function AboutPage() {
         <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="rounded-2xl border border-gray-200 p-6 bg-white">
             <div className="flex items-center gap-3">
-              <Truck className="h-5 w-5 text-red-700" />
+              <Truck className="h-5 w-5 text-neutral-900" />
               <h3 className="font-semibold text-gray-900">Fast, careful delivery</h3>
             </div>
             <p className="mt-3 text-sm text-gray-600">
@@ -180,7 +179,7 @@ export default function AboutPage() {
 
           <div className="rounded-2xl border border-gray-200 p-6 bg-white">
             <div className="flex items-center gap-3">
-              <ShieldCheck className="h-5 w-5 text-red-700" />
+              <ShieldCheck className="h-5 w-5 text-neutral-900" />
               <h3 className="font-semibold text-gray-900">Authenticity & QC</h3>
             </div>
             <p className="mt-3 text-sm text-gray-600">
@@ -190,7 +189,7 @@ export default function AboutPage() {
 
           <div className="rounded-2xl border border-gray-200 p-6 bg-white">
             <div className="flex items-center gap-3">
-              <HeartHandshake className="h-5 w-5 text-red-700" />
+              <HeartHandshake className="h-5 w-5 text-neutral-900" />
               <h3 className="font-semibold text-gray-900">Helpful support</h3>
             </div>
             <p className="mt-3 text-sm text-gray-600">
@@ -216,8 +215,6 @@ export default function AboutPage() {
         </div>
       </section>
 
-      {/* Footer (optional in your Home it was commented out, but About can keep it) */}
-      <Footer />
-    </div>
+      {/* Footer (optional in your Home it was commented out, but About can keep it) */}</div>
   );
 }

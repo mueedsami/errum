@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&display=swap");
+
+
 /* stylelint-disable-next-line */
 @variant dark (&:where(.dark, .dark *));
 
@@ -51,4 +54,97 @@ body {
 
 .dark ::-webkit-scrollbar-thumb:hover {
   background: #404040;
+}
+
+/* E-commerce Premium Theme (WoodMart-inspired) */
+@layer base {
+  .ec-root {
+    font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+    color: #111827; /* neutral-900 */
+    background: #f7f7f7;
+  }
+
+  .ec-root :where(h1, h2, h3, h4, h5, h6, .ec-heading) {
+    font-family: "Playfair Display", ui-serif, Georgia, "Times New Roman", Times, serif;
+    letter-spacing: -0.015em;
+  }
+
+  .ec-root a {
+    color: inherit;
+  }
+}
+
+@layer components {
+  .ec-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  @media (min-width: 640px) {
+    .ec-container { padding-left: 24px; padding-right: 24px; }
+  }
+
+  .ec-card {
+    background: #ffffff;
+    border: 1px solid #e5e7eb; /* neutral-200 */
+    border-radius: 14px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+
+  .ec-card-hover {
+    transition: box-shadow 180ms ease, transform 180ms ease, border-color 180ms ease;
+  }
+  .ec-card-hover:hover {
+    box-shadow: 0 10px 22px rgba(0,0,0,0.08);
+    border-color: #d1d5db; /* neutral-300 */
+    transform: translateY(-1px);
+  }
+
+  .ec-btn {
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-weight: 600;
+    font-size: 14px;
+    line-height: 1.1;
+    transition: transform 150ms ease, box-shadow 150ms ease, background 150ms ease, color 150ms ease, border-color 150ms ease;
+  }
+
+  .ec-btn:active { transform: translateY(0.5px); }
+
+  .ec-btn-primary {
+    background: #111827; /* neutral-900 */
+    color: #fff;
+    box-shadow: 0 8px 16px rgba(17,24,39,0.12);
+  }
+  .ec-btn-primary:hover { background: #0b1220; }
+
+  .ec-btn-secondary {
+    background: #fff;
+    color: #111827;
+    border: 1px solid #e5e7eb;
+  }
+  .ec-btn-secondary:hover { background: #f9fafb; }
+
+  .ec-input {
+    width: 100%;
+    border-radius: 12px;
+    border: 1px solid #d1d5db;
+    padding: 10px 12px;
+    font-size: 14px;
+    outline: none;
+  }
+  .ec-input:focus {
+    border-color: #111827;
+    box-shadow: 0 0 0 3px rgba(17,24,39,0.08);
+  }
+
+  .ec-price {
+    color: #b07a33; /* warm gold */
+    font-weight: 700;
+  }
+
+  .ec-muted { color: #6b7280; } /* neutral-500 */
+  .ec-divider { border-color: #e5e7eb; }
 }

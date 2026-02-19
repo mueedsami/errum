@@ -41,7 +41,7 @@ export default function ProductsPage() {
   }
 
   if (loading) return <div className="text-center py-10">Loading products...</div>;
-  if (error) return <div className="text-center py-10 text-red-600">{error}</div>;
+  if (error) return <div className="text-center py-10 text-rose-600">{error}</div>;
 
   return (
     <div className="container mx-auto px-4 py-8">

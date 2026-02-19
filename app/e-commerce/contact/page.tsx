@@ -24,14 +24,14 @@ const locations = [
 
 export default function ContactPage() {
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-transparent">
       <Navigation />
 
       {/* Header */}
       <section className="relative overflow-hidden">
         <div className="absolute inset-0">
           <div className="absolute -top-24 -left-24 h-80 w-80 rounded-full bg-rose-100/60 blur-3xl" />
-          <div className="absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-red-100/50 blur-3xl" />
+          <div className="absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-rose-50/50 blur-3xl" />
           <div className="absolute inset-0 bg-gradient-to-b from-white via-white/95 to-white" />
         </div>
 
@@ -58,7 +58,7 @@ export default function ContactPage() {
               className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm hover:shadow-md transition"
             >
               <div className="flex items-center gap-2">
-                <MapPin className="h-5 w-5 text-red-700" />
+                <MapPin className="h-5 w-5 text-neutral-900" />
                 <h3 className="text-base font-bold text-gray-900">
                   {loc.title}
                 </h3>
@@ -82,7 +82,7 @@ export default function ContactPage() {
           <div className="flex items-start sm:items-center gap-3 sm:gap-4 flex-col sm:flex-row justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <MessageCircle className="h-5 w-5 text-red-700" />
+                <MessageCircle className="h-5 w-5 text-neutral-900" />
                 <h3 className="text-base font-bold text-gray-900">
                   WhatsApp for International Orders ✈️
                 </h3>
@@ -111,16 +111,16 @@ export default function ContactPage() {
 
           <div className="mt-6 grid gap-4">
             <input
-              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-red-200"
+              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-rose-200"
               placeholder="Your name"
             />
             <input
-              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-red-200"
+              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-rose-200"
               placeholder="Your phone number"
             />
             <textarea
               rows={5}
-              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-red-200"
+              className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-rose-200"
               placeholder="Your message"
             />
             <button

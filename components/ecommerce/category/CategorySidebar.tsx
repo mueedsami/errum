@@ -67,7 +67,7 @@ export default function CategorySidebar({
         <div
           className={`flex items-center justify-between p-2 rounded cursor-pointer transition-colors ${
             isActive(category)
-              ? 'bg-red-100 text-red-700 font-medium'
+              ? 'bg-rose-50 text-neutral-900 font-medium'
               : 'hover:bg-gray-100 text-gray-700'
           }`}
           style={{ paddingLeft: `${8 + level * 16}px` }}
@@ -107,7 +107,7 @@ export default function CategorySidebar({
           <div
             className={`p-2 rounded cursor-pointer transition-colors ${
               activeCategory === 'all'
-                ? 'bg-red-100 text-red-700 font-medium'
+                ? 'bg-rose-50 text-neutral-900 font-medium'
                 : 'hover:bg-gray-100 text-gray-700'
             }`}
             onClick={() => onCategoryChange('all')}
@@ -136,7 +136,7 @@ export default function CategorySidebar({
                 value={range.value}
                 checked={selectedPriceRange === range.value}
                 onChange={(e) => onPriceRangeChange(e.target.value)}
-                className="mr-2 text-red-600 focus:ring-red-500"
+                className="mr-2 text-rose-600 focus:ring-neutral-200"
               />
               <span className="text-sm text-gray-700">{range.label}</span>
             </label>
@@ -159,7 +159,7 @@ export default function CategorySidebar({
                 value={stock.value}
                 checked={selectedStock === stock.value}
                 onChange={(e) => onStockChange(e.target.value)}
-                className="mr-2 text-red-600 focus:ring-red-500"
+                className="mr-2 text-rose-600 focus:ring-neutral-200"
               />
               <span className="text-sm text-gray-700">{stock.label}</span>
             </label>

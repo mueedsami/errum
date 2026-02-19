@@ -1,7 +1,6 @@
 import { Suspense } from 'react';
 import { notFound } from 'next/navigation';
 import Navigation from '@/components/ecommerce/Navigation';
-import Footer from '@/components/ecommerce/Footer';
 import SearchClient from './search-client';
 import catalogService from '@/services/catalogService';
 import { buildCardProductsFromResponse } from '@/lib/ecommerceCardUtils';
@@ -47,10 +46,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
           initialTotal={totalResults}
           initialError={error}
         />
-      </Suspense>
-
-      <Footer />
-    </div>
+      </Suspense></div>
   );
 }
 

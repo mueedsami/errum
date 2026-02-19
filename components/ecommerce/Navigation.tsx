@@ -447,7 +447,7 @@ const Navbar = () => {
                   Loading categories...
                 </div>
               ) : error ? (
-                <div className="text-sm text-red-500">{error}</div>
+                <div className="text-sm text-rose-600">{error}</div>
               ) : categories.length === 0 ? (
                 <div className="text-sm text-gray-500">
                   No categories available

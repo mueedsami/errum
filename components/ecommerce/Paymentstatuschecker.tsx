@@ -135,7 +135,7 @@ export default function PaymentStatusChecker({ onPaymentVerified }: PaymentStatu
   // Render checking state
   if (checking) {
     return (
-      <div className="fixed top-4 right-4 z-50 bg-white rounded-lg shadow-lg p-4 max-w-md animate-slide-in">
+      <div className="fixed top-4 right-4 z-50 bg-white rounded-xl shadow-lg p-4 max-w-md animate-slide-in">
         <div className="flex items-center gap-3">
           <Loader2 className="animate-spin text-blue-600" size={24} />
           <div>
@@ -152,7 +152,7 @@ export default function PaymentStatusChecker({ onPaymentVerified }: PaymentStatu
     return (
       <div className="fixed top-4 right-4 z-50 max-w-md animate-slide-in">
         {paymentResult.status === 'success' && (
-          <div className="bg-green-50 border-2 border-green-500 rounded-lg shadow-lg p-4">
+          <div className="bg-green-50 border-2 border-green-500 rounded-xl shadow-lg p-4">
             <div className="flex items-start gap-3">
               <CheckCircle className="text-green-600 flex-shrink-0" size={24} />
               <div className="flex-1">
@@ -175,16 +175,16 @@ export default function PaymentStatusChecker({ onPaymentVerified }: PaymentStatu
         )}
 
         {paymentResult.status === 'failed' && (
-          <div className="bg-red-50 border-2 border-red-500 rounded-lg shadow-lg p-4">
+          <div className="bg-rose-50 border-2 border-rose-300 rounded-xl shadow-lg p-4">
             <div className="flex items-start gap-3">
-              <XCircle className="text-red-600 flex-shrink-0" size={24} />
+              <XCircle className="text-rose-600 flex-shrink-0" size={24} />
               <div className="flex-1">
-                <h4 className="font-bold text-red-900 mb-1">Payment Failed</h4>
-                <p className="text-sm text-red-800 mb-2">{paymentResult.message}</p>
+                <h4 className="font-bold text-rose-900 mb-1">Payment Failed</h4>
+                <p className="text-sm text-rose-800 mb-2">{paymentResult.message}</p>
                 {paymentResult.orderNumber && (
                   <button
                     onClick={() => router.push('/e-commerce/my-account')}
-                    className="text-xs text-red-700 font-medium hover:underline"
+                    className="text-xs text-neutral-900 font-medium hover:underline"
                   >
                     View Orders →
                   </button>
@@ -192,7 +192,7 @@ export default function PaymentStatusChecker({ onPaymentVerified }: PaymentStatu
               </div>
               <button
                 onClick={() => setPaymentResult({ status: null, orderNumber: null, message: null })}
-                className="text-red-600 hover:text-red-800"
+                className="text-rose-600 hover:text-neutral-900"
               >
                 ✕
               </button>
@@ -201,7 +201,7 @@ export default function PaymentStatusChecker({ onPaymentVerified }: PaymentStatu
         )}
 
         {paymentResult.status === 'cancelled' && (
-          <div className="bg-yellow-50 border-2 border-yellow-500 rounded-lg shadow-lg p-4">
+          <div className="bg-yellow-50 border-2 border-yellow-500 rounded-xl shadow-lg p-4">
             <div className="flex items-start gap-3">
               <AlertTriangle className="text-yellow-600 flex-shrink-0" size={24} />
               <div className="flex-1">

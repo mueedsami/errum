@@ -263,8 +263,8 @@ export default function BestSellerProducts() {
                         onClick={(e) => toggleWishlist(product, e)}
                         className={`p-2 rounded-full shadow-lg transition-all duration-300 ${
                           isInWishlist 
-                            ? 'bg-red-600 text-white scale-110' 
-                            : 'bg-white hover:bg-red-50'
+                            ? 'bg-rose-600 text-white scale-110' 
+                            : 'bg-white hover:bg-rose-50'
                         }`}
                       >
                         <Heart 
@@ -286,7 +286,7 @@ export default function BestSellerProducts() {
                     <button
                       onClick={(e) => handleAddToCart(product, e)}
                       disabled={addingProductId === product.id}
-                      className={`absolute bottom-0 left-0 right-0 bg-red-700 text-white py-3 text-sm font-bold transition-transform duration-300 flex items-center justify-center gap-2 hover:bg-red-800 ${
+                      className={`absolute bottom-0 left-0 right-0 bg-neutral-900 text-white py-3 text-sm font-bold transition-transform duration-300 flex items-center justify-center gap-2 hover:bg-neutral-800 ${
                         hoveredId === product.id ? 'translate-y-0' : 'translate-y-full'
                       } ${addingProductId === product.id ? 'bg-green-600' : ''}`}
                     >
@@ -306,11 +306,11 @@ export default function BestSellerProducts() {
                   <div className="p-4 text-center">
                     <h3 
                       onClick={() => navigateToProduct(product.variations[0].id)}
-                      className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 group-hover:text-red-600 transition-colors cursor-pointer"
+                      className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 group-hover:text-rose-600 transition-colors cursor-pointer"
                     >
                       {product.name}
                     </h3>
-                    <span className="text-lg font-bold text-red-700">
+                    <span className="text-lg font-bold text-neutral-900">
                       {product.priceRange?.includes('-')
                         ? `${product.priceRange}৳`
                         : `${product.variations[0].price.toLocaleString()}.00৳`}

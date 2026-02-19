@@ -204,14 +204,14 @@ export default function LoginRegisterPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-transparent">
       {/* Header */}
       <header className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             <button 
               onClick={() => router.push('/e-commerce')}
-              className="flex items-center text-gray-700 hover:text-red-700 transition-colors"
+              className="flex items-center text-gray-700 hover:text-neutral-900 transition-colors"
             >
               <ArrowLeft size={20} className="mr-2" />
               <span>Back to Shop</span>
@@ -225,7 +225,7 @@ export default function LoginRegisterPage() {
       {/* Breadcrumb */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
         <div className="text-sm text-gray-600">
-          <button onClick={() => router.push('/e-commerce')} className="text-red-700 hover:underline">
+          <button onClick={() => router.push('/e-commerce')} className="text-neutral-900 hover:underline">
             Home
           </button>
           <span className="mx-2">&gt;</span>
@@ -263,7 +263,7 @@ export default function LoginRegisterPage() {
           <div className={`flex items-center gap-3 p-4 rounded-lg shadow-lg min-w-[320px] max-w-md ${
             alert.type === 'success' 
               ? 'bg-green-600 text-white' 
-              : 'bg-red-600 text-white'
+              : 'bg-rose-600 text-white'
           }`}>
             <div className="flex-shrink-0">
               {alert.type === 'success' ? (
@@ -310,7 +310,7 @@ export default function LoginRegisterPage() {
               onClick={() => setActiveTab('login')}
               className={`flex-1 pb-4 text-lg font-medium transition-colors relative ${
                 activeTab === 'login'
-                  ? 'text-red-700 border-b-2 border-red-700'
+                  ? 'text-neutral-900 border-b-2 border-neutral-900'
                   : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -320,7 +320,7 @@ export default function LoginRegisterPage() {
               onClick={() => setActiveTab('register')}
               className={`flex-1 pb-4 text-lg font-medium transition-colors relative ${
                 activeTab === 'register'
-                  ? 'text-red-700 border-b-2 border-red-700'
+                  ? 'text-neutral-900 border-b-2 border-neutral-900'
                   : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -333,13 +333,13 @@ export default function LoginRegisterPage() {
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Email address <span className="text-red-700">*</span>
+                  Email address <span className="text-neutral-900">*</span>
                 </label>
                 <input
                   type="email"
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-700 focus:border-transparent transition-all"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-200 focus:border-transparent transition-all"
                   placeholder="Enter your email"
                   onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
                   disabled={isLoading}
@@ -348,14 +348,14 @@ export default function LoginRegisterPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Password <span className="text-red-700">*</span>
+                  Password <span className="text-neutral-900">*</span>
                 </label>
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
-                    className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-700 focus:border-transparent transition-all"
+                    className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-200 focus:border-transparent transition-all"
                     placeholder="Enter your password"
                     onKeyPress={(e) => e.key === 'Enter' && handleLogin()}
                     disabled={isLoading}
@@ -377,7 +377,7 @@ export default function LoginRegisterPage() {
                     type="checkbox"
                     checked={rememberMe}
                     onChange={(e) => setRememberMe(e.target.checked)}
-                    className="w-4 h-4 text-red-700 border-gray-300 rounded focus:ring-red-700"
+                    className="w-4 h-4 text-neutral-900 border-gray-300 rounded focus:ring-neutral-200"
                     disabled={isLoading}
                   />
                   <span className="ml-2 text-sm text-gray-700">Remember me</span>
@@ -387,13 +387,13 @@ export default function LoginRegisterPage() {
               <button
                 onClick={handleLogin}
                 disabled={isLoading}
-                className="w-full bg-red-700 text-white py-3 rounded-md font-medium hover:bg-red-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="w-full bg-neutral-900 text-white py-3 rounded-md font-medium hover:bg-neutral-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
                 {isLoading ? 'Logging in...' : 'Log In'}
               </button>
 
               <div className="text-center">
-                <a href="#" className="text-red-700 hover:underline text-sm">
+                <a href="#" className="text-neutral-900 hover:underline text-sm">
                   Lost your password?
                 </a>
               </div>
@@ -405,13 +405,13 @@ export default function LoginRegisterPage() {
             <div className="space-y-6">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Full Name <span className="text-red-700">*</span>
+                  Full Name <span className="text-neutral-900">*</span>
                 </label>
                 <input
                   type="text"
                   value={registerName}
                   onChange={(e) => setRegisterName(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-700 focus:border-transparent transition-all"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-200 focus:border-transparent transition-all"
                   placeholder="Enter your full name"
                   disabled={isLoading}
                 />
@@ -419,13 +419,13 @@ export default function LoginRegisterPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Email address <span className="text-red-700">*</span>
+                  Email address <span className="text-neutral-900">*</span>
                 </label>
                 <input
                   type="email"
                   value={registerEmail}
                   onChange={(e) => setRegisterEmail(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-700 focus:border-transparent transition-all"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-200 focus:border-transparent transition-all"
                   placeholder="Enter your email"
                   disabled={isLoading}
                 />
@@ -433,13 +433,13 @@ export default function LoginRegisterPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Phone Number <span className="text-red-700">*</span>
+                  Phone Number <span className="text-neutral-900">*</span>
                 </label>
                 <input
                   type="tel"
                   value={registerPhone}
                   onChange={(e) => setRegisterPhone(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-700 focus:border-transparent transition-all"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-200 focus:border-transparent transition-all"
                   placeholder="01XXXXXXXXX"
                   disabled={isLoading}
                 />
@@ -448,14 +448,14 @@ export default function LoginRegisterPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Password <span className="text-red-700">*</span>
+                  Password <span className="text-neutral-900">*</span>
                 </label>
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
                     value={registerPassword}
                     onChange={(e) => setRegisterPassword(e.target.value)}
-                    className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-700 focus:border-transparent transition-all"
+                    className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-200 focus:border-transparent transition-all"
                     placeholder="Create a password"
                     disabled={isLoading}
                     autoComplete="new-password"
@@ -475,14 +475,14 @@ export default function LoginRegisterPage() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Confirm Password <span className="text-red-700">*</span>
+                  Confirm Password <span className="text-neutral-900">*</span>
                 </label>
                 <div className="relative">
                   <input
                     type={showConfirmPassword ? 'text' : 'password'}
                     value={registerConfirmPassword}
                     onChange={(e) => setRegisterConfirmPassword(e.target.value)}
-                    className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-red-700 focus:border-transparent transition-all"
+                    className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-200 focus:border-transparent transition-all"
                     placeholder="Confirm your password"
                     disabled={isLoading}
                     autoComplete="new-password"
@@ -499,7 +499,7 @@ export default function LoginRegisterPage() {
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
                   {registerConfirmPassword && registerPassword !== registerConfirmPassword && (
-                    <span className="text-red-700">Passwords do not match</span>
+                    <span className="text-neutral-900">Passwords do not match</span>
                   )}
                   {registerConfirmPassword && registerPassword === registerConfirmPassword && (
                     <span className="text-green-700">Passwords match ✓</span>
@@ -517,7 +517,7 @@ export default function LoginRegisterPage() {
                 onClick={handleRegister}
                 disabled={isLoading}
                 type="button"
-                className="w-full bg-red-700 text-white py-3 rounded-md font-medium hover:bg-red-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                className="w-full bg-neutral-900 text-white py-3 rounded-md font-medium hover:bg-neutral-800 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
               >
                 {isLoading ? 'Registering...' : 'Register'}
               </button>

@@ -45,10 +45,20 @@ const flattenCategories = (cats: CatalogCategory[]): CatalogCategory[] => {
 
 
 const UI_CARDS_PER_PAGE = 20;
-const API_RAW_PAGE_SIZE = 200;
 const MAX_API_PAGES = 50;
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const getProductsSilent = (params: GetProductsParams) =>
+  catalogService.getProducts({ ...(params as any), _suppressErrorLog: true } as GetProductsParams);
+
+const getPageSizeFromResponse = (response: Awaited<ReturnType<typeof catalogService.getProducts>> | null | undefined) => {
+  const p = Number(response?.pagination?.per_page || 0);
+  if (Number.isFinite(p) && p > 0) return p;
+  const len = Array.isArray(response?.products) ? response!.products.length : 0;
+  return Math.max(1, len || 20);
+};
+
 
 const buildCardProductsFromFlatCatalog = (rawProducts: (Product | SimpleProduct)[]): SimpleProduct[] => {
   const grouped = groupProductsByMother(rawProducts as any[], {
@@ -164,35 +174,66 @@ export default function CategoryPage() {
 
   const recoverFailedApiPageRange = async (
     attemptParams: Record<string, any>,
-    failedApiPage: number
-  ): Promise<{ recovered: (Product | SimpleProduct)[]; unrecoverableItemSlots: number }> => {
+    failedApiPage: number,
+    rawPageSize: number
+  ): Promise<{ recovered: (Product | SimpleProduct)[]; unrecoverableItemSlots: number; perPageOverrideSupported: boolean }> => {
     const recovered: (Product | SimpleProduct)[] = [];
-    const divisors = [100, 50, 20, 10, 5, 1].filter((size) => API_RAW_PAGE_SIZE % size === 0);
-    const startIndex = (failedApiPage - 1) * API_RAW_PAGE_SIZE;
-    const endIndexExclusive = startIndex + API_RAW_PAGE_SIZE;
+    const divisors = [100, 50, 20, 10, 5, 1]
+      .filter((size) => rawPageSize % size === 0 && size < rawPageSize)
+      .sort((a, b) => b - a);
 
-    const fetchChunkRecursive = async (chunkStart: number, chunkEndExclusive: number, divisorIndex: number): Promise<number> => {
+    if (divisors.length === 0) {
+      return { recovered, unrecoverableItemSlots: rawPageSize, perPageOverrideSupported: false };
+    }
+
+    const startIndex = (failedApiPage - 1) * rawPageSize;
+    const endIndexExclusive = startIndex + rawPageSize;
+    let perPageOverrideSupported: boolean | null = null;
+
+    const fetchChunkRecursive = async (
+      chunkStart: number,
+      chunkEndExclusive: number,
+      divisorIndex: number
+    ): Promise<number> => {
       const chunkSize = divisors[Math.min(divisorIndex, divisors.length - 1)] || 1;
       let unrecoverableSlots = 0;
 
       for (let cursor = chunkStart; cursor < chunkEndExclusive; cursor += chunkSize) {
         const page = Math.floor(cursor / chunkSize) + 1;
         try {
-          const response = await catalogService.getProducts({
+          const response = await getProductsSilent({
             ...(attemptParams as any),
             page,
             per_page: chunkSize,
-          });
+          } as GetProductsParams);
+
+          if (perPageOverrideSupported === null) {
+            const returnedPageSize = getPageSizeFromResponse(response);
+            perPageOverrideSupported = returnedPageSize === chunkSize || (chunkSize === 1 && returnedPageSize === 1);
+          }
+
+          if (perPageOverrideSupported === false) {
+            // Backend is ignoring per_page overrides, so chunk-based recovery is impossible.
+            return chunkEndExclusive - chunkStart;
+          }
 
           if (Array.isArray(response?.products) && response.products.length > 0) {
             recovered.push(...(response.products as any[]));
           }
         } catch (chunkErr) {
+          if (perPageOverrideSupported === false) {
+            return chunkEndExclusive - chunkStart;
+          }
+
           if (chunkSize === 1) {
             unrecoverableSlots += 1;
-            console.error(`Skipping malformed product item at raw index ${cursor} (api page ${failedApiPage})`, chunkErr);
+            console.warn(`Skipping malformed product item at raw index ${cursor} (api page ${failedApiPage})`);
           } else {
-            unrecoverableSlots += await fetchChunkRecursive(cursor, Math.min(cursor + chunkSize, chunkEndExclusive), divisorIndex + 1);
+            unrecoverableSlots += await fetchChunkRecursive(
+              cursor,
+              Math.min(cursor + chunkSize, chunkEndExclusive),
+              divisorIndex + 1
+            );
           }
         }
       }
@@ -201,8 +242,13 @@ export default function CategoryPage() {
     };
 
     const unrecoverableItemSlots = await fetchChunkRecursive(startIndex, endIndexExclusive, 0);
-    return { recovered, unrecoverableItemSlots };
+    return {
+      recovered,
+      unrecoverableItemSlots,
+      perPageOverrideSupported: perPageOverrideSupported !== false,
+    };
   };
+
 
 
   const fetchProducts = async (uiPage = 1) => {
@@ -213,7 +259,7 @@ export default function CategoryPage() {
     try {
       const baseParams: GetProductsParams = {
         page: 1,
-        per_page: API_RAW_PAGE_SIZE,
+        per_page: 200,
         sort_by: selectedSort as GetProductsParams['sort_by'],
       };
 
@@ -269,7 +315,7 @@ export default function CategoryPage() {
 
         let initialResponse: Awaited<ReturnType<typeof catalogService.getProducts>> | null = null;
         try {
-          initialResponse = await catalogService.getProducts({ ...(attempt as any), page: 1 });
+          initialResponse = await getProductsSilent({ ...(attempt as any), page: 1 } as GetProductsParams);
         } catch (pageErr) {
           console.error('Error fetching products page 1 for attempt:', attempt, pageErr);
           lastFatalError = pageErr;
@@ -280,27 +326,31 @@ export default function CategoryPage() {
           aggregatedRaw.push(...(initialResponse.products as any[]));
         }
 
+        const rawPageSize = getPageSizeFromResponse(initialResponse);
         const apiLastPage = Math.max(1, Number(initialResponse?.pagination?.last_page || 1));
         if (apiLastPage > 1) {
           const safeLastPage = Math.min(apiLastPage, MAX_API_PAGES);
           for (let apiPage = 2; apiPage <= safeLastPage; apiPage += 1) {
             try {
-              const nextResponse = await catalogService.getProducts({ ...(attempt as any), page: apiPage });
+              const nextResponse = await getProductsSilent({ ...(attempt as any), page: apiPage } as GetProductsParams);
               if (Array.isArray(nextResponse?.products) && nextResponse.products.length > 0) {
                 aggregatedRaw.push(...(nextResponse.products as any[]));
               }
               if (!nextResponse?.pagination?.has_more_pages) break;
             } catch (pageErr) {
-              console.error(`Error fetching products page ${apiPage}:`, pageErr);
+              console.warn(`Backend page ${apiPage} returned an error. Attempting recovery...`);
               hadRecoverableFailures = true;
 
               try {
-                const recovery = await recoverFailedApiPageRange(attempt, apiPage);
+                const recovery = await recoverFailedApiPageRange(attempt, apiPage, rawPageSize);
                 if (Array.isArray(recovery.recovered) && recovery.recovered.length > 0) {
                   aggregatedRaw.push(...(recovery.recovered as any[]));
                 }
 
-                if (recovery.unrecoverableItemSlots > 0) {
+                if (!recovery.perPageOverrideSupported) {
+                  console.warn(`Backend ignored per_page override, so frontend could not isolate bad item(s) on backend page ${apiPage}. Skipping that page.`);
+                  failedApiPages.add(apiPage);
+                } else if (recovery.unrecoverableItemSlots > 0) {
                   failedApiPages.add(apiPage);
                 } else {
                   console.info(`Recovered backend page ${apiPage} using smaller chunk retries`);

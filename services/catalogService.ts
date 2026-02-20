@@ -170,6 +170,8 @@ export interface GetProductsParams {
   page?: number;
   featured?: boolean;
   new_arrivals?: boolean;
+  /** Internal-only: suppress noisy console errors for expected retry probes */
+  _suppressErrorLog?: boolean;
 }
 
 export interface SearchProductsParams {
@@ -701,8 +703,10 @@ const linkCategoryParents = (nodes: CatalogCategory[], parent: CatalogCategory |
  */
 const catalogService = {
   async getProducts(params?: GetProductsParams): Promise<CatalogProductsResponse> {
+    const suppressErrorLog = Boolean((params as any)?._suppressErrorLog);
     try {
       const requestParams: Record<string, any> = { ...(params || {}) };
+      delete requestParams._suppressErrorLog;
 
       // Backwards/forwards compatible category filters:
       // Some backends expect `category` (slug/name) while others use `category_id`.
@@ -741,7 +745,9 @@ const catalogService = {
       const parsed = parseProductsPayload(payload);
       return parsed;
     } catch (error) {
-      console.error('Error fetching products:', error);
+      if (!suppressErrorLog) {
+        console.error('Error fetching products:', error);
+      }
       throw new Error('Failed to fetch products');
     }
   },

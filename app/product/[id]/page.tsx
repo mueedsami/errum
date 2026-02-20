@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, Edit, Trash2, Archive, Package, Tag, Calendar, User, ChevronLeft, ChevronRight } from 'lucide-react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
@@ -17,6 +17,7 @@ interface ProductDetailPageProps {
 
 export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const productId = parseInt(params.id);
 
   const [darkMode, setDarkMode] = useState(false);
@@ -25,6 +26,15 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+
+  const goBackSafely = () => {
+    const returnTo = searchParams.get('returnTo');
+    if (returnTo && returnTo.startsWith('/')) {
+      router.push(returnTo);
+      return;
+    }
+    router.back();
+  };
 
   useEffect(() => {
     fetchProduct();
@@ -67,7 +77,11 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     try {
       await productService.delete(productId);
       setToast({ message: 'Product deleted successfully', type: 'success' });
-      setTimeout(() => router.push('/product/list'), 1500);
+      setTimeout(() => {
+        const returnTo = searchParams.get('returnTo');
+        if (returnTo && returnTo.startsWith('/')) router.push(returnTo);
+        else router.push('/product/list');
+      }, 1500);
     } catch (error) {
       console.error('Failed to delete product:', error);
       setToast({ message: 'Failed to delete product', type: 'error' });
@@ -80,7 +94,11 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
     try {
       await productService.archive(productId);
       setToast({ message: 'Product archived successfully', type: 'success' });
-      setTimeout(() => router.push('/product/list'), 1500);
+      setTimeout(() => {
+        const returnTo = searchParams.get('returnTo');
+        if (returnTo && returnTo.startsWith('/')) router.push(returnTo);
+        else router.push('/product/list');
+      }, 1500);
     } catch (error) {
       console.error('Failed to archive product:', error);
       setToast({ message: 'Failed to archive product', type: 'error' });
@@ -133,7 +151,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
             <div className="text-center">
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">Product Not Found</h2>
               <button
-                onClick={() => router.push('/product/list')}
+                onClick={goBackSafely}
                 className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
               >
                 Back to Products
@@ -157,7 +175,7 @@ export default function ProductDetailPage({ params }: ProductDetailPageProps) {
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-4">
                 <button
-                  onClick={() => router.back()}
+                  onClick={goBackSafely}
                   className="p-2.5 hover:bg-white dark:hover:bg-gray-800 rounded-lg transition-colors border border-gray-200 dark:border-gray-700 shadow-sm"
                 >
                   <ArrowLeft className="w-5 h-5 text-gray-600 dark:text-gray-400" />

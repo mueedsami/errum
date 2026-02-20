@@ -5,6 +5,31 @@ const toNumber = (value: unknown): number => {
   return Number.isFinite(num) ? num : 0;
 };
 
+const toUnixMs = (value: unknown): number => {
+  if (!value) return 0;
+  const ms = Date.parse(String(value));
+  return Number.isFinite(ms) ? ms : 0;
+};
+
+export const getCardNewestSortKey = (product: SimpleProduct): number => {
+  const variants = getVariantListForCard(product);
+  let newestTime = 0;
+  let newestId = 0;
+
+  variants.forEach((item) => {
+    newestId = Math.max(newestId, toNumber((item as any)?.id));
+    newestTime = Math.max(
+      newestTime,
+      toUnixMs((item as any)?.created_at),
+      toUnixMs((item as any)?.updated_at),
+    );
+  });
+
+  // Timestamp drives order. ID is a tiebreaker for records without dates.
+  return newestTime > 0 ? newestTime * 100000 + newestId : newestId;
+};
+
+
 const dedupeVariants = (variants: SimpleProduct[]): SimpleProduct[] => {
   const seen = new Set<string>();
   const list: SimpleProduct[] = [];

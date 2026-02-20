@@ -414,8 +414,8 @@ const normalizeProduct = (
         count: toNumber(raw.ratings.count, 0),
       }
       : undefined,
-    created_at: raw?.created_at || new Date().toISOString(),
-    updated_at: raw?.updated_at || new Date().toISOString(),
+    created_at: normalizeString(raw?.created_at || ''),
+    updated_at: normalizeString(raw?.updated_at || raw?.created_at || ''),
   };
 };
 

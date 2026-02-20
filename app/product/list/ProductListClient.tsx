@@ -61,7 +61,10 @@ export default function ProductPage() {
   }
 
   const updateQueryParams = useCallback(
-    (updates: Record<string, string | null | undefined>) => {
+    (
+      updates: Record<string, string | null | undefined>,
+      historyMode: 'replace' | 'push' = 'replace'
+    ) => {
       const params = new URLSearchParams(searchParams.toString());
       Object.entries(updates).forEach(([key, value]) => {
         if (value === null || value === undefined || value === '') params.delete(key);
@@ -69,8 +72,13 @@ export default function ProductPage() {
       });
 
       const qs = params.toString();
+      const nextUrl = qs ? `${pathname}?${qs}` : pathname;
       isUpdatingUrlRef.current = true;
-      router.replace(qs ? `${pathname}?${qs}` : pathname);
+      if (historyMode === 'push') {
+        router.push(nextUrl);
+      } else {
+        router.replace(nextUrl);
+      }
     },
     [router, pathname, searchParams]
   );
@@ -78,7 +86,7 @@ const goToPage = useCallback(
   (page: number) => {
     const safe = Number.isFinite(page) && page > 0 ? page : 1;
     setCurrentPage(safe);
-    updateQueryParams({ page: String(safe) });
+    updateQueryParams({ page: String(safe) }, 'push');
   },
   [updateQueryParams]
 );
@@ -597,7 +605,9 @@ const goToPage = useCallback(
   };
 
   const handleView = (id: number) => {
-    router.push(`/product/${id}`);
+    const qs = searchParams.toString();
+    const returnTo = qs ? `${pathname}?${qs}` : pathname;
+    router.push(`/product/${id}?returnTo=${encodeURIComponent(returnTo)}`);
   };
 
   const handleAdd = () => {

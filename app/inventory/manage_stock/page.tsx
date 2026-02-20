@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, Package, CheckCircle, AlertCircle } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import StoreCard from '@/components/StoreCard';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
@@ -22,6 +22,9 @@ interface StoreCardData {
 
 export default function ManageStockPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const isUpdatingUrlRef = useRef(false);
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -31,6 +34,31 @@ export default function ManageStockPage() {
   const [userStoreId, setUserStoreId] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>('');
+
+  const updateQueryParams = useCallback(
+    (updates: Record<string, string | null | undefined>, historyMode: 'replace' | 'push' = 'replace') => {
+      const params = new URLSearchParams(searchParams.toString());
+      Object.entries(updates).forEach(([key, value]) => {
+        if (value === null || value === undefined || value === '') params.delete(key);
+        else params.set(key, value);
+      });
+
+      const qs = params.toString();
+      const nextUrl = qs ? `${pathname}?${qs}` : pathname;
+      isUpdatingUrlRef.current = true;
+      if (historyMode === 'push') router.push(nextUrl);
+      else router.replace(nextUrl);
+    },
+    [router, pathname, searchParams]
+  );
+
+  useEffect(() => {
+    if (isUpdatingUrlRef.current) {
+      isUpdatingUrlRef.current = false;
+      return;
+    }
+    setSearchTerm(searchParams.get('q') ?? '');
+  }, [searchParams]);
 
   useEffect(() => {
     const role = localStorage.getItem('userRole') || '';
@@ -105,7 +133,9 @@ export default function ManageStockPage() {
   };
 
   const handleManageStock = (storeId: string) => {
-    router.push(`/inventory/outlet-stock?storeId=${storeId}`);
+    const qs = searchParams.toString();
+    const returnTo = qs ? `${pathname}?${qs}` : pathname;
+    router.push(`/inventory/outlet-stock?storeId=${storeId}&returnTo=${encodeURIComponent(returnTo)}`);
   };
 
   const filteredStores = stores.filter(
@@ -173,7 +203,11 @@ export default function ManageStockPage() {
                       type="text"
                       placeholder="Search stores..."
                       value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        setSearchTerm(next);
+                        updateQueryParams({ q: next || null });
+                      }}
                       className="pl-9 pr-4 py-2 border border-gray-200 dark:border-gray-600 rounded-lg text-sm w-64 bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500"
                     />
                   </div>

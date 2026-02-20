@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { AlertCircle, ChevronDown, ChevronUp, Package, Search } from 'lucide-react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import inventoryService, { GlobalInventoryItem, Store as StoreBreakdown } from '@/services/inventoryService';
@@ -44,6 +45,11 @@ type ExtraCounts = { total: number; used: number; defective: number };
 type RateLimitState = { active: boolean; lastAt?: number; message?: string };
 
 export default function ViewInventoryPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const isUpdatingUrlRef = useRef(false);
+
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -66,6 +72,23 @@ export default function ViewInventoryPage() {
   const imageCacheRef = useRef<Record<number, string>>({});
   const inFlightRef = useRef<Set<number>>(new Set());
 
+  const updateQueryParams = useCallback(
+    (updates: Record<string, string | null | undefined>, historyMode: 'replace' | 'push' = 'replace') => {
+      const params = new URLSearchParams(searchParams.toString());
+      Object.entries(updates).forEach(([key, value]) => {
+        if (value === null || value === undefined || value === '') params.delete(key);
+        else params.set(key, value);
+      });
+
+      const qs = params.toString();
+      const nextUrl = qs ? `${pathname}?${qs}` : pathname;
+      isUpdatingUrlRef.current = true;
+      if (historyMode === 'push') router.push(nextUrl);
+      else router.replace(nextUrl);
+    },
+    [router, pathname, searchParams]
+  );
+
   useEffect(() => {
     metaCacheRef.current = productMetaById;
   }, [productMetaById]);
@@ -74,10 +97,20 @@ export default function ViewInventoryPage() {
     imageCacheRef.current = productImageById;
   }, [productImageById]);
 
-  // Reset pagination when searching
+  // Sync URL params -> local state (supports refresh + browser back/forward)
   useEffect(() => {
-    setVisibleCount(50);
-  }, [searchTerm]);
+    if (isUpdatingUrlRef.current) {
+      isUpdatingUrlRef.current = false;
+      return;
+    }
+
+    const q = searchParams.get('q') ?? '';
+    const limitRaw = Number(searchParams.get('limit') ?? '50');
+    const safeLimit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.floor(limitRaw) : 50;
+
+    setSearchTerm(q);
+    setVisibleCount(safeLimit);
+  }, [searchParams]);
 
   useEffect(() => {
     fetchInitialData();
@@ -517,6 +550,18 @@ export default function ViewInventoryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleProductIds]);
 
+  const handleSearchChange = (value: string) => {
+    setSearchTerm(value);
+    setVisibleCount(50);
+    updateQueryParams({ q: value || null, limit: '50' });
+  };
+
+  const handleLoadMore = () => {
+    const next = visibleCount + 50;
+    setVisibleCount(next);
+    updateQueryParams({ limit: String(next) }, 'push');
+  };
+
   // -------------------- UI --------------------
   if (loading) {
     return (
@@ -570,7 +615,7 @@ export default function ViewInventoryPage() {
                   type="text"
                   placeholder="Search by product name, SKU or category"
                   value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onChange={(e) => handleSearchChange(e.target.value)}
                   className="w-full pl-10 pr-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
@@ -792,7 +837,7 @@ export default function ViewInventoryPage() {
                   {filteredProducts.length > visibleCount && (
                     <div className="flex justify-center pt-2">
                       <button
-                        onClick={() => setVisibleCount(v => v + 50)}
+                        onClick={handleLoadMore}
                         className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                       >
                         Load more ({Math.min(50, filteredProducts.length - visibleCount)} more)

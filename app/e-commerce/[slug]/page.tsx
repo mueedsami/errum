@@ -121,6 +121,7 @@ export default function CategoryPage() {
   const [loading, setLoading] = useState(true);
   const [categoriesLoading, setCategoriesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [partialLoadWarning, setPartialLoadWarning] = useState<string | null>(null);
 
   const [selectedSort, setSelectedSort] = useState('newest');
   const [currentPage, setCurrentPage] = useState(1);
@@ -161,10 +162,54 @@ export default function CategoryPage() {
   };
 
 
+  const recoverFailedApiPageRange = async (
+    attemptParams: Record<string, any>,
+    failedApiPage: number
+  ): Promise<{ recovered: (Product | SimpleProduct)[]; unrecoverableItemSlots: number }> => {
+    const recovered: (Product | SimpleProduct)[] = [];
+    const divisors = [100, 50, 20, 10, 5, 1].filter((size) => API_RAW_PAGE_SIZE % size === 0);
+    const startIndex = (failedApiPage - 1) * API_RAW_PAGE_SIZE;
+    const endIndexExclusive = startIndex + API_RAW_PAGE_SIZE;
+
+    const fetchChunkRecursive = async (chunkStart: number, chunkEndExclusive: number, divisorIndex: number): Promise<number> => {
+      const chunkSize = divisors[Math.min(divisorIndex, divisors.length - 1)] || 1;
+      let unrecoverableSlots = 0;
+
+      for (let cursor = chunkStart; cursor < chunkEndExclusive; cursor += chunkSize) {
+        const page = Math.floor(cursor / chunkSize) + 1;
+        try {
+          const response = await catalogService.getProducts({
+            ...(attemptParams as any),
+            page,
+            per_page: chunkSize,
+          });
+
+          if (Array.isArray(response?.products) && response.products.length > 0) {
+            recovered.push(...(response.products as any[]));
+          }
+        } catch (chunkErr) {
+          if (chunkSize === 1) {
+            unrecoverableSlots += 1;
+            console.error(`Skipping malformed product item at raw index ${cursor} (api page ${failedApiPage})`, chunkErr);
+          } else {
+            unrecoverableSlots += await fetchChunkRecursive(cursor, Math.min(cursor + chunkSize, chunkEndExclusive), divisorIndex + 1);
+          }
+        }
+      }
+
+      return unrecoverableSlots;
+    };
+
+    const unrecoverableItemSlots = await fetchChunkRecursive(startIndex, endIndexExclusive, 0);
+    return { recovered, unrecoverableItemSlots };
+  };
+
+
   const fetchProducts = async (uiPage = 1) => {
     if (categoriesLoading) return;
 
     setLoading(true);
+    setPartialLoadWarning(null);
     try {
       const baseParams: GetProductsParams = {
         page: 1,
@@ -215,11 +260,22 @@ export default function CategoryPage() {
       }
 
       let matched = false;
+      let hadRecoverableFailures = false;
+      let lastFatalError: unknown = null;
 
       for (const attempt of attempts) {
         const aggregatedRaw: (Product | SimpleProduct)[] = [];
+        const failedApiPages = new Set<number>();
 
-        const initialResponse = await catalogService.getProducts({ ...(attempt as any), page: 1 });
+        let initialResponse: Awaited<ReturnType<typeof catalogService.getProducts>> | null = null;
+        try {
+          initialResponse = await catalogService.getProducts({ ...(attempt as any), page: 1 });
+        } catch (pageErr) {
+          console.error('Error fetching products page 1 for attempt:', attempt, pageErr);
+          lastFatalError = pageErr;
+          continue;
+        }
+
         if (Array.isArray(initialResponse?.products) && initialResponse.products.length > 0) {
           aggregatedRaw.push(...(initialResponse.products as any[]));
         }
@@ -228,11 +284,34 @@ export default function CategoryPage() {
         if (apiLastPage > 1) {
           const safeLastPage = Math.min(apiLastPage, MAX_API_PAGES);
           for (let apiPage = 2; apiPage <= safeLastPage; apiPage += 1) {
-            const nextResponse = await catalogService.getProducts({ ...(attempt as any), page: apiPage });
-            if (Array.isArray(nextResponse?.products) && nextResponse.products.length > 0) {
-              aggregatedRaw.push(...(nextResponse.products as any[]));
+            try {
+              const nextResponse = await catalogService.getProducts({ ...(attempt as any), page: apiPage });
+              if (Array.isArray(nextResponse?.products) && nextResponse.products.length > 0) {
+                aggregatedRaw.push(...(nextResponse.products as any[]));
+              }
+              if (!nextResponse?.pagination?.has_more_pages) break;
+            } catch (pageErr) {
+              console.error(`Error fetching products page ${apiPage}:`, pageErr);
+              hadRecoverableFailures = true;
+
+              try {
+                const recovery = await recoverFailedApiPageRange(attempt, apiPage);
+                if (Array.isArray(recovery.recovered) && recovery.recovered.length > 0) {
+                  aggregatedRaw.push(...(recovery.recovered as any[]));
+                }
+
+                if (recovery.unrecoverableItemSlots > 0) {
+                  failedApiPages.add(apiPage);
+                } else {
+                  console.info(`Recovered backend page ${apiPage} using smaller chunk retries`);
+                }
+              } catch (recoveryErr) {
+                console.error(`Recovery failed for products page ${apiPage}:`, recoveryErr);
+                failedApiPages.add(apiPage);
+              }
+
+              continue;
             }
-            if (!nextResponse?.pagination?.has_more_pages) break;
           }
         }
 
@@ -249,21 +328,43 @@ export default function CategoryPage() {
           setCurrentPage(safeUiPage);
           setTotalPages(computedTotalPages);
           setError(null);
+
+          if (failedApiPages.size > 0) {
+            const sortedFailedPages = Array.from(failedApiPages).sort((a, b) => a - b);
+            setPartialLoadWarning(
+              `Some products were skipped due to a server data issue. We recovered what we could, but backend page${sortedFailedPages.length > 1 ? 's' : ''} ${sortedFailedPages.join(', ')} still has invalid item data.`
+            );
+          } else if (hadRecoverableFailures) {
+            setPartialLoadWarning('Some backend pages had data issues, but products were recovered automatically.');
+          } else {
+            setPartialLoadWarning(null);
+          }
+
           matched = true;
           break;
         }
       }
 
       if (!matched) {
+        if (hadRecoverableFailures) {
+          setError('Some products could not be loaded because of a server data issue.');
+          setPartialLoadWarning('Try changing sort order or filters to continue browsing other products.');
+        } else if (lastFatalError) {
+          throw lastFatalError;
+        } else {
+          setError(null);
+          setPartialLoadWarning(null);
+        }
+
         setProducts([]);
         setTotalResults(0);
         setCurrentPage(1);
         setTotalPages(1);
-        setError(null);
       }
     } catch (err) {
       console.error('Error fetching products:', err);
       setError('Failed to load products');
+      setPartialLoadWarning(null);
       setProducts([]);
       setTotalResults(0);
     } finally {
@@ -392,6 +493,12 @@ export default function CategoryPage() {
                   <option value="name">Name A-Z</option>
                 </select>
               </div>
+
+              {partialLoadWarning && !error && (
+                <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  {partialLoadWarning}
+                </div>
+              )}
 
               {error ? (
                 <div className="text-center py-12">

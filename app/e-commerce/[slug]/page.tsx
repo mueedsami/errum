@@ -44,6 +44,62 @@ const flattenCategories = (cats: CatalogCategory[]): CatalogCategory[] => {
 };
 
 
+const getDescendantCategoryNodes = (category: CatalogCategory | null | undefined): CatalogCategory[] => {
+  if (!category) return [];
+  const nodes: CatalogCategory[] = [];
+  const walk = (node: CatalogCategory) => {
+    nodes.push(node);
+    if (Array.isArray(node.children)) node.children.forEach(walk);
+  };
+  walk(category);
+  return nodes;
+};
+
+const buildAllowedCategoryKeys = (category: CatalogCategory | null, slugFallback: string) => {
+  const ids = new Set<number>();
+  const keys = new Set<string>();
+
+  const addKey = (v: string | undefined | null) => {
+    const k = normalizeKey(String(v || ''));
+    if (k) keys.add(k);
+  };
+
+  if (category) {
+    for (const node of getDescendantCategoryNodes(category)) {
+      const id = Number((node as any)?.id || 0);
+      if (id > 0) ids.add(id);
+      addKey(node.name);
+      addKey(node.slug);
+    }
+  }
+
+  addKey(slugFallback);
+
+  return { ids, keys };
+};
+
+const productMatchesAllowedCategory = (
+  product: Product | SimpleProduct,
+  allowed: { ids: Set<number>; keys: Set<string> }
+) => {
+  if ((!allowed.ids || allowed.ids.size === 0) && (!allowed.keys || allowed.keys.size === 0)) return true;
+
+  const cat: any = (product as any)?.category;
+  const catId = Number(cat?.id || 0);
+  if (catId > 0 && allowed.ids.has(catId)) return true;
+
+  const candidateKeys = [
+    cat?.slug,
+    cat?.name,
+    (product as any)?.category_slug,
+    (product as any)?.category_name,
+  ]
+    .map((v) => normalizeKey(String(v || '')))
+    .filter(Boolean);
+
+  return candidateKeys.some((k) => allowed.keys.has(k));
+};
+
 const UI_CARDS_PER_PAGE = 20;
 const MAX_API_PAGES = 50;
 
@@ -311,7 +367,29 @@ export default function CategoryPage() {
 
       for (const attempt of attempts) {
         const aggregatedRaw: (Product | SimpleProduct)[] = [];
+        const seenProductIds = new Set<number>();
         const failedApiPages = new Set<number>();
+        const allowedCategory = buildAllowedCategoryKeys(activeCategory || null, categorySlug);
+
+        const appendFilteredUniqueProducts = (items: (Product | SimpleProduct)[] | undefined | null) => {
+          if (!Array.isArray(items) || items.length === 0) return 0;
+
+          let added = 0;
+          for (const rawItem of items) {
+            if (!rawItem) continue;
+            if (!productMatchesAllowedCategory(rawItem, allowedCategory)) continue;
+
+            const itemId = Number((rawItem as any).id || 0);
+            if (itemId > 0) {
+              if (seenProductIds.has(itemId)) continue;
+              seenProductIds.add(itemId);
+            }
+
+            aggregatedRaw.push(rawItem);
+            added += 1;
+          }
+          return added;
+        };
 
         let initialResponse: Awaited<ReturnType<typeof catalogService.getProducts>> | null = null;
         try {
@@ -323,7 +401,7 @@ export default function CategoryPage() {
         }
 
         if (Array.isArray(initialResponse?.products) && initialResponse.products.length > 0) {
-          aggregatedRaw.push(...(initialResponse.products as any[]));
+          appendFilteredUniqueProducts(initialResponse.products as any[]);
         }
 
         const rawPageSize = getPageSizeFromResponse(initialResponse);
@@ -334,14 +412,12 @@ export default function CategoryPage() {
             try {
               const nextResponse = await getProductsSilent({ ...(attempt as any), page: apiPage } as GetProductsParams);
               const nextProducts = Array.isArray(nextResponse?.products) ? (nextResponse.products as any[]) : [];
-              if (nextProducts.length > 0) {
-                aggregatedRaw.push(...nextProducts);
-              }
+              const addedCount = appendFilteredUniqueProducts(nextProducts as any[]);
 
               // Some backends return incorrect pagination metadata (e.g. global last_page for every category).
-              // Stop early when the page is empty or clearly partial, even if has_more_pages/last_page says otherwise.
-              const nextPerPage = getPageSizeFromResponse(nextResponse);
-              if (nextProducts.length === 0 || nextProducts.length < nextPerPage) break;
+              // Stop early on empty pages, no new unique category-matching rows (repeated/global pages), or normal paginator end.
+              if (nextProducts.length === 0) break;
+              if (addedCount === 0) break;
               if (!nextResponse?.pagination?.has_more_pages) break;
             } catch (pageErr) {
               console.warn(`Backend page ${apiPage} returned an error. Attempting recovery...`);
@@ -350,7 +426,7 @@ export default function CategoryPage() {
               try {
                 const recovery = await recoverFailedApiPageRange(attempt, apiPage, rawPageSize);
                 if (Array.isArray(recovery.recovered) && recovery.recovered.length > 0) {
-                  aggregatedRaw.push(...(recovery.recovered as any[]));
+                  appendFilteredUniqueProducts(recovery.recovered as any[]);
                 }
 
                 if (!recovery.perPageOverrideSupported) {

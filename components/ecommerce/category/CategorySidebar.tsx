@@ -77,7 +77,7 @@ export default function CategorySidebar({
             className="flex-1"
           >
             {category.name}
-            {category.product_count !== undefined && (
+            {!hasChildren && category.product_count !== undefined && (
               <span className="text-sm text-gray-500 ml-1">({category.product_count})</span>
             )}
           </span>

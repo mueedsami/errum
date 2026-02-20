@@ -98,64 +98,82 @@ export default function CategoryPage() {
 
     setLoading(true);
     try {
-      const params: GetProductsParams = {
+      const baseParams: GetProductsParams = {
         page,
         per_page: 24,
         sort_by: selectedSort as GetProductsParams['sort_by'],
       };
 
-      if (!activeCategory?.id) {
-        // Category might be missing from the tree (or slug mismatch). Try a graceful fallback
-        // using the raw slug/name so the page doesn't go empty.
-        const fallbackCategory = decodeURIComponent(categorySlug || '').replace(/-/g, ' ').trim();
-        setActiveCategoryName(fallbackCategory || '');
-        setError(null);
-
-        const fallbackParams: any = {
-          ...params,
-          category: categorySlug || fallbackCategory,
-        };
-        delete fallbackParams.category_id;
-
-        const fallbackResponse = await catalogService.getProducts(fallbackParams);
-        const fallbackCards = buildCardProductsFromResponse(fallbackResponse);
-        setProducts(fallbackCards);
-
-        setCurrentPage(fallbackResponse.pagination.current_page);
-        setTotalPages(fallbackResponse.pagination.last_page);
-        return;
-      }
-
-      params.category_id = activeCategory.id;
-      params.category = activeCategory.slug || activeCategory.name;
-
       if (selectedStock === 'in_stock') {
-        params.in_stock = true;
+        baseParams.in_stock = true;
+      } else if (selectedStock === 'out_of_stock') {
+        baseParams.in_stock = false;
       }
 
       if (selectedPriceRange !== 'all') {
         const [min, max] = selectedPriceRange.split('-').map(Number);
-        if (!Number.isNaN(min)) params.min_price = min;
-        if (!Number.isNaN(max)) params.max_price = max;
+        if (!Number.isNaN(min)) baseParams.min_price = min;
+        if (!Number.isNaN(max)) baseParams.max_price = max;
       }
 
-      let response = await catalogService.getProducts(params);
-      let cardProducts = buildCardProductsFromResponse(response);
+      const decodedSlugName = decodeURIComponent(categorySlug || '').replace(/-/g, ' ').trim();
 
-      // Fallback for older API versions: try slug/name based filtering if id-based filtering returns empty.
-      if (cardProducts.length === 0 && (activeCategory?.slug || activeCategory?.name)) {
-        const fallbackParams: any = { ...params };
-        delete fallbackParams.category_id;
-        fallbackParams.category = activeCategory.slug || activeCategory.name;
-        response = await catalogService.getProducts(fallbackParams);
-        cardProducts = buildCardProductsFromResponse(response);
+      // Try multiple category parameter shapes because backend versions differ:
+      // some honor `category_id`, some honor `category` (name), some honor `category` (slug).
+      const attempts: Array<Record<string, any>> = [];
+      const seenAttemptKeys = new Set<string>();
+      const pushAttempt = (candidate: Record<string, any>) => {
+        const key = JSON.stringify(candidate);
+        if (seenAttemptKeys.has(key)) return;
+        seenAttemptKeys.add(key);
+        attempts.push(candidate);
+      };
+
+      if (activeCategory?.id) {
+        setActiveCategoryName(activeCategory.name);
+        pushAttempt({ ...baseParams, category_id: activeCategory.id });
+        pushAttempt({ ...baseParams, category_id: activeCategory.id, category: activeCategory.name });
+        if (activeCategory.slug) {
+          pushAttempt({ ...baseParams, category_id: activeCategory.id, category: activeCategory.slug });
+          pushAttempt({ ...baseParams, category: activeCategory.slug });
+        }
+        pushAttempt({ ...baseParams, category: activeCategory.name });
+      } else {
+        setActiveCategoryName(decodedSlugName || '');
+        if (decodedSlugName) pushAttempt({ ...baseParams, category: decodedSlugName });
+        if (categorySlug) pushAttempt({ ...baseParams, category: categorySlug });
       }
 
-      setProducts(cardProducts);
-      setCurrentPage(response.pagination.current_page);
-      setTotalPages(response.pagination.last_page);
-      setActiveCategoryName(activeCategory.name);
-      setError(null);
+      if (attempts.length === 0) {
+        pushAttempt({ ...baseParams });
+      }
+
+      let lastResponse: any = null;
+      let lastCards: any[] = [];
+      let matched = false;
+
+      for (const attempt of attempts) {
+        const response = await catalogService.getProducts(attempt as any);
+        const cards = buildCardProductsFromResponse(response);
+        lastResponse = response;
+        lastCards = cards;
+
+        if (cards.length > 0) {
+          setProducts(cards);
+          setCurrentPage(response.pagination.current_page);
+          setTotalPages(response.pagination.last_page);
+          setError(null);
+          matched = true;
+          break;
+        }
+      }
+
+      if (!matched) {
+        setProducts(lastCards);
+        setCurrentPage(lastResponse?.pagination?.current_page || 1);
+        setTotalPages(lastResponse?.pagination?.last_page || 1);
+        setError(null);
+      }
     } catch (err) {
       console.error('Error fetching products:', err);
       setError('Failed to load products');

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { Suspense, useState, useEffect, useRef, useCallback } from 'react';
 import { Search, Package, CheckCircle, AlertCircle } from 'lucide-react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import StoreCard from '@/components/StoreCard';
@@ -21,6 +21,23 @@ interface StoreCardData {
 }
 
 export default function ManageStockPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-screen bg-gray-50 dark:bg-gray-900 items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 dark:border-white mx-auto mb-4" />
+            <p className="text-gray-600 dark:text-gray-400">Loading inventory page...</p>
+          </div>
+        </div>
+      }
+    >
+      <ManageStockPageContent />
+    </Suspense>
+  );
+}
+
+function ManageStockPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();

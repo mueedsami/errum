@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { AlertCircle, ChevronDown, ChevronUp, Package, Search } from 'lucide-react';
 import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import Sidebar from '@/components/Sidebar';
@@ -44,7 +44,7 @@ type ExtraCounts = { total: number; used: number; defective: number };
 
 type RateLimitState = { active: boolean; lastAt?: number; message?: string };
 
-export default function ViewInventoryPage() {
+function ViewInventoryPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
@@ -851,5 +851,19 @@ export default function ViewInventoryPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ViewInventoryPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+          <div className="text-sm text-gray-600 dark:text-gray-300">Loading inventory view...</div>
+        </div>
+      }
+    >
+      <ViewInventoryPageContent />
+    </Suspense>
   );
 }

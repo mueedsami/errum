@@ -333,9 +333,15 @@ export default function CategoryPage() {
           for (let apiPage = 2; apiPage <= safeLastPage; apiPage += 1) {
             try {
               const nextResponse = await getProductsSilent({ ...(attempt as any), page: apiPage } as GetProductsParams);
-              if (Array.isArray(nextResponse?.products) && nextResponse.products.length > 0) {
-                aggregatedRaw.push(...(nextResponse.products as any[]));
+              const nextProducts = Array.isArray(nextResponse?.products) ? (nextResponse.products as any[]) : [];
+              if (nextProducts.length > 0) {
+                aggregatedRaw.push(...nextProducts);
               }
+
+              // Some backends return incorrect pagination metadata (e.g. global last_page for every category).
+              // Stop early when the page is empty or clearly partial, even if has_more_pages/last_page says otherwise.
+              const nextPerPage = getPageSizeFromResponse(nextResponse);
+              if (nextProducts.length === 0 || nextProducts.length < nextPerPage) break;
               if (!nextResponse?.pagination?.has_more_pages) break;
             } catch (pageErr) {
               console.warn(`Backend page ${apiPage} returned an error. Attempting recovery...`);

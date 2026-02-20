@@ -6,26 +6,19 @@ import HeroSection from '@/components/ecommerce/HeroSection';
 import OurCategories from '@/components/ecommerce/OurCategories';
 import FeaturedProducts from '@/components/ecommerce/FeaturedProducts';
 import NewArrivals from '@/components/ecommerce/NewArrivals';
+import SubcategoryProductTabs from '@/components/ecommerce/SubcategoryProductTabs';
+
 export default function HomePage() {
   return (
-    <div className="bg-transparent min-h-screen">
-      {/* Navigation Bar */}
+    <div className="min-h-screen bg-transparent">
       <Navigation />
-      
-      {/* Hero Section */}
       <HeroSection />
-      
-      {/* Categories Section */}
-      <OurCategories />
-      
-      {/* Featured Products Section */}
-      <FeaturedProducts />
-      
-      {/* New Arrivals Section */}
-      <NewArrivals />
-            
-      {/* Footer */}
-      {/**/}
+      <div className="pb-6 sm:pb-10">
+        <OurCategories />
+        <FeaturedProducts />
+        <NewArrivals />
+        <SubcategoryProductTabs />
+      </div>
     </div>
   );
 }

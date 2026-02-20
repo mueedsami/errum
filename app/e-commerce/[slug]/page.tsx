@@ -13,7 +13,8 @@ import catalogService, {
   SimpleProduct,
   GetProductsParams,
 } from '@/services/catalogService';
-import { buildCardProductsFromResponse, getCardPriceText, getCardStockLabel } from '@/lib/ecommerceCardUtils';
+import { getCardPriceText, getCardStockLabel } from '@/lib/ecommerceCardUtils';
+import { groupProductsByMother } from '@/lib/ecommerceProductGrouping';
 
 interface CategoryPageParams {
   slug: string;
@@ -42,6 +43,71 @@ const flattenCategories = (cats: CatalogCategory[]): CatalogCategory[] => {
   return result;
 };
 
+
+const UI_CARDS_PER_PAGE = 20;
+const API_RAW_PAGE_SIZE = 200;
+const MAX_API_PAGES = 50;
+
+const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const buildCardProductsFromFlatCatalog = (rawProducts: (Product | SimpleProduct)[]): SimpleProduct[] => {
+  const grouped = groupProductsByMother(rawProducts as any[], {
+    useCategoryInKey: true,
+    preferSkuGrouping: true,
+  });
+
+  return grouped.map((group) => {
+    const rawVariants = (group.variants || [])
+      .map((variant) => variant.raw)
+      .filter(Boolean) as SimpleProduct[];
+
+    const uniqueVariants = new Map<number, SimpleProduct>();
+    rawVariants.forEach((variant) => {
+      const id = Number((variant as any)?.id) || 0;
+      if (!id) return;
+      if (!uniqueVariants.has(id)) uniqueVariants.set(id, variant);
+    });
+
+    const all = Array.from(uniqueVariants.values());
+    const representative =
+      (group.representative as SimpleProduct) ||
+      all.find((variant) => Number(variant.stock_quantity || 0) > 0) ||
+      all[0];
+
+    if (!representative) {
+      return {
+        id: Number(group.representativeId || 0),
+        name: group.baseName || 'Product',
+        display_name: group.baseName || 'Product',
+        base_name: group.baseName || 'Product',
+        sku: '',
+        selling_price: 0,
+        stock_quantity: 0,
+        description: '',
+        images: [],
+        in_stock: false,
+        has_variants: false,
+        total_variants: 0,
+        variants: [],
+      } as SimpleProduct;
+    }
+
+    const variantsWithoutRepresentative = all.filter(
+      (variant) => Number(variant.id) !== Number(representative.id)
+    );
+
+    return {
+      ...representative,
+      name: group.baseName || (representative as any).base_name || representative.name,
+      display_name: group.baseName || (representative as any).display_name || (representative as any).base_name || representative.name,
+      base_name: group.baseName || (representative as any).base_name || representative.name,
+      has_variants: all.length > 1,
+      total_variants: all.length,
+      variants: variantsWithoutRepresentative,
+    } as SimpleProduct;
+  });
+};
+
 export default function CategoryPage() {
   const params = useParams() as CategoryPageParams;
   const router = useRouter();
@@ -59,6 +125,7 @@ export default function CategoryPage() {
   const [selectedSort, setSelectedSort] = useState('newest');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [totalResults, setTotalResults] = useState(0);
   const [isCartOpen, setIsCartOpen] = useState(false);
 
   const [selectedPriceRange, setSelectedPriceRange] = useState<string>('all');
@@ -93,14 +160,15 @@ export default function CategoryPage() {
     }
   };
 
-  const fetchProducts = async (page = 1) => {
+
+  const fetchProducts = async (uiPage = 1) => {
     if (categoriesLoading) return;
 
     setLoading(true);
     try {
       const baseParams: GetProductsParams = {
-        page,
-        per_page: 24,
+        page: 1,
+        per_page: API_RAW_PAGE_SIZE,
         sort_by: selectedSort as GetProductsParams['sort_by'],
       };
 
@@ -118,8 +186,6 @@ export default function CategoryPage() {
 
       const decodedSlugName = decodeURIComponent(categorySlug || '').replace(/-/g, ' ').trim();
 
-      // Try multiple category parameter shapes because backend versions differ:
-      // some honor `category_id`, some honor `category` (name), some honor `category` (slug).
       const attempts: Array<Record<string, any>> = [];
       const seenAttemptKeys = new Set<string>();
       const pushAttempt = (candidate: Record<string, any>) => {
@@ -148,20 +214,40 @@ export default function CategoryPage() {
         pushAttempt({ ...baseParams });
       }
 
-      let lastResponse: any = null;
-      let lastCards: any[] = [];
       let matched = false;
 
       for (const attempt of attempts) {
-        const response = await catalogService.getProducts(attempt as any);
-        const cards = buildCardProductsFromResponse(response);
-        lastResponse = response;
-        lastCards = cards;
+        const aggregatedRaw: (Product | SimpleProduct)[] = [];
+
+        const initialResponse = await catalogService.getProducts({ ...(attempt as any), page: 1 });
+        if (Array.isArray(initialResponse?.products) && initialResponse.products.length > 0) {
+          aggregatedRaw.push(...(initialResponse.products as any[]));
+        }
+
+        const apiLastPage = Math.max(1, Number(initialResponse?.pagination?.last_page || 1));
+        if (apiLastPage > 1) {
+          const safeLastPage = Math.min(apiLastPage, MAX_API_PAGES);
+          for (let apiPage = 2; apiPage <= safeLastPage; apiPage += 1) {
+            const nextResponse = await catalogService.getProducts({ ...(attempt as any), page: apiPage });
+            if (Array.isArray(nextResponse?.products) && nextResponse.products.length > 0) {
+              aggregatedRaw.push(...(nextResponse.products as any[]));
+            }
+            if (!nextResponse?.pagination?.has_more_pages) break;
+          }
+        }
+
+        const cards = buildCardProductsFromFlatCatalog(aggregatedRaw);
 
         if (cards.length > 0) {
-          setProducts(cards);
-          setCurrentPage(response.pagination.current_page);
-          setTotalPages(response.pagination.last_page);
+          const computedTotalPages = Math.max(1, Math.ceil(cards.length / UI_CARDS_PER_PAGE));
+          const safeUiPage = clamp(uiPage, 1, computedTotalPages);
+          const startIndex = (safeUiPage - 1) * UI_CARDS_PER_PAGE;
+          const pageCards = cards.slice(startIndex, startIndex + UI_CARDS_PER_PAGE);
+
+          setProducts(pageCards);
+          setTotalResults(cards.length);
+          setCurrentPage(safeUiPage);
+          setTotalPages(computedTotalPages);
           setError(null);
           matched = true;
           break;
@@ -169,15 +255,17 @@ export default function CategoryPage() {
       }
 
       if (!matched) {
-        setProducts(lastCards);
-        setCurrentPage(lastResponse?.pagination?.current_page || 1);
-        setTotalPages(lastResponse?.pagination?.last_page || 1);
+        setProducts([]);
+        setTotalResults(0);
+        setCurrentPage(1);
+        setTotalPages(1);
         setError(null);
       }
     } catch (err) {
       console.error('Error fetching products:', err);
       setError('Failed to load products');
       setProducts([]);
+      setTotalResults(0);
     } finally {
       setLoading(false);
     }
@@ -273,7 +361,7 @@ export default function CategoryPage() {
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">{activeCategoryName || 'Products'}</h1>
             <p className="text-gray-600">
-              {products.length} {products.length === 1 ? 'product' : 'products'} found
+              {totalResults} {totalResults === 1 ? 'product' : 'products'} found
             </p>
           </div>
 
@@ -292,7 +380,7 @@ export default function CategoryPage() {
 
             <main className="flex-1">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-                <div className="text-sm text-gray-600">Showing {products.length} products</div>
+                <div className="text-sm text-gray-600">Showing {products.length} of {totalResults} products</div>
                 <select
                   value={selectedSort}
                   onChange={(e) => setSelectedSort(e.target.value)}

@@ -13,6 +13,7 @@ import lookupService, { LookupProductData } from '@/services/lookupService';
 import purchaseOrderService from '@/services/purchase-order.service';
 import productImageService from '@/services/productImageService';
 import storeService, { Store } from '@/services/storeService';
+import ReturnExchangeFromOrder from '@/components/lookup/ReturnExchangeFromOrder';
 import { connectQZ, getDefaultPrinter } from '@/lib/qz-tray';
 import BatchPrinter from "@/components/BatchPrinter";
 import {
@@ -2509,6 +2510,28 @@ export default function LookupPage() {
                             <p className="text-[10px] text-gray-600 dark:text-gray-400">{singleOrder.notes}</p>
                           </div>
                         )}
+
+                        <ReturnExchangeFromOrder
+                          order={{
+                            id: singleOrder.id,
+                            order_number: singleOrder.order_number,
+                            store: (singleOrder as any).store,
+                            store_id: (singleOrder as any).store_id,
+                            items: singleOrder.items.map((it: any) => ({
+                              id: it.id,
+                              product_id: it.product_id,
+                              product_name: it.product_name,
+                              product_sku: it.product_sku,
+                              quantity: it.quantity,
+                              unit_price: it.unit_price,
+                              total_amount: it.total_amount,
+                              returnable_quantity: it.returnable_quantity,
+                              returned_quantity: it.returned_quantity,
+                              barcodes: it.barcodes,
+                            })),
+                          }}
+                          stores={stores as any}
+                        />
                       </div>
                     </div>
                   )}

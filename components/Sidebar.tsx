@@ -18,6 +18,8 @@ import {
   Search,
   History,
   ShieldCheck,
+  RotateCcw,
+  Tag,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -152,6 +154,8 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     { icon: Package, label: 'Online Order Packing', href: '/social-commerce/package' },
     { icon: Package, label: 'PreOrders', href: '/preorders' },
     { icon: AlertTriangle, label: 'Extra Panel', href: '/extra' },
+    { icon: RotateCcw, label: 'Returns & Exchanges', href: '/returns' },
+    { icon: Tag, label: 'Sale Campaigns', href: '/campaigns' },
     { icon: Search, label: 'Lookup', href: '/lookup' },
     { icon: History, label: 'Activity Log', href: '/activity-logs' },
     { icon: CreditCard, label: 'Transaction', href: '/transaction' },

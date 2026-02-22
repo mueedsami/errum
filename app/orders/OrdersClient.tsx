@@ -48,7 +48,6 @@ import refundService, { type CreateRefundRequest } from '@/services/refundServic
 
 import shipmentService from '@/services/shipmentService';
 import { checkQZStatus, printReceipt, printBulkReceipts, getPrinters, savePreferredPrinter } from '@/lib/qz-tray';
-import { useAuth } from '@/contexts/AuthContext';
 
 interface Order {
   id: number;
@@ -286,13 +285,20 @@ const pickOrderItemImage = (item: any): string | null => {
   return null;
 };
 
+const getTodayFilterValue = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
 // Pathao lookup types (used for Social Commerce address editing)
 type PathaoCity = { city_id: number; city_name: string };
 type PathaoZone = { zone_id: number; zone_name: string };
 type PathaoArea = { area_id: number; area_name: string };
 
 export default function OrdersDashboard() {
-  const { scopedStoreId } = useAuth();
   const [darkMode, setDarkMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -306,7 +312,7 @@ export default function OrdersDashboard() {
   const pathaoInFlightRef = useRef<Set<string>>(new Set());
 
   const [search, setSearch] = useState('');
-  const [dateFilter, setDateFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState(getTodayFilterValue());
 
   // ✅ NEW: Order type filter (All / Social / E-Com)
   const [orderTypeFilter, setOrderTypeFilter] = useState('All Types');
@@ -336,6 +342,23 @@ const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Stat
   useEffect(() => {
     setViewMode(initialViewMode);
   }, [initialViewMode]);
+
+  // Default to Pending in Online Orders (as requested) for faster workflow.
+  // Keeps Installments on "All" because installment statuses vary.
+  const didInitQuickDefaultsRef = useRef(false);
+  useEffect(() => {
+    if (didInitQuickDefaultsRef.current) return;
+    didInitQuickDefaultsRef.current = true;
+
+    if (initialViewMode === 'online') {
+      setOrderStatusFilter('pending');
+    } else {
+      setOrderStatusFilter('All Order Status');
+    }
+
+    setCourierFilter('pathao');
+  }, [initialViewMode]);
+
 
   // ♻️ Restore cached Pathao lookup results (10 min TTL)
   useEffect(() => {
@@ -488,6 +511,7 @@ const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Stat
   const [ecCity, setEcCity] = useState('');
   const [ecState, setEcState] = useState('');
   const [ecPostalCode, setEcPostalCode] = useState('');
+  const [ecCountry, setEcCountry] = useState('Bangladesh');
   const [ecLandmark, setEcLandmark] = useState('');
 
   // ✅ Bulk selection + operations (Pathao + Print)
@@ -510,8 +534,10 @@ const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Stat
     total: number;
     success: number;
     failed: number;
-    details: Array<{ orderId: number; orderNumber?: string; status: 'success' | 'failed'; message: string }>;
-  }>({ show: false, current: 0, total: 0, success: 0, failed: 0, details: [] });
+    batchCode?: string;
+    batchStatus?: 'pending' | 'processing' | 'completed' | 'cancelled' | 'preparing' | 'error';
+    details: Array<{ orderId?: number; orderNumber?: string; status: 'success' | 'failed'; message: string }>;
+  }>({ show: false, current: 0, total: 0, success: 0, failed: 0, batchCode: undefined, batchStatus: 'preparing', details: [] });
 
   // ✅ QZ / printer state
   const [qzConnected, setQzConnected] = useState(false);
@@ -542,18 +568,21 @@ const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Stat
 
 
   const parseMoney = (val: any) => Number(String(val ?? '0').replace(/[^0-9.-]/g, ''));
+  const cleanText = (val: any) => (val == null ? '' : String(val)).trim();
 
   const formatShippingAddress = (shipping: any): string => {
     if (!shipping) return '';
     if (typeof shipping === 'string') return shipping;
 
     const s: any = shipping || {};
+    const line1 = s.address_line1 || s.address_line_1 || s.street || s.address || '';
+    const line2 = s.address_line2 || s.address_line_2 || '';
 
     // E-commerce pattern
-    if (s.address_line_1 || s.address_line_2) {
+    if (line1 || line2) {
       const parts: string[] = [];
-      if (s.address_line_1) parts.push(String(s.address_line_1));
-      if (s.address_line_2) parts.push(String(s.address_line_2));
+      if (line1) parts.push(String(line1));
+      if (line2) parts.push(String(line2));
       const cityState = [s.city, s.state].filter(Boolean).join(', ');
       const pc = s.postal_code || s.postalCode || '';
       if (cityState) parts.push(pc ? `${cityState} ${pc}` : cityState);
@@ -650,11 +679,12 @@ const [paymentStatusFilter, setPaymentStatusFilter] = useState('All Payment Stat
         setScPostalCode(sa.postal_code || '');
       }
     } else if (orderType === 'ecommerce') {
-      setEcAddress1(sa.address_line_1 || (typeof editableOrder.customer.address === 'string' ? editableOrder.customer.address : '') || '');
-      setEcAddress2(sa.address_line_2 || '');
+      setEcAddress1(sa.address_line1 || sa.address_line_1 || sa.street || (typeof editableOrder.customer.address === 'string' ? editableOrder.customer.address : '') || '');
+      setEcAddress2(sa.address_line2 || sa.address_line_2 || '');
       setEcCity(sa.city || '');
       setEcState(sa.state || '');
       setEcPostalCode(sa.postal_code || '');
+      setEcCountry(sa.country || 'Bangladesh');
       setEcLandmark(sa.landmark || '');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -939,42 +969,48 @@ const derivePaymentStatus = (order: any) => {
     };
   };
 
-  const normalizeCourier = (v: any) => normalize(v);
+  const normalizeCourier = (v: any) => normalize(v).replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // Only these values are allowed as order markers in UI
+  const getAllowedCourierValue = (raw: any): string => {
+    const n = normalizeCourier(raw);
+    if (!n) return '';
+    if (n === 'pathao') return 'pathao';
+    if (n === 'sundarban') return 'Sundarban';
+    if (n === 'pending') return 'Pending';
+    if (n === 'partial order' || n === 'partialorder') return 'Partial Order';
+    return '';
+  };
 
   const courierLabel = (raw: any): string => {
-    const n = normalizeCourier(raw);
-    if (!n) return 'Unassigned';
-    const map: Record<string, string> = {
-      pathao: 'Pathao',
-      steadfast: 'Steadfast',
-      sundarban: 'Sundarban',
-      redx: 'RedX',
-      paperfly: 'Paperfly',
-      ecourier: 'eCourier',
-      'e-courier': 'eCourier',
-      manual: 'Manual',
-    };
-    return map[n] || String(raw);
+    const allowed = getAllowedCourierValue(raw);
+    if (!allowed) return 'Unassigned';
+
+    const n = normalizeCourier(allowed);
+    if (n === 'pathao') return 'Pathao';
+    if (n === 'sundarban') return 'Sundarban';
+    if (n === 'pending') return 'Pending';
+    if (n === 'partial order') return 'Partial Order';
+    return String(allowed);
   };
 
   const getCourierBadge = (raw: any) => {
-    const n = normalizeCourier(raw);
+    const allowed = getAllowedCourierValue(raw);
+    if (!allowed) return null;
+
+    const n = normalizeCourier(allowed);
     const cls =
       n === 'pathao'
         ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300'
-        : n === 'steadfast'
-        ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300'
         : n === 'sundarban'
         ? 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300'
-        : n === 'redx'
-        ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
-        : n
-        ? 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
-        : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400';
+        : n === 'pending'
+        ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300'
+        : 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300';
 
     return (
       <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-semibold ${cls}`}>
-        {courierLabel(raw)}
+        {courierLabel(allowed)}
       </span>
     );
   };
@@ -1005,9 +1041,13 @@ const derivePaymentStatus = (order: any) => {
       }
 
       return list.map((o) => {
-        if (normalizeCourier(o.intendedCourier)) return o;
-        if (!map.has(o.id)) return o;
-        return { ...o, intendedCourier: map.get(o.id) ?? null };
+        const currentAllowed = getAllowedCourierValue(o.intendedCourier);
+        if (currentAllowed) return { ...o, intendedCourier: currentAllowed };
+
+        if (!map.has(o.id)) return { ...o, intendedCourier: null };
+
+        const dbAllowed = getAllowedCourierValue(map.get(o.id));
+        return { ...o, intendedCourier: dbAllowed || null };
       });
     } catch (e) {
       console.warn('Failed to hydrate courier markers from DB:', e);
@@ -1015,27 +1055,30 @@ const derivePaymentStatus = (order: any) => {
     }
   };
 
-  const DEFAULT_COURIERS = useMemo(
-    () => ['pathao', 'sundarban', 'steadfast', 'redx', 'paperfly', 'eCourier', 'manual'],
-    []
-  );
+  const DEFAULT_COURIERS = useMemo(() => ['pathao', 'Sundarban', 'Pending', 'Partial Order'], []);
+
+  const allowedCourierMap = useMemo(() => {
+    const map = new Map<string, string>();
+    DEFAULT_COURIERS.forEach((c) => map.set(normalizeCourier(c), String(c)));
+    return map;
+  }, [DEFAULT_COURIERS]);
 
   const courierFilterOptions = useMemo(() => {
-    const set = new Set<string>();
-    DEFAULT_COURIERS.forEach((c) => set.add(String(c)));
-    (availableCouriers || []).forEach((c) => c && set.add(String(c)));
-    // also include whatever already exists in loaded orders (so it always shows)
-    (orders || []).forEach((o) => {
-      if (o?.intendedCourier) set.add(String(o.intendedCourier));
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [DEFAULT_COURIERS, availableCouriers, orders]);
+    // Keep the marker list fixed so no legacy courier tags (RedX, etc.) show up in filters/modals
+    return [...DEFAULT_COURIERS];
+  }, [DEFAULT_COURIERS]);
 
   const loadAvailableCouriers = async () => {
     try {
       const list = await orderService.getAvailableCouriers();
       const names = Array.from(
-        new Set((list || []).map((x) => x?.courier_name).filter(Boolean).map((x) => String(x)))
+        new Set(
+          (list || [])
+            .map((x) => x?.courier_name)
+            .filter(Boolean)
+            .map((x) => allowedCourierMap.get(normalizeCourier(x)) || null)
+            .filter(Boolean) as string[]
+        )
       );
       setAvailableCouriers(names);
     } catch (e) {
@@ -1057,7 +1100,6 @@ const derivePaymentStatus = (order: any) => {
           sort_by: 'created_at',
           sort_order: 'desc',
           per_page: 1000,
-          ...(scopedStoreId ? { store_id: scopedStoreId } : {}),
         });
 
         allOrders = inst.data || [];
@@ -1068,14 +1110,12 @@ const derivePaymentStatus = (order: any) => {
             sort_by: 'created_at',
             sort_order: 'desc',
             per_page: 1000,
-            ...(scopedStoreId ? { store_id: scopedStoreId } : {}),
           }),
           orderService.getAll({
             order_type: 'ecommerce',
             sort_by: 'created_at',
             sort_order: 'desc',
             per_page: 1000,
-            ...(scopedStoreId ? { store_id: scopedStoreId } : {}),
           }),
         ]);
 
@@ -1126,17 +1166,26 @@ const derivePaymentStatus = (order: any) => {
     setShowPrinterSelect(false);
   };
 
-  const orderStatusOptions = useMemo(() => {
-    const set = new Set<string>();
-    orders.forEach((o) => set.add(o.status));
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [orders]);
-
   const paymentStatusOptions = useMemo(() => {
     const set = new Set<string>();
     orders.forEach((o) => set.add(o.paymentStatus));
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [orders]);
+
+  // ⚡ Quick top tabs (status + courier) for fast switching
+  const quickStatusTabs = useMemo(
+    () => [
+      { label: 'Pending', value: 'pending' },
+      { label: 'Confirmed', value: 'confirmed' },
+      { label: 'Cancelled', value: 'cancelled' },
+      { label: 'Returned', value: 'returned' },
+      { label: 'All', value: 'All Order Status' },
+    ],
+    []
+  );
+
+  const quickCourierTabs = useMemo(() => ['All Couriers', ...courierFilterOptions], [courierFilterOptions]);
+
 
   useEffect(() => {
     let filtered = orders;
@@ -1289,13 +1338,16 @@ const derivePaymentStatus = (order: any) => {
   const openCourierEditor = (order: Order) => {
     setActiveMenu(null);
     setCourierModalOrder(order);
-    setCourierModalValue(order.intendedCourier ? String(order.intendedCourier) : '');
+    const current = order.intendedCourier ? String(order.intendedCourier) : '';
+    const normalizedCurrent = normalizeCourier(current);
+    setCourierModalValue(current && allowedCourierMap.has(normalizedCurrent) ? (allowedCourierMap.get(normalizedCurrent) as string) : '');
     setShowCourierModal(true);
   };
 
   const saveCourierMarker = async () => {
     if (!courierModalOrder) return;
-    const nextVal = courierModalValue?.trim() ? courierModalValue.trim() : null;
+    const nextRaw = courierModalValue?.trim() ? courierModalValue.trim() : '';
+    const nextVal = nextRaw ? (allowedCourierMap.get(normalizeCourier(nextRaw)) || nextRaw) : null;
 
     setIsSavingCourier(true);
     try {
@@ -1307,14 +1359,17 @@ const derivePaymentStatus = (order: any) => {
       );
 
       if (applied) {
-        setAvailableCouriers((prev) => Array.from(new Set([...(prev || []), String(applied)])));
+        const mappedApplied = allowedCourierMap.get(normalizeCourier(applied));
+        if (mappedApplied) {
+          setAvailableCouriers((prev) => Array.from(new Set([...(prev || []), mappedApplied])));
+        }
       }
 
       setShowCourierModal(false);
       setCourierModalOrder(null);
-      alert('Courier marker updated successfully');
+      alert('Order marker updated successfully');
     } catch (e: any) {
-      alert(e?.message || 'Failed to update courier marker');
+      alert(e?.message || 'Failed to update order marker');
     } finally {
       setIsSavingCourier(false);
     }
@@ -1639,6 +1694,29 @@ const derivePaymentStatus = (order: any) => {
 
       const newOrderTotal = exchangeData.replacementProducts.reduce((sum, p) => sum + p.unit_price * p.quantity, 0);
 
+
+      // ✅ Avoid hardcoding payment_method_id (IDs can differ per environment)
+      let paymentMethodId = 1;
+      try {
+        const pmRes = await axios.get('/payment-methods/all');
+        const methods: any[] =
+          (pmRes as any)?.data?.data?.payment_methods ||
+          (pmRes as any)?.data?.data ||
+          (pmRes as any)?.data ||
+          [];
+
+        const normalized = (v: any) => String(v ?? '').toLowerCase().trim();
+        const cash =
+          methods.find((m) => normalized(m?.type) === 'cash') ||
+          methods.find((m) => normalized(m?.name).includes('cash')) ||
+          methods.find((m) => normalized(m?.name).includes('ক্যাশ')) ||
+          methods[0];
+
+        paymentMethodId = Number(cash?.id) || 1;
+      } catch (e) {
+        console.warn('Failed to load payment methods, falling back to id=1', e);
+      }
+
       const newOrderData = {
         order_type: selectedOrderForAction.order_type as 'social_commerce' | 'ecommerce',
         store_id: exchangeData.exchangeAtStoreId,
@@ -1649,11 +1727,10 @@ const derivePaymentStatus = (order: any) => {
           quantity: p.quantity,
           unit_price: p.unit_price,
           barcode: p.barcode,
-          barcode_id: p.barcode_id,
-        })),
+})),
         payment: {
-          payment_method_id: 1,
-          amount: newOrderTotal,
+          payment_method_id: paymentMethodId,
+amount: newOrderTotal,
           payment_type: 'full' as const,
         },
         notes: `Exchange from order #${selectedOrderForAction.order_number} | Return: #${returnNumber}`,
@@ -1792,6 +1869,8 @@ const derivePaymentStatus = (order: any) => {
     }
     if (!confirm(`Send ${selectedOrders.size} order(s) to Pathao?`)) return;
 
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
     setIsSendingBulk(true);
     setPathaoProgress({
       show: true,
@@ -1799,6 +1878,8 @@ const derivePaymentStatus = (order: any) => {
       total: selectedOrders.size,
       success: 0,
       failed: 0,
+      batchCode: undefined,
+      batchStatus: 'preparing',
       details: [],
     });
 
@@ -1808,6 +1889,7 @@ const derivePaymentStatus = (order: any) => {
     try {
       const selectedOrdersList = orders.filter((o) => selectedOrders.has(o.id));
       const shipmentIdsToSend: number[] = [];
+      const detailsBuffer: Array<{ orderId?: number; orderNumber?: string; status: 'success' | 'failed'; message: string }> = [];
 
       for (let idx = 0; idx < selectedOrdersList.length; idx++) {
         const order = selectedOrdersList[idx];
@@ -1824,14 +1906,8 @@ const derivePaymentStatus = (order: any) => {
           if (existingShipment) {
             if (existingShipment.pathao_consignment_id) {
               failedCount++;
-              setPathaoProgress((prev) => ({
-                ...prev,
-                failed: failedCount,
-                details: [
-                  ...prev.details,
-                  { orderId: order.id, orderNumber: order.orderNumber, status: 'failed', message: 'Already sent to Pathao' },
-                ],
-              }));
+              detailsBuffer.push({ orderId: order.id, orderNumber: order.orderNumber, status: 'failed', message: 'Already sent to Pathao' });
+              setPathaoProgress((prev) => ({ ...prev, failed: failedCount, details: [...prev.details, detailsBuffer[detailsBuffer.length - 1]] }));
               continue;
             }
             shipmentIdsToSend.push(existingShipment.id);
@@ -1846,60 +1922,137 @@ const derivePaymentStatus = (order: any) => {
           }
         } catch (error: any) {
           failedCount++;
-          setPathaoProgress((prev) => ({
-            ...prev,
-            failed: failedCount,
-            details: [
-              ...prev.details,
-              {
-                orderId: order.id,
-                orderNumber: order.orderNumber,
-                status: 'failed',
-                message: error?.response?.data?.message || error.message || 'Failed',
-              },
-            ],
-          }));
+          const item = {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            status: 'failed' as const,
+            message: error?.response?.data?.message || error.message || 'Failed',
+          };
+          detailsBuffer.push(item);
+          setPathaoProgress((prev) => ({ ...prev, failed: failedCount, details: [...prev.details, item] }));
         }
 
-        await new Promise((resolve) => setTimeout(resolve, 250));
+        await wait(250);
       }
 
-      if (shipmentIdsToSend.length > 0) {
-        const result = await shipmentService.bulkSendToPathao(shipmentIdsToSend);
+      if (shipmentIdsToSend.length === 0) {
+        setPathaoProgress((prev) => ({
+          ...prev,
+          current: prev.total,
+          success: successCount,
+          failed: failedCount,
+          batchStatus: 'completed',
+        }));
 
-        (result?.success || []).forEach((item: any) => {
+        alert(`Bulk Send to Pathao Completed!\n\nSuccess: ${successCount}\nFailed: ${failedCount}`);
+        setSelectedOrders(new Set());
+        await loadOrders();
+        return;
+      }
+
+      // Start queue batch send (default async mode)
+      const started = await shipmentService.startBulkSendToPathao(shipmentIdsToSend);
+
+      // Backward compatible handling if server responds in sync mode
+      if ('success' in started && 'failed' in started) {
+        for (const item of started.success || []) {
           successCount++;
-          setPathaoProgress((prev) => ({
-            ...prev,
-            success: successCount,
-            details: [
-              ...prev.details,
-              {
-                orderId: 0,
-                orderNumber: item.shipment_number,
-                status: 'success',
-                message: `Consignment ID: ${item.pathao_consignment_id}`,
-              },
-            ],
-          }));
-        });
+          detailsBuffer.push({
+            orderNumber: item.shipment_number,
+            status: 'success',
+            message: `Consignment ID: ${item.pathao_consignment_id}`,
+          });
+        }
 
-        (result?.failed || []).forEach((item: any) => {
+        for (const item of started.failed || []) {
           failedCount++;
+          detailsBuffer.push({
+            orderNumber: item.shipment_number,
+            status: 'failed',
+            message: item.reason,
+          });
+        }
+
+        setPathaoProgress((prev) => ({
+          ...prev,
+          current: prev.total,
+          success: successCount,
+          failed: failedCount,
+          batchStatus: 'completed',
+          details: detailsBuffer,
+        }));
+      } else {
+        const batchCode = started.batch_code;
+        const immediateFailures = Array.isArray(started.immediate_failures) ? started.immediate_failures : [];
+
+        if (immediateFailures.length > 0) {
+          failedCount += immediateFailures.length;
+          immediateFailures.forEach((f) => {
+            detailsBuffer.push({
+              orderNumber: f.shipment_number,
+              status: 'failed',
+              message: f.reason,
+            });
+          });
+        }
+
+        setPathaoProgress((prev) => ({
+          ...prev,
+          batchCode,
+          batchStatus: 'processing',
+          details: [...detailsBuffer],
+          failed: failedCount,
+        }));
+
+        let summary = await shipmentService.getBulkStatus(batchCode);
+
+        while (summary.status === 'pending' || summary.status === 'processing') {
+          successCount = summary.success;
+          const queuedFailed = summary.failed;
+          const processedWithPrechecks = failedCount + summary.processed;
+
           setPathaoProgress((prev) => ({
             ...prev,
-            failed: failedCount,
-            details: [
-              ...prev.details,
-              {
-                orderId: 0,
-                orderNumber: item.shipment_number,
-                status: 'failed',
-                message: item.reason,
-              },
-            ],
+            batchCode,
+            batchStatus: summary.status,
+            current: Math.min(prev.total, processedWithPrechecks),
+            success: successCount,
+            failed: failedCount + queuedFailed,
           }));
-        });
+
+          await wait(2000);
+          summary = await shipmentService.getBulkStatus(batchCode);
+        }
+
+        // Final status update
+        successCount = summary.success;
+        failedCount = failedCount + summary.failed;
+
+        // Pull per-shipment final details
+        try {
+          const finalDetails = await shipmentService.getBulkStatusDetails(batchCode);
+          for (const item of finalDetails.results || []) {
+            detailsBuffer.push({
+              orderNumber: item.order_number || item.shipment_number,
+              status: item.success ? 'success' : 'failed',
+              message: item.success
+                ? `Consignment ID: ${item.consignment_id || 'N/A'}`
+                : item.message || 'Failed to send',
+            });
+          }
+        } catch (detailsErr) {
+          console.warn('Could not fetch final bulk details:', detailsErr);
+        }
+
+        setPathaoProgress((prev) => ({
+          ...prev,
+          batchCode,
+          batchStatus: summary.status,
+          current: prev.total,
+          success: successCount,
+          failed: failedCount,
+          details: detailsBuffer,
+        }));
       }
 
       alert(`Bulk Send to Pathao Completed!\n\nSuccess: ${successCount}\nFailed: ${failedCount}`);
@@ -1942,7 +2095,16 @@ const derivePaymentStatus = (order: any) => {
     } finally {
       setIsSendingBulk(false);
       setTimeout(() => {
-        setPathaoProgress({ show: false, current: 0, total: 0, success: 0, failed: 0, details: [] });
+        setPathaoProgress({
+          show: false,
+          current: 0,
+          total: 0,
+          success: 0,
+          failed: 0,
+          batchCode: undefined,
+          batchStatus: 'preparing',
+          details: [],
+        });
       }, 2500);
     }
   };
@@ -2170,23 +2332,12 @@ const derivePaymentStatus = (order: any) => {
         return;
       }
 
-      const result = await shipmentService.bulkSendToPathao([shipmentId]);
-      const success = Array.isArray(result?.success) ? result.success : [];
-      const failed = Array.isArray(result?.failed) ? result.failed : [];
-
-      if (success.length > 0) {
-        const item = success[0];
-        alert(
-          `✅ Sent to Pathao successfully!\n\nShipment: ${item.shipment_number ?? ''}\nConsignment ID: ${
-            item.pathao_consignment_id ?? ''
-          }`
-        );
-      } else if (failed.length > 0) {
-        const item = failed[0];
-        alert(`❌ Failed to send to Pathao.\n\nReason: ${item.reason ?? 'Unknown error'}`);
-      } else {
-        alert('Pathao response received, but could not determine success/failure.');
-      }
+      const sent = await shipmentService.sendToPathao(shipmentId);
+      alert(
+        `✅ Sent to Pathao successfully!\n\nShipment: ${sent?.shipment_number ?? shipment?.shipment_number ?? ''}\nConsignment ID: ${
+          sent?.pathao_consignment_id ?? ''
+        }`
+      );
 
       // Set courier marker to Pathao in DB (persists after reload)
       try {
@@ -2349,57 +2500,54 @@ const derivePaymentStatus = (order: any) => {
 
     setIsProductLoading(true);
     try {
-      const response = await axios.post('/products/advanced-search', {
-        query,
-        is_archived: false,
-        enable_fuzzy: true,
-        fuzzy_threshold: 60,
-        search_fields: ['name', 'sku', 'description', 'category'],
-        per_page: 50,
-      });
+      const products = await productService.advancedSearchAll(
+        {
+          query,
+          is_archived: false,
+          enable_fuzzy: true,
+          fuzzy_threshold: 60,
+          search_fields: ['name', 'sku', 'description', 'category', 'custom_fields'],
+          per_page: 50,
+        },
+        { max_items: 5000 }
+      );
 
       const results: any[] = [];
 
-      if (response.data?.success) {
-        const products = response.data.data?.items || response.data.data?.data?.items || response.data.data || [];
+      for (const prod of products) {
+        const imgPath =
+          prod?.images?.[0]?.image_url ||
+          prod?.images?.[0]?.image_path ||
+          (prod as any)?.image_url ||
+          (prod as any)?.image_path ||
+          (prod as any)?.thumbnail;
+        const imageUrl = toPublicImageUrl(imgPath);
 
-        for (const prod of products) {
-          const imgPath =
-            prod?.images?.[0]?.image_url ||
-            prod?.images?.[0]?.image_path ||
-            prod?.image_url ||
-            prod?.image_path ||
-            prod?.thumbnail;
-          const imageUrl = toPublicImageUrl(imgPath);
+        const productBatches = pickerBatches.filter((batch: any) => {
+          const batchProductId = batch.product?.id || batch.product_id;
+          return batchProductId === prod.id && batch.quantity > 0;
+        });
 
-          const productBatches = pickerBatches.filter((batch: any) => {
-            const batchProductId = batch.product?.id || batch.product_id;
-            return batchProductId === prod.id && batch.quantity > 0;
-          });
-
-          if (productBatches.length > 0) {
-            for (const batch of productBatches) {
-              results.push({
-                id: prod.id,
-                name: prod.name,
-                sku: prod.sku,
-                imageUrl,
-                batchId: batch.id,
-                batchNumber: batch.batch_number,
-                price: parseMoney(batch.sell_price),
-                available: batch.quantity,
-                relevance_score: prod.relevance_score || 0,
-                search_stage: prod.search_stage || 'api',
-              });
-            }
+        if (productBatches.length > 0) {
+          for (const batch of productBatches) {
+            results.push({
+              id: prod.id,
+              name: prod.name,
+              sku: prod.sku,
+              imageUrl,
+              batchId: batch.id,
+              batchNumber: batch.batch_number,
+              price: parseMoney(batch.sell_price),
+              available: batch.quantity,
+              relevance_score: (prod as any).relevance_score || 0,
+              search_stage: (prod as any).search_stage || 'api',
+            });
           }
         }
-
-        results.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
-        setProductResults(results);
-      } else {
-        setProductResults([]);
       }
+
+      results.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
+      setProductResults(results);
     } catch (err) {
       console.error('Product search failed', err);
       setProductResults([]);
@@ -2632,12 +2780,18 @@ const derivePaymentStatus = (order: any) => {
 
       // Build shipping_address + customer_address based on order type
       if (orderType === 'social_commerce') {
+        const cityObj = pathaoCities.find((c) => String(c.city_id) === String(pathaoCityId));
+        const zoneObj = pathaoZones.find((z) => String(z.zone_id) === String(pathaoZoneId));
+        const areaObj = pathaoAreas.find((a) => String(a.area_id) === String(pathaoAreaId));
+
         if (scIsInternational) {
           shipping_address = {
             ...shipping_address,
             name: customerName ?? shipping_address.name ?? '',
             phone: customerPhone ?? shipping_address.phone ?? '',
             street: scInternationalStreet,
+            address_line1: scInternationalStreet,
+            address_line_1: scInternationalStreet,
             city: scCity,
             state: scState || undefined,
             country: scCountry,
@@ -2656,15 +2810,15 @@ const derivePaymentStatus = (order: any) => {
               name: customerName ?? shipping_address.name ?? '',
               phone: customerPhone ?? shipping_address.phone ?? '',
               street: scStreetAddress,
+              address_line1: scStreetAddress,
+              address_line_1: scStreetAddress,
+              city: shipping_address.city || cityObj?.city_name || scCity || 'Dhaka',
+              country: shipping_address.country || 'Bangladesh',
               postal_code: scPostalCode || undefined,
             };
 
             customer_address_text = `${scStreetAddress}${scPostalCode ? ` - ${scPostalCode}` : ''}`;
           } else {
-            const cityObj = pathaoCities.find((c) => String(c.city_id) === String(pathaoCityId));
-            const zoneObj = pathaoZones.find((z) => String(z.zone_id) === String(pathaoZoneId));
-            const areaObj = pathaoAreas.find((a) => String(a.area_id) === String(pathaoAreaId));
-
             const cityIdNum = pathaoCityId ? Number(pathaoCityId) : undefined;
             const zoneIdNum = pathaoZoneId ? Number(pathaoZoneId) : undefined;
             const areaIdNum = pathaoAreaId ? Number(pathaoAreaId) : undefined;
@@ -2674,8 +2828,11 @@ const derivePaymentStatus = (order: any) => {
               name: customerName ?? shipping_address.name ?? '',
               phone: customerPhone ?? shipping_address.phone ?? '',
               street: scStreetAddress,
+              address_line1: scStreetAddress,
+              address_line_1: scStreetAddress,
               area: areaObj?.area_name || shipping_address.area || '',
               city: cityObj?.city_name || shipping_address.city || '',
+              country: shipping_address.country || 'Bangladesh',
               pathao_city_id: cityIdNum,
               pathao_zone_id: zoneIdNum,
               pathao_area_id: areaIdNum,
@@ -2692,16 +2849,52 @@ const derivePaymentStatus = (order: any) => {
           name: customerName ?? shipping_address.name ?? '',
           phone: customerPhone ?? shipping_address.phone ?? '',
           email: customerEmail ?? shipping_address.email ?? undefined,
+          address_line1: ecAddress1,
           address_line_1: ecAddress1,
+          address_line2: ecAddress2 || undefined,
           address_line_2: ecAddress2 || undefined,
           city: ecCity,
           state: ecState,
           postal_code: ecPostalCode,
+          country: ecCountry || shipping_address.country || 'Bangladesh',
           landmark: ecLandmark || undefined,
         };
 
         const parts = [ecAddress1, ecAddress2, ecCity, ecState].filter(Boolean);
         customer_address_text = parts.join(', ') + (ecPostalCode ? ` ${ecPostalCode}` : '');
+      }
+
+      // Canonicalize shipping payload to match backend validation rules
+      if (shipping_address && typeof shipping_address === 'object' && Object.keys(shipping_address).length > 0) {
+        const normalizedLine1 = cleanText(
+          shipping_address.address_line1 ||
+            shipping_address.address_line_1 ||
+            shipping_address.street ||
+            shipping_address.address ||
+            customer_address_text
+        );
+
+        const normalizedCity = cleanText(
+          shipping_address.city ||
+            (orderType === 'ecommerce' ? ecCity : scCity) ||
+            pathaoCities.find((c) => String(c.city_id) === String(pathaoCityId))?.city_name ||
+            'Dhaka'
+        );
+
+        const normalizedCountry = cleanText(
+          shipping_address.country ||
+            (orderType === 'ecommerce' ? ecCountry : scCountry) ||
+            'Bangladesh'
+        );
+
+        if (normalizedLine1) {
+          shipping_address.address_line1 = normalizedLine1;
+          shipping_address.address_line_1 = shipping_address.address_line_1 || normalizedLine1;
+          shipping_address.street = shipping_address.street || normalizedLine1;
+        }
+
+        shipping_address.city = normalizedCity;
+        shipping_address.country = normalizedCountry;
       }
 
       const payloadBase: any = {
@@ -2886,7 +3079,7 @@ const derivePaymentStatus = (order: any) => {
                   onClick={() => {
                     setViewMode('online');
                     setOrderTypeFilter('All Types');
-                    setOrderStatusFilter('All Order Status');
+                    setOrderStatusFilter('pending');
                     setPaymentStatusFilter('All Payment Status');
                     setCourierFilter('All Couriers');
                     setSearch('');
@@ -2929,6 +3122,86 @@ const derivePaymentStatus = (order: any) => {
                 )}
               </div>
 
+
+              {/* ⚡ Quick filters (2-row): Status then Courier */}
+              <div className="mb-3 border border-gray-200 dark:border-gray-800 rounded p-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-bold tracking-wide">
+                    Order Status
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOrderStatusFilter(viewMode === 'online' ? 'pending' : 'All Order Status');
+                      setCourierFilter('All Couriers');
+                    }}
+                    className="text-[10px] font-semibold text-gray-600 dark:text-gray-400 hover:text-black dark:hover:text-white"
+                    title="Reset quick filters"
+                  >
+                    Reset
+                  </button>
+                </div>
+
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {quickStatusTabs.map((t) => {
+                    const active =
+                      t.value === 'All Order Status'
+                        ? orderStatusFilter === 'All Order Status'
+                        : normalize(orderStatusFilter) === normalize(t.value);
+
+                    return (
+                      <button
+                        key={t.value}
+                        type="button"
+                        aria-pressed={active}
+                        onClick={() => setOrderStatusFilter(t.value)}
+                        className={`px-2.5 py-1 rounded border text-[11px] font-semibold transition-colors ${
+                          active
+                            ? 'bg-black text-white border-black dark:bg-white dark:text-black dark:border-white'
+                            : 'bg-white text-black border-gray-300 hover:bg-gray-50 dark:bg-gray-900 dark:text-white dark:border-gray-700 dark:hover:bg-gray-800'
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {viewMode === 'online' && (
+                  <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-800">
+                    <p className="text-[10px] text-gray-600 dark:text-gray-400 uppercase font-bold tracking-wide">
+                      Add Order Marker
+                    </p>
+
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {quickCourierTabs.map((c) => {
+                        const active =
+                          c === 'All Couriers'
+                            ? courierFilter === 'All Couriers'
+                            : normalizeCourier(courierFilter) === normalizeCourier(c);
+
+                        return (
+                          <button
+                            key={c}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => setCourierFilter(c)}
+                            className={`px-2.5 py-1 rounded border text-[11px] font-semibold transition-colors ${
+                              active
+                                ? 'bg-black text-white border-black dark:bg-white dark:text-black dark:border-white'
+                                : 'bg-white text-black border-gray-300 hover:bg-gray-50 dark:bg-gray-900 dark:text-white dark:border-gray-700 dark:hover:bg-gray-800'
+                            }`}
+                            title={c === 'All Couriers' ? 'All order markers' : `Order Marker: ${courierLabel(c)}`}
+                          >
+                            {c === 'All Couriers' ? 'All' : courierLabel(c)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div className="flex flex-col md:flex-row md:items-center gap-2 mb-3">
                 <div className="relative flex-1 w-full">
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -2968,19 +3241,6 @@ const derivePaymentStatus = (order: any) => {
                 </select>
 
                 <select
-                  value={orderStatusFilter}
-                  onChange={(e) => setOrderStatusFilter(e.target.value)}
-                  className="w-full md:w-auto px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
-                >
-                  <option>All Order Status</option>
-                  {orderStatusOptions.map((s) => (
-                    <option key={s} value={s}>
-                      {statusLabel(s)}
-                    </option>
-                  ))}
-                </select>
-
-                <select
                   value={paymentStatusFilter}
                   onChange={(e) => setPaymentStatusFilter(e.target.value)}
                   className="w-full md:w-auto px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
@@ -2992,22 +3252,6 @@ const derivePaymentStatus = (order: any) => {
                     </option>
                   ))}
                 </select>
-
-                {viewMode === 'online' && (
-                  <select
-                    value={courierFilter}
-                    onChange={(e) => setCourierFilter(e.target.value)}
-                    className="w-full md:w-auto px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-2 focus:ring-black dark:focus:ring-white"
-                    title="Filter by intended courier marker"
-                  >
-                    <option value="All Couriers">All Couriers</option>
-                    {courierFilterOptions.map((c) => (
-                      <option key={c} value={c}>
-                        {courierLabel(c)}
-                      </option>
-                    ))}
-                  </select>
-                )}
               </div>
 
               <p className="text-xs text-gray-500 dark:text-gray-500">
@@ -3089,6 +3333,12 @@ const derivePaymentStatus = (order: any) => {
                       }}
                     />
                   </div>
+                  {pathaoProgress.batchCode ? (
+                    <p className="mt-1 text-[10px] text-gray-600 dark:text-gray-400">
+                      Batch: <span className="font-mono">{pathaoProgress.batchCode}</span>
+                      {pathaoProgress.batchStatus ? ` • ${pathaoProgress.batchStatus}` : ''}
+                    </p>
+                  ) : null}
                 </div>
               )}
 
@@ -3252,7 +3502,7 @@ const derivePaymentStatus = (order: any) => {
                         </th>
                         {viewMode === 'online' && (
                           <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
-                            Courier
+                            Order Marker
                           </th>
                         )}
                         <th className="px-4 py-3 text-left text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
@@ -3323,7 +3573,7 @@ const derivePaymentStatus = (order: any) => {
                                     openCourierEditor(order);
                                   }}
                                   className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
-                                  title="Edit courier marker"
+                                  title="Edit order marker"
                                 >
                                   <Edit className="h-3.5 w-3.5 text-gray-700 dark:text-gray-300" />
                                 </button>
@@ -3499,13 +3749,13 @@ const derivePaymentStatus = (order: any) => {
         </div>
       )}
 
-      {/* Courier Marker Modal */}
+      {/* Order Marker Modal */}
       {showCourierModal && courierModalOrder && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-900 rounded-xl max-w-md w-full border border-gray-200 dark:border-gray-800">
             <div className="px-5 py-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-bold text-black dark:text-white">Set Courier Marker</h3>
+                <h3 className="text-sm font-bold text-black dark:text-white">Add Order Marker</h3>
                 <p className="text-[10px] text-gray-500 dark:text-gray-400">
                   {courierModalOrder.orderNumber} • #{courierModalOrder.id}
                 </p>
@@ -3522,7 +3772,7 @@ const derivePaymentStatus = (order: any) => {
             </div>
 
             <div className="p-5 space-y-2">
-              <label className="block text-[11px] text-gray-700 dark:text-gray-300">Courier</label>
+              <label className="block text-[11px] text-gray-700 dark:text-gray-300">Add Order Marker</label>
               <select
                 value={courierModalValue}
                 onChange={(e) => setCourierModalValue(e.target.value)}
@@ -3536,7 +3786,7 @@ const derivePaymentStatus = (order: any) => {
                 ))}
               </select>
               <p className="text-[10px] text-gray-500 dark:text-gray-400">
-                This is just an intended courier marker for tracking & filtering. You can change it anytime.
+                This is just an order marker for tracking & filtering. You can change it anytime.
               </p>
             </div>
 
@@ -3604,7 +3854,7 @@ const derivePaymentStatus = (order: any) => {
               className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700"
             >
               <Truck className="h-5 w-5 flex-shrink-0" />
-              <span>Set Courier Marker</span>
+              <span>Add Order Marker</span>
             </button>
           )}
 
@@ -3772,9 +4022,7 @@ const derivePaymentStatus = (order: any) => {
                 alt={imagePreview.name}
                 className="w-full max-h-[70vh] object-contain rounded-lg bg-white dark:bg-black"
                 onError={(e) => {
-                  if (!e.currentTarget.src.includes('/placeholder-product.png')) {
-                        e.currentTarget.src = '/placeholder-product.png';
-                      }
+                  e.currentTarget.src = '/placeholder-product.png';
                 }}
               />
             </div>
@@ -4072,9 +4320,7 @@ const derivePaymentStatus = (order: any) => {
                                       alt={item.name}
                                       className="w-full h-full object-cover"
                                       onError={(e) => {
-                                        if (!e.currentTarget.src.includes('/placeholder-product.png')) {
-                        e.currentTarget.src = '/placeholder-product.png';
-                      }
+                                        e.currentTarget.src = '/placeholder-product.png';
                                       }}
                                     />
                                   </button>
@@ -4593,6 +4839,15 @@ const derivePaymentStatus = (order: any) => {
                           className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm"
                         />
                       </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Country*</label>
+                        <input
+                          type="text"
+                          value={ecCountry}
+                          onChange={(e) => setEcCountry(e.target.value)}
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-black dark:text-white text-sm"
+                        />
+                      </div>
                       <div className="col-span-2">
                         <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Landmark</label>
                         <input
@@ -4623,9 +4878,7 @@ const derivePaymentStatus = (order: any) => {
                             alt={item.name}
                             className="w-12 h-12 rounded-md object-cover border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
                             onError={(e) => {
-                              if (!e.currentTarget.src.includes('/placeholder-product.png')) {
-                        e.currentTarget.src = '/placeholder-product.png';
-                      }
+                              e.currentTarget.src = '/placeholder-product.png';
                             }}
                           />
                           <div className="flex-1">
@@ -4948,9 +5201,7 @@ const derivePaymentStatus = (order: any) => {
                             alt={product.name}
                             className="w-10 h-10 rounded-md object-cover border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800"
                             onError={(e) => {
-                              if (!e.currentTarget.src.includes('/placeholder-product.png')) {
-                        e.currentTarget.src = '/placeholder-product.png';
-                      }
+                              e.currentTarget.src = '/placeholder-product.png';
                             }}
                           />
                           <div className="min-w-0 flex-1">

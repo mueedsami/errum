@@ -7,6 +7,7 @@ export interface ProductReturn {
   order_id: number;
   customer_id: number;
   store_id: number;
+  received_at_store_id?: number;
   return_reason: 'defective_product' | 'wrong_item' | 'not_as_described' | 'customer_dissatisfaction' | 'size_issue' | 'color_issue' | 'quality_issue' | 'late_delivery' | 'changed_mind' | 'duplicate_order' | 'other';
   return_type?: 'customer_return' | 'store_return' | 'warehouse_return';
   status: ReturnStatus;

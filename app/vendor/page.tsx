@@ -343,14 +343,31 @@ export default function VendorPaymentPage() {
       });
     }
 
-    // Deduplicate — only show one row per variation group (the first product encountered)
-    const seenKeys = new Set<string>();
-    return list.filter((p) => {
-      const key = getVariantGroupKey(p);
-      if (seenKeys.has(key)) return false;
-      seenKeys.add(key);
-      return true;
-    });
+    // Show grouped rows (by SKU) so variations don't spam the list.
+    const keyFor = (p: any) => {
+      const id = Number(p?.id ?? 0);
+      const rawSku = String(p?.sku ?? '').trim().toLowerCase();
+      if (!rawSku) return `__no_sku_${id || Math.random()}`;
+      const sku = rawSku.replace(/\s+/g, '');
+      const stripped = sku.replace(/[-_]?(?:\d+(?:\.\d+)?)$/i, '');
+      return (stripped || sku).trim();
+    };
+
+    const grouped = new Map<string, any>();
+    for (const p of list) {
+      const k = keyFor(p);
+      if (!grouped.has(k)) {
+        grouped.set(k, p);
+        continue;
+      }
+      // Prefer the "base" item if it has no trailing-number SKU
+      const existing = grouped.get(k);
+      const existingSku = String(existing?.sku ?? '').trim();
+      const newSku = String((p as any)?.sku ?? '').trim();
+      if (existingSku && !newSku) grouped.set(k, p);
+    }
+
+    return Array.from(grouped.values());
   }, [products, poSearch, poCategoryId, categoryTree]);
 
   const addProductToPO = (productId: number) => {
@@ -453,22 +470,17 @@ export default function VendorPaymentPage() {
     return () => window.clearTimeout(t);
   }, [showAddPurchase, purchaseForm, poSearch, poCategoryId, poShowAllProducts]);
 
+  /**
+   * Grouping rule for variations:
+   * Group ONLY by the FULL SKU (exact match), never by name or SKU-prefix.
+   * Products without SKU are treated as standalone (no inferred variations).
+   */
   const getVariantGroupKey = (p: Product): string => {
-    // base_name is the authoritative grouping key when available
-    const baseName = ((p as any).base_name || '').trim().toLowerCase();
-    if (baseName) return `bn:${baseName}`;
-
-    // SKU-based grouping: strip a trailing size/number suffix like "-40", "_L", " XL"
-    // BUT only if stripping leaves something non-empty — all-numeric SKUs must not collapse to ""
-    const sku = (((p as any).sku || '') as string).trim().toLowerCase();
-    if (sku) {
-      const stripped = sku.replace(/[-_\s]?(?:xs|s|m|l|xl|xxl|\d+(?:\.\d+)?)$/i, '').trim();
-      if (stripped.length > 0) return `sku:${stripped}`;
-      return `sku:${sku}`; // full SKU if nothing useful was stripped
-    }
-
-    // Fall back to the product id — no grouping
-    return `id:${(p as any).id}`;
+    const id = Number((p as any)?.id ?? 0);
+    const rawSku = String((p as any)?.sku ?? '').trim();
+    if (!rawSku) return `__no_sku_${id || 0}`;
+    // Normalize: case-insensitive, ignore spaces
+    return rawSku.toLowerCase().replace(/\s+/g, '');
   };
 
   const extractTrailingSize = (p: Product): number | null => {
@@ -480,7 +492,7 @@ export default function VendorPaymentPage() {
   };
 
   const getVariantGroupProducts = (p: Product): Product[] => {
-    // If backend already returns variants on the object, prefer that
+    // If backend already returns variants, use them (trusted relation)
     if (Array.isArray((p as any).variants) && (p as any).variants.length > 0) {
       const all = [p, ...(p as any).variants].filter(Boolean) as any[];
       const map = new Map<number, Product>();
@@ -488,10 +500,8 @@ export default function VendorPaymentPage() {
       return Array.from(map.values());
     }
 
-    // Group by our stable key — only products sharing the exact same key are variations
+    // Fallback: infer variants from full product list using full SKU match ONLY.
     const key = getVariantGroupKey(p);
-    // Never treat id-based keys as a group (each product is its own group)
-    if (key.startsWith('id:')) return [p];
     return products.filter((x) => getVariantGroupKey(x) === key);
   };
 

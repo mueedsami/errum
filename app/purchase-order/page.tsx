@@ -297,6 +297,7 @@ export default function PurchaseOrdersPage() {
   const [editProductSearch, setEditProductSearch] = useState('');
   const [editProductResults, setEditProductResults] = useState<Product[]>([]);
   const [editProductSearching, setEditProductSearching] = useState(false);
+  const [expandedSkuGroups, setExpandedSkuGroups] = useState<Set<string>>(new Set());
 
   const [editOriginal, setEditOriginal] = useState<{
     tax_amount: number;
@@ -336,7 +337,10 @@ export default function PurchaseOrdersPage() {
           vendor_id: editPO.vendor_id,
           is_archived: false,
         });
-        if (!cancelled) setEditProductResults(Array.isArray(res?.data) ? res.data : []);
+        if (!cancelled) {
+          setEditProductResults(Array.isArray(res?.data) ? res.data : []);
+          setExpandedSkuGroups(new Set()); // reset expanded state on new search
+        }
       } catch {
         if (!cancelled) setEditProductResults([]);
       } finally {
@@ -542,6 +546,7 @@ export default function PurchaseOrdersPage() {
 
     setEditProductSearch('');
     setEditProductResults([]);
+    setExpandedSkuGroups(new Set());
 
     setShowEditModal(true);
   } catch (error) {
@@ -1378,55 +1383,163 @@ export default function PurchaseOrdersPage() {
                 </div>
 
                 {editProductSearch.trim() && (
-                  <div className="mt-3 max-h-60 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-md divide-y divide-gray-200 dark:divide-gray-700">
-                    {editProductResults.map((p) => {
-                      const img = pickProductImage(p);
-                      return (
-                        <div key={p.id} className="flex items-center justify-between gap-3 p-3 bg-white dark:bg-gray-800">
-                          <div className="flex items-center gap-3 min-w-0">
-                            {img ? (
+                  <div className="mt-3 max-h-72 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg">
+                    {(() => {
+                      if (!editProductSearching && editProductResults.length === 0) {
+                        return <div className="p-4 text-sm text-gray-500 dark:text-gray-400 text-center">No products found.</div>;
+                      }
+
+                      // Group products by SKU — variations share the same SKU
+                      const groups = editProductResults.reduce<Record<string, { sku: string; baseName: string; products: Product[] }>>((acc, p) => {
+                        const sku = p.sku || `__no_sku_${p.id}`;
+                        if (!acc[sku]) {
+                          acc[sku] = {
+                            sku,
+                            baseName: p.base_name || p.name,
+                            products: [],
+                          };
+                        }
+                        acc[sku].products.push(p);
+                        return acc;
+                      }, {});
+
+                      return Object.values(groups).map((group) => {
+                        const isMulti = group.products.length > 1;
+                        const isExpanded = expandedSkuGroups.has(group.sku);
+                        const groupImg = pickProductImage(group.products[0]);
+
+                        if (!isMulti) {
+                          // Single product — no grouping needed
+                          const p = group.products[0];
+                          const img = pickProductImage(p);
+                          const alreadyInPO = (editPO?.items ?? []).some((it: any) => Number(it?.product_id) === Number(p.id));
+                          const alreadyInNew = editForm.new_items.some((x) => Number(x.product_id) === Number(p.id));
+                          const added = alreadyInPO || alreadyInNew;
+                          return (
+                            <div key={p.id} className="flex items-center justify-between gap-3 p-3 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700 last:border-0">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <button
+                                  type="button"
+                                  onClick={() => img && setImagePreview({ url: img, name: p.name })}
+                                  className="w-10 h-10 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 flex-shrink-0"
+                                  title={img ? 'View image' : undefined}
+                                >
+                                  {img ? (
+                                    <img src={img} alt={p.name} className="w-full h-full object-cover" onError={(e) => { if (!e.currentTarget.src.includes('/placeholder-product.png')) e.currentTarget.src = '/placeholder-product.png'; }} />
+                                  ) : (
+                                    <Package className="w-5 h-5 text-gray-400 m-auto mt-2.5" />
+                                  )}
+                                </button>
+                                <div className="min-w-0">
+                                  <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{p.name}</div>
+                                  <div className="text-xs text-gray-500 dark:text-gray-400 font-mono">SKU: {p.sku || '—'}</div>
+                                </div>
+                              </div>
                               <button
                                 type="button"
-                                onClick={() => setImagePreview({ url: img, name: p.name })}
-                                className="w-10 h-10 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-900 flex-shrink-0"
-                                title="View image"
+                                onClick={() => appendProductToEdit(p)}
+                                disabled={added}
+                                className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-md flex-shrink-0 ${added ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 text-white'}`}
+                                title={added ? 'Already in PO' : 'Add to PO'}
                               >
-                                <img
-                                  src={img}
-                                  alt={p.name}
-                                  className="w-full h-full object-cover"
-                                  onError={(e) => {
-                                    if (!e.currentTarget.src.includes('/placeholder-product.png')) {
-                        e.currentTarget.src = '/placeholder-product.png';
-                      }
-                                  }}
-                                />
+                                {added ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+                                {added ? 'Added' : 'Add'}
                               </button>
-                            ) : (
-                              <div className="w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600" />
-                            )}
-
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium text-gray-900 dark:text-white truncate">{p.name}</div>
-                              <div className="text-xs text-gray-500 dark:text-gray-400 truncate">{(p as any).sku || ''}</div>
                             </div>
+                          );
+                        }
+
+                        // Multiple products with same SKU = variation group
+                        return (
+                          <div key={group.sku} className="border-b border-gray-100 dark:border-gray-700 last:border-0">
+                            {/* Group header */}
+                            <button
+                              type="button"
+                              onClick={() => setExpandedSkuGroups((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(group.sku)) next.delete(group.sku);
+                                else next.add(group.sku);
+                                return next;
+                              })}
+                              className="w-full flex items-center justify-between gap-3 px-3 py-2.5 bg-gray-50 dark:bg-gray-700/60 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left"
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-9 h-9 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 flex-shrink-0">
+                                  {groupImg ? (
+                                    <img src={groupImg} alt={group.baseName} className="w-full h-full object-cover" onError={(e) => { if (!e.currentTarget.src.includes('/placeholder-product.png')) e.currentTarget.src = '/placeholder-product.png'; }} />
+                                  ) : (
+                                    <Package className="w-4 h-4 text-gray-400 m-auto mt-2.5" />
+                                  )}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="text-sm font-semibold text-gray-900 dark:text-white truncate">{group.baseName}</div>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">SKU: {group.sku}</span>
+                                    <span className="text-[10px] font-semibold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 rounded-full">
+                                      {group.products.length} variations
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                              {isExpanded
+                                ? <ChevronUp className="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                : <ChevronDown className="w-4 h-4 text-gray-500 flex-shrink-0" />}
+                            </button>
+
+                            {/* Variation rows */}
+                            {isExpanded && (
+                              <div className="divide-y divide-gray-100 dark:divide-gray-700/50">
+                                {group.products.map((p) => {
+                                  const img = pickProductImage(p);
+                                  const alreadyInPO = (editPO?.items ?? []).some((it: any) => Number(it?.product_id) === Number(p.id));
+                                  const alreadyInNew = editForm.new_items.some((x) => Number(x.product_id) === Number(p.id));
+                                  const added = alreadyInPO || alreadyInNew;
+                                  const suffix = p.variation_suffix || (p.name !== group.baseName ? p.name.replace(group.baseName, '').trim() : '');
+                                  return (
+                                    <div key={p.id} className="flex items-center justify-between gap-3 pl-12 pr-3 py-2.5 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
+                                      <div className="flex items-center gap-2.5 min-w-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => img && setImagePreview({ url: img, name: p.name })}
+                                          className="w-8 h-8 rounded overflow-hidden border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700 flex-shrink-0"
+                                          title={img ? 'View image' : undefined}
+                                        >
+                                          {img ? (
+                                            <img src={img} alt={p.name} className="w-full h-full object-cover" onError={(e) => { if (!e.currentTarget.src.includes('/placeholder-product.png')) e.currentTarget.src = '/placeholder-product.png'; }} />
+                                          ) : (
+                                            <Package className="w-4 h-4 text-gray-400 m-auto mt-2" />
+                                          )}
+                                        </button>
+                                        <div className="min-w-0">
+                                          <div className="text-sm text-gray-800 dark:text-gray-200 truncate">
+                                            {suffix ? (
+                                              <span className="font-medium text-blue-700 dark:text-blue-300">{suffix}</span>
+                                            ) : (
+                                              <span className="text-gray-600 dark:text-gray-400 italic">Base variant</span>
+                                            )}
+                                          </div>
+                                          <div className="text-[10px] text-gray-400 font-mono">ID: {p.id}</div>
+                                        </div>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => appendProductToEdit(p)}
+                                        disabled={added}
+                                        className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs rounded-md flex-shrink-0 ${added ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 text-white'}`}
+                                        title={added ? 'Already in PO' : 'Add to PO'}
+                                      >
+                                        {added ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
+                                        {added ? 'Added' : 'Add'}
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
-
-                          <button
-                            type="button"
-                            onClick={() => appendProductToEdit(p)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs bg-green-600 hover:bg-green-700 text-white rounded-md"
-                          >
-                            <Plus className="w-3 h-3" />
-                            Add
-                          </button>
-                        </div>
-                      );
-                    })}
-
-                    {!editProductSearching && editProductResults.length === 0 && (
-                      <div className="p-4 text-sm text-gray-500 dark:text-gray-400">No products found.</div>
-                    )}
+                        );
+                      });
+                    })()}
                   </div>
                 )}
               </div>

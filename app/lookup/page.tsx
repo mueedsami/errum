@@ -101,38 +101,50 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) 
   return t.length ? t + ellipsis : "";
 }
 
-function wrapTwoLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): [string, string] {
-  const clean = String(text || "").trim().replace(/\s+/g, " ");
-  if (!clean) return ["", ""];
-  if (ctx.measureText(clean).width <= maxWidth) return [clean, ""];
+function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines = 3): string[] {
+  const clean = (text || "").trim().replace(/\s+/g, " ");
+  if (!clean) return [""];
+  if (ctx.measureText(clean).width <= maxWidth) return [clean];
 
   const words = clean.split(" ");
-  if (words.length <= 1) {
-    // No spaces; split by characters
-    let line1 = clean;
-    while (line1.length > 0 && ctx.measureText(line1).width > maxWidth) line1 = line1.slice(0, -1);
-    const rest = clean.slice(line1.length).trim();
-    if (!rest) return [fitText(ctx, clean, maxWidth), ""];
-    return [line1, fitText(ctx, rest, maxWidth)];
-  }
+  const lines: string[] = [];
+  let remaining = words;
 
-  // Build first line word-by-word
-  let line1 = "";
-  let i = 0;
-  for (; i < words.length; i++) {
-    const test = line1 ? `${line1} ${words[i]}` : words[i];
-    if (ctx.measureText(test).width <= maxWidth) {
-      line1 = test;
-    } else {
+  while (remaining.length > 0 && lines.length < maxLines) {
+    const isLastLine = lines.length === maxLines - 1;
+
+    if (remaining.length === 1) {
+      lines.push(isLastLine ? fitText(ctx, remaining[0], maxWidth) : remaining[0]);
+      remaining = [];
       break;
+    }
+
+    let line = "";
+    let i = 0;
+    for (; i < remaining.length; i++) {
+      const test = line ? `${line} ${remaining[i]}` : remaining[i];
+      if (ctx.measureText(test).width <= maxWidth) line = test;
+      else break;
+    }
+
+    if (!line) {
+      let forced = remaining[0];
+      while (forced.length > 0 && ctx.measureText(forced).width > maxWidth) forced = forced.slice(0, -1);
+      line = forced || fitText(ctx, remaining[0], maxWidth);
+      i = 1;
+    }
+
+    if (isLastLine && i < remaining.length) {
+      const restRaw = [line, ...remaining.slice(i)].join(" ");
+      lines.push(fitText(ctx, restRaw, maxWidth));
+      remaining = [];
+    } else {
+      lines.push(line);
+      remaining = remaining.slice(i);
     }
   }
 
-  if (!line1) return [fitText(ctx, clean, maxWidth), ""];
-
-  const line2Raw = words.slice(i).join(" ").trim();
-  const line2 = line2Raw ? fitText(ctx, line2Raw, maxWidth) : "";
-  return [line1, line2];
+  return lines.length > 0 ? lines : [fitText(ctx, clean, maxWidth)];
 }
 
 function normalizeLabelName(text: string) {
@@ -178,44 +190,41 @@ async function renderLabelBase64(opts: { code: string; productName: string; pric
   ctx.font = `800 ${Math.round(hPx * 0.11)}px Arial`;
   ctx.fillText("ERRUM BD", centerX, topPad);
 
-  // Product name (match BatchPrinter)
+  // Product name — up to 3 lines, shrinking font as needed
   const nameY = topPad + Math.round(hPx * 0.14);
   const nameMaxW = wPx - pad * 2;
   const lineGap = Math.max(2, Math.round(hPx * 0.01));
   const fullName = normalizeLabelName(opts.productName || "Product");
 
-  let name1 = "";
-  let name2 = "";
-  let afterNameY = 0;
-
   let nameFont = Math.round(hPx * 0.095);
   ctx.font = `700 ${nameFont}px Arial`;
+  let nameLines = wrapLines(ctx, fullName, nameMaxW, 3);
 
-  [name1, name2] = wrapTwoLines(ctx, fullName, nameMaxW);
-
-  // If it needs 2 lines, shrink a bit for safety
-  if (name2) {
+  if (nameLines.length > 1) {
     nameFont = Math.round(hPx * 0.082);
     ctx.font = `700 ${nameFont}px Arial`;
-    [name1, name2] = wrapTwoLines(ctx, fullName, nameMaxW);
+    nameLines = wrapLines(ctx, fullName, nameMaxW, 3);
   }
 
-  ctx.fillText(name1, centerX, nameY);
-  let afterBottom = nameY + nameFont;
-
-  if (name2) {
-    ctx.fillText(name2, centerX, nameY + nameFont + lineGap);
-    afterBottom = nameY + (nameFont + lineGap) * 2;
+  if (nameLines.length > 2) {
+    nameFont = Math.round(hPx * 0.070);
+    ctx.font = `700 ${nameFont}px Arial`;
+    nameLines = wrapLines(ctx, fullName, nameMaxW, 3);
   }
 
-  afterNameY = afterBottom + Math.round(hPx * 0.03);
+  nameLines.forEach((line, i) => {
+    ctx.fillText(line, centerX, nameY + i * (nameFont + lineGap));
+  });
 
-  // Barcode
+  const afterNameBottom = nameY + nameLines.length * (nameFont + lineGap);
+  const afterNameY = afterNameBottom + Math.round(hPx * 0.02);
+
+  // Barcode — smaller to leave room for 3-line names
   const JsBarcode = (window as any).JsBarcode;
   const maxBcW = Math.round((wPx - pad * 2) * 0.98);
-  const maxBcH = Math.round(hPx * 0.56);
-  const bcHeight = Math.round(hPx * 0.28);
-  const bcFontSize = Math.round(hPx * 0.09);
+  const maxBcH = Math.round(hPx * 0.36);
+  const bcHeight = Math.round(hPx * 0.17);
+  const bcFontSize = Math.round(hPx * 0.062);
 
   const renderBarcodeCanvas = (barWidth: number) => {
     const c = document.createElement("canvas");
@@ -235,7 +244,7 @@ async function renderLabelBase64(opts: { code: string; productName: string; pric
   // Pick the largest integer barWidth that fits
   let bw = 1;
   let bcCanvas = renderBarcodeCanvas(bw);
-  while (bw < 6) {
+  while (bw < 3) {
     const next = renderBarcodeCanvas(bw + 1);
     if (next.width <= maxBcW && next.height <= maxBcH) {
       bw += 1;

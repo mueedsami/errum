@@ -48,7 +48,7 @@ async function ensureQZConnection() {
 const LABEL_WIDTH_MM = 39;
 const LABEL_HEIGHT_MM = 25;
 const DEFAULT_DPI = 300; // set to 203 for 203dpi printers
-const TOP_GAP_MM = 1; // extra blank gap at the very top (same as Batch)
+const TOP_GAP_MM = 0.3; // extra blank gap at the very top (same as Batch)
 const SHIFT_X_MM = 0; // keep 0 for perfect centering
 
 function mmToIn(mm: number) {
@@ -79,34 +79,50 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) 
   return t.length ? t + ellipsis : "";
 }
 
-function wrapTwoLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number) {
+function wrapLines(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines = 3): string[] {
   const clean = (text || "").trim().replace(/\s+/g, " ");
-  if (!clean) return ["", ""] as const;
-  if (ctx.measureText(clean).width <= maxWidth) return [clean, ""] as const;
+  if (!clean) return [""];
+  if (ctx.measureText(clean).width <= maxWidth) return [clean];
 
   const words = clean.split(" ");
-  if (words.length <= 1) {
-    let line1 = clean;
-    while (line1.length > 0 && ctx.measureText(line1).width > maxWidth) {
-      line1 = line1.slice(0, -1);
+  const lines: string[] = [];
+  let remaining = words;
+
+  while (remaining.length > 0 && lines.length < maxLines) {
+    const isLastLine = lines.length === maxLines - 1;
+
+    if (remaining.length === 1) {
+      lines.push(isLastLine ? fitText(ctx, remaining[0], maxWidth) : remaining[0]);
+      remaining = [];
+      break;
     }
-    const rest = clean.slice(line1.length).trim();
-    const line2 = rest ? fitText(ctx, rest, maxWidth) : "";
-    return [line1 || fitText(ctx, clean, maxWidth), line2] as const;
+
+    let line = "";
+    let i = 0;
+    for (; i < remaining.length; i++) {
+      const test = line ? `${line} ${remaining[i]}` : remaining[i];
+      if (ctx.measureText(test).width <= maxWidth) line = test;
+      else break;
+    }
+
+    if (!line) {
+      let forced = remaining[0];
+      while (forced.length > 0 && ctx.measureText(forced).width > maxWidth) forced = forced.slice(0, -1);
+      line = forced || fitText(ctx, remaining[0], maxWidth);
+      i = 1;
+    }
+
+    if (isLastLine && i < remaining.length) {
+      const restRaw = [line, ...remaining.slice(i)].join(" ");
+      lines.push(fitText(ctx, restRaw, maxWidth));
+      remaining = [];
+    } else {
+      lines.push(line);
+      remaining = remaining.slice(i);
+    }
   }
 
-  let line1 = "";
-  let i = 0;
-  for (; i < words.length; i++) {
-    const test = line1 ? `${line1} ${words[i]}` : words[i];
-    if (ctx.measureText(test).width <= maxWidth) line1 = test;
-    else break;
-  }
-
-  if (!line1) return [fitText(ctx, clean, maxWidth), ""] as const;
-  const line2Raw = words.slice(i).join(" ").trim();
-  const line2 = line2Raw ? fitText(ctx, line2Raw, maxWidth) : "";
-  return [line1, line2] as const;
+  return lines.length > 0 ? lines : [fitText(ctx, clean, maxWidth)];
 }
 
 function normalizeLabelName(text: string) {
@@ -154,41 +170,42 @@ async function renderLabelBase64(opts: {
   ctx.font = `800 ${Math.round(hPx * 0.11)}px Arial`;
   ctx.fillText("ERRUM BD", centerX, topPad);
 
-  // Product name
+  // Product name — up to 3 lines, shrinking font as needed
   const nameY = topPad + Math.round(hPx * 0.14);
   const nameMaxW = wPx - pad * 2;
   const lineGap = Math.max(2, Math.round(hPx * 0.01));
   const fullName = normalizeLabelName(opts.productName || "Product");
 
-  let name1 = "";
-  let name2 = "";
-
   let nameFont = Math.round(hPx * 0.095);
   ctx.font = `700 ${nameFont}px Arial`;
+  let nameLines = wrapLines(ctx, fullName, nameMaxW, 3);
 
-  [name1, name2] = wrapTwoLines(ctx, fullName, nameMaxW);
-  if (name2) {
+  if (nameLines.length > 1) {
     nameFont = Math.round(hPx * 0.082);
     ctx.font = `700 ${nameFont}px Arial`;
-    [name1, name2] = wrapTwoLines(ctx, fullName, nameMaxW);
+    nameLines = wrapLines(ctx, fullName, nameMaxW, 3);
   }
 
-  ctx.fillText(name1, centerX, nameY);
-
-  let afterNameBottom = nameY + nameFont;
-  if (name2) {
-    ctx.fillText(name2, centerX, nameY + nameFont + lineGap);
-    afterNameBottom = nameY + (nameFont + lineGap) * 2;
+  if (nameLines.length > 2) {
+    nameFont = Math.round(hPx * 0.070);
+    ctx.font = `700 ${nameFont}px Arial`;
+    nameLines = wrapLines(ctx, fullName, nameMaxW, 3);
   }
-  const afterNameY = afterNameBottom + Math.round(hPx * 0.03);
 
-  // Barcode
+  nameLines.forEach((line, i) => {
+    ctx.fillText(line, centerX, nameY + i * (nameFont + lineGap));
+  });
+
+  const afterNameBottom = nameY + nameLines.length * (nameFont + lineGap);
+  const afterNameY = afterNameBottom + Math.round(hPx * 0.02);
+
+  // Barcode — smaller to leave room for 3-line names
   const JsBarcode = (window as any).JsBarcode;
 
   const maxBcW = Math.round((wPx - pad * 2) * 0.98);
-  const maxBcH = Math.round(hPx * 0.56);
-  const bcHeight = Math.round(hPx * 0.28);
-  const bcFontSize = Math.round(hPx * 0.09);
+  const maxBcH = Math.round(hPx * 0.36);
+  const bcHeight = Math.round(hPx * 0.17);
+  const bcFontSize = Math.round(hPx * 0.062);
 
   const renderBarcodeCanvas = (barWidth: number) => {
     const c = document.createElement("canvas");
@@ -207,7 +224,7 @@ async function renderLabelBase64(opts: {
 
   let bw = 1;
   let bcCanvas = renderBarcodeCanvas(bw);
-  while (bw < 6) {
+  while (bw < 3) {
     const next = renderBarcodeCanvas(bw + 1);
     if (next.width <= maxBcW && next.height <= maxBcH) {
       bw += 1;
@@ -230,7 +247,7 @@ async function renderLabelBase64(opts: {
   const priceText = `Price (VAT inc.): ৳${Number(opts.price || 0).toLocaleString("en-BD")}`;
   ctx.textBaseline = "bottom";
   const priceFontSize = Math.round(hPx * 0.082);
-  ctx.font = `700 ${priceFontSize}px "Consolas", "Lucida Console", "DejaVu Sans Mono", "Courier New", monospace`;
+  ctx.font = `800 ${priceFontSize}px "Consolas", "Lucida Console", "DejaVu Sans Mono", "Courier New", monospace`;
   const priceY = hPx - pad;
   ctx.fillText(fitText(ctx, priceText, wPx - pad * 2), centerX, priceY);
 

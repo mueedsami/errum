@@ -21,9 +21,9 @@ body {
 }
 
 ::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: #f5f5f4; }
-::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: #a8a29e; }
+::-webkit-scrollbar-track { background: #111; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.28); }
 
 /* ─── Design tokens ─────────────────────────────────────── */
 @layer base {
@@ -45,6 +45,65 @@ body {
     font-family: "Jost", ui-sans-serif, system-ui, sans-serif;
     color: var(--ink);
     background: var(--paper);
+    position: relative;
+    isolation: isolate;
+  }
+
+  /* ── Global dark-page background texture ──────────────────────────────
+     Applied automatically to every dark page via the [style*="--ink"] selector.
+     Three stacked layers (all pointer-events:none, z-index:-1):
+       1. Fine grid lines  — subtle white crosshatch
+       2. Grain noise      — organic film-grain feel
+       3. Radial glow      — warm gold bloom at top-left
+     These sit behind all content via a fixed pseudo-element so they
+     scroll with the page naturally and don't repeat per-section.
+  ───────────────────────────────────────────────────────────────────── */
+  .ec-root[style*="var(--ink)"]::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+
+    /* Layer 1 — fine grid */
+    background-image:
+      linear-gradient(rgba(255,255,255,0.028) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.028) 1px, transparent 1px),
+    /* Layer 2 — grain (SVG feTurbulence data URI) */
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)' opacity='1'/%3E%3C/svg%3E"),
+    /* Layer 3 — base ink */
+      var(--ink);
+
+    background-size:
+      52px 52px,   /* grid cell size */
+      52px 52px,   /* grid cell size (cross direction) */
+      180px 180px, /* grain tile */
+      100% 100%;   /* base fill */
+
+    /* grain blended at very low opacity */
+    background-blend-mode: normal, normal, soft-light, normal;
+    opacity: 1;
+  }
+
+  /* Warm gold glow — top-left atmospheric light source */
+  .ec-root[style*="var(--ink)"]::after {
+    content: "";
+    position: fixed;
+    top: -20vh;
+    left: -15vw;
+    width: 70vw;
+    height: 70vw;
+    max-width: 900px;
+    max-height: 900px;
+    z-index: -1;
+    pointer-events: none;
+    border-radius: 50%;
+    background: radial-gradient(
+      circle at center,
+      rgba(176,124,58,0.10) 0%,
+      rgba(176,124,58,0.04) 35%,
+      transparent 70%
+    );
   }
 
   .ec-root :where(h1, h2, h3, h4, h5, h6, .ec-heading) {
@@ -77,23 +136,23 @@ body {
 
   /* Card surface */
   .ec-surface {
-    background: #fff;
-    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
     border-radius: 18px;
-    box-shadow: 0 2px 12px rgba(13,13,13,0.05), 0 1px 3px rgba(13,13,13,0.04);
+    box-shadow: 0 2px 24px rgba(0,0,0,0.3);
   }
 
   /* Product cards */
   .ec-card {
-    background: #ffffff;
-    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.09);
     border-radius: 14px;
-    box-shadow: 0 1px 2px rgba(13,13,13,0.04);
   }
-  .ec-card-hover { transition: box-shadow 200ms ease, transform 200ms ease, border-color 200ms ease; }
+  .ec-card-hover { transition: box-shadow 200ms ease, transform 200ms ease, border-color 200ms ease, background 200ms ease; }
   .ec-card-hover:hover {
-    box-shadow: 0 12px 28px rgba(13,13,13,0.1);
-    border-color: var(--border-md);
+    background: rgba(255,255,255,0.08);
+    box-shadow: 0 16px 40px rgba(0,0,0,0.4);
+    border-color: rgba(255,255,255,0.16);
     transform: translateY(-2px);
   }
 
@@ -143,7 +202,7 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    color: var(--ink-40);
+    color: rgba(255,255,255,0.32);
     font-family: "DM Mono", monospace;
     font-size: 10px;
     letter-spacing: 0.22em;
@@ -153,7 +212,7 @@ body {
     content: "";
     width: 24px;
     height: 1px;
-    background: var(--border-md);
+    background: rgba(255,255,255,0.15);
     flex-shrink: 0;
   }
 

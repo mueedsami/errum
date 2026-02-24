@@ -244,11 +244,11 @@ const SubcategoryProductTabs: React.FC<{ tabsCount?: number; productsPerTab?: nu
         <div className="ec-container">
           <div className="ec-surface p-4 sm:p-6 lg:p-8">
             <div className="mb-6 space-y-2">
-              <div className="h-3 w-32 rounded-full bg-neutral-200 animate-pulse" />
-              <div className="h-8 w-56 rounded-lg   bg-neutral-200 animate-pulse" />
+              <div className="h-3 w-32 rounded-full animate-pulse" style={{ background: 'rgba(255,255,255,0.08)' }}" />
+              <div className="h-8 w-56 rounded-lg   animate-pulse" style={{ background: 'rgba(255,255,255,0.08)' }}" />
             </div>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 mb-5">
-              {[1,2,3].map(i => <div key={i} className="aspect-[3/4] rounded-2xl bg-neutral-100 animate-pulse" />)}
+              {[1,2,3].map(i => <div key={i} className="aspect-[3/4] rounded-2xl animate-pulse" style={{ background: 'rgba(255,255,255,0.05)' }} />)}
             </div>
           </div>
         </div>
@@ -268,15 +268,15 @@ const SubcategoryProductTabs: React.FC<{ tabsCount?: number; productsPerTab?: nu
           <div className="px-4 pt-6 pb-5 sm:px-6 lg:px-8 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="ec-eyebrow">Collections</p>
-              <h2 className="ec-heading mt-2 text-2xl font-semibold tracking-tight text-neutral-900 sm:text-3xl">
+              <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 'clamp(22px,4vw,36px)', fontWeight: 500, color: 'white', letterSpacing: '-0.01em' }}>
                 Shop by Subcategory
               </h2>
-              <p className="mt-1 text-sm text-neutral-500">Select a collection to explore the latest styles</p>
+              <p className="mt-1 text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>Select a collection to explore the latest styles</p>
             </div>
             {activeTab?.category && (
               <button
                 onClick={() => router.push(`/e-commerce/${encodeURIComponent(catSlug(activeTab.category))}`)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-200 bg-white px-4 py-2 text-sm font-medium text-neutral-900 shadow-sm transition hover:border-neutral-400 self-start sm:self-auto whitespace-nowrap"
+                className="inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium transition self-start sm:self-auto whitespace-nowrap" style={{ border: '1px solid rgba(255,255,255,0.15)', background: 'transparent', color: 'rgba(255,255,255,0.7)' }} onMouseEnter={(e)=>{e.currentTarget.style.borderColor='var(--gold)';e.currentTarget.style.color='var(--gold-light)';}} onMouseLeave={(e)=>{e.currentTarget.style.borderColor='rgba(255,255,255,0.15)';e.currentTarget.style.color='rgba(255,255,255,0.7)';}"
               >
                 View all in {activeTab.category.name} →
               </button>
@@ -303,7 +303,7 @@ const SubcategoryProductTabs: React.FC<{ tabsCount?: number; productsPerTab?: nu
                         : 'shadow-md hover:shadow-xl'
                     }`}
                   >
-                    <div className="relative aspect-[3/4] w-full overflow-hidden bg-neutral-200">
+                    <div className="relative aspect-[3/4] w-full overflow-hidden rounded" style={{ background: 'rgba(255,255,255,0.08)' }}>
                       {imgUrl ? (
                         <img
                           src={imgUrl}
@@ -320,8 +320,8 @@ const SubcategoryProductTabs: React.FC<{ tabsCount?: number; productsPerTab?: nu
 
                       {/* Active checkmark */}
                       {active && (
-                        <div className="absolute top-3 right-3 flex h-7 w-7 items-center justify-center rounded-full bg-white shadow-md">
-                          <svg className="h-4 w-4 text-neutral-900" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <div className="absolute top-3 right-3 flex h-7 w-7 items-center justify-center rounded-full " style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(4px)' }}>
+                          <svg className="h-4 w-4" style={{ color: 'var(--gold)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                           </svg>
                         </div>
@@ -356,7 +356,7 @@ const SubcategoryProductTabs: React.FC<{ tabsCount?: number; productsPerTab?: nu
                   <button
                     key={cat.id}
                     onClick={() => setActiveId(cat.id)}
-                    className={`ec-pill ${cat.id === activeId ? 'ec-pill-active' : ''} px-4 py-1.5 text-xs`}
+                    className='px-4 py-1.5 text-xs rounded-full transition-all' style={{ border: `1px solid ${cat.id === activeId ? 'var(--gold)' : 'rgba(255,255,255,0.15)'}`, background: cat.id === activeId ? 'rgba(176,124,58,0.15)' : 'rgba(255,255,255,0.04)', color: cat.id === activeId ? 'var(--gold-light)' : 'rgba(255,255,255,0.5)', fontFamily: "'DM Mono', monospace", letterSpacing: '0.06em', fontSize: '11px' }}
                   >
                     {cat.name}
                   </button>
@@ -365,7 +365,7 @@ const SubcategoryProductTabs: React.FC<{ tabsCount?: number; productsPerTab?: nu
             )}
           </div>
 
-          <div className="mx-4 sm:mx-6 lg:mx-8 border-t border-neutral-100" />
+          <div className="mx-4 sm:mx-6 lg:mx-8" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }} />
 
           {/* Product grid */}
           <div className="p-4 sm:p-6 lg:p-8">
@@ -373,11 +373,11 @@ const SubcategoryProductTabs: React.FC<{ tabsCount?: number; productsPerTab?: nu
               <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
                 {Array.from({ length: productsPerTab }).map((_, i) => (
                   <div key={i} className="ec-card overflow-hidden rounded-2xl animate-pulse">
-                    <div className="aspect-[4/5] bg-neutral-100" />
+                    <div className="aspect-[4/5] rounded" style={{ background: 'rgba(255,255,255,0.05)' }} />
                     <div className="p-4 space-y-2">
-                      <div className="h-3 rounded bg-neutral-100" />
-                      <div className="h-4 rounded bg-neutral-100" />
-                      <div className="h-4 w-1/2 rounded bg-neutral-100" />
+                      <div className="h-3 rounded rounded" style={{ background: 'rgba(255,255,255,0.05)' }} />
+                      <div className="h-4 rounded rounded" style={{ background: 'rgba(255,255,255,0.05)' }} />
+                      <div className="h-4 w-1/2 rounded rounded" style={{ background: 'rgba(255,255,255,0.05)' }} />
                     </div>
                   </div>
                 ))}
@@ -397,9 +397,9 @@ const SubcategoryProductTabs: React.FC<{ tabsCount?: number; productsPerTab?: nu
                 ))}
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-neutral-200 bg-neutral-50 py-14 text-center">
-                <p className="ec-heading text-lg font-medium text-neutral-400">No products in this category yet</p>
-                <p className="mt-1 text-sm text-neutral-400">Check back soon for new arrivals</p>
+              <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed" style={{ borderColor: 'rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.02)' }} py-14 text-center">
+                <p className="ec-heading text-lg font-medium " style={{ color: 'rgba(255,255,255,0.35)' }}>No products in this category yet</p>
+                <p className="mt-1 text-sm " style={{ color: 'rgba(255,255,255,0.25)' }}>Check back soon for new arrivals</p>
               </div>
             )}
           </div>

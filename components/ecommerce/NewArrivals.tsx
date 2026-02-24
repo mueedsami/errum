@@ -125,16 +125,16 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8 }) => {
       <section className="ec-section">
         <div className="ec-container">
           <div className="ec-surface p-4 sm:p-6 lg:p-7">
-            <div className="h-3 w-32 rounded bg-neutral-200" />
-            <div className="mt-3 h-8 w-48 rounded bg-neutral-200" />
+            <div className="h-3 w-32 rounded rounded" style={{ background: 'rgba(255,255,255,0.08)' }} />
+            <div className="mt-3 h-8 w-48 rounded rounded" style={{ background: 'rgba(255,255,255,0.08)' }} />
             <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
               {Array.from({ length: limit }).map((_, i) => (
                 <div key={i} className="ec-card overflow-hidden rounded-2xl animate-pulse">
-                  <div className="aspect-[4/5] bg-neutral-100" />
+                  <div className="aspect-[4/5] rounded" style={{ background: 'rgba(255,255,255,0.05)' }} />
                   <div className="p-4 space-y-2">
-                    <div className="h-3 rounded bg-neutral-100" />
-                    <div className="h-4 rounded bg-neutral-100" />
-                    <div className="h-4 w-1/2 rounded bg-neutral-100" />
+                    <div className="h-3 rounded rounded" style={{ background: 'rgba(255,255,255,0.05)' }} />
+                    <div className="h-4 rounded rounded" style={{ background: 'rgba(255,255,255,0.05)' }} />
+                    <div className="h-4 w-1/2 rounded rounded" style={{ background: 'rgba(255,255,255,0.05)' }} />
                   </div>
                 </div>
               ))}

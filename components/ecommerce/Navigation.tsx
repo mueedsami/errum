@@ -2,560 +2,393 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import {
-  Menu,
-  X,
-  ShoppingCart,
-  Search,
-  User,
-  ChevronDown,
-  LogOut,
-  Heart,
-  Package
-} from 'lucide-react';
-
+import { useRouter, usePathname } from 'next/navigation';
+import { ShoppingCart, Search, User, ChevronDown, LogOut, Heart, Package, Menu, X, Grid3X3 } from 'lucide-react';
 import { useCustomerAuth } from '@/contexts/CustomerAuthContext';
 import catalogService, { CatalogCategory } from '@/services/catalogService';
 import cartService from '@/services/cartService';
 
+const catSlug = (c: { name: string; slug?: string }) =>
+  c.slug || c.name.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-');
+
 const Navbar = () => {
-  const router = useRouter();
+  const router   = useRouter();
+  const pathname = usePathname();
   const { customer, isAuthenticated, logout } = useCustomerAuth();
 
-  const [isOpen, setIsOpen] = useState(false);
-  const [categories, setCategories] = useState<CatalogCategory[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [activeDropdown, setActiveDropdown] = useState<number | null>(null);
-  const [cartCount, setCartCount] = useState(0);
-  const [showUserDropdown, setShowUserDropdown] = useState(false);
-  const [showCatDropdown, setShowCatDropdown] = useState(false);
-  const catDropdownRef = useRef<HTMLDivElement>(null);
+  const [categories,       setCategories]       = useState<CatalogCategory[]>([]);
+  const [cartCount,        setCartCount]        = useState(0);
+  const [mobileOpen,       setMobileOpen]       = useState(false);
+  const [showUser,         setShowUser]         = useState(false);
+  const [showCats,         setShowCats]         = useState(false);
+  const [mobileActiveCat,  setMobileActiveCat]  = useState<number | null>(null);
+  const [scrolled,         setScrolled]         = useState(false);
 
-  // Ref for dropdown to handle click outside
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const userRef = useRef<HTMLDivElement>(null);
+  const catsRef = useRef<HTMLDivElement>(null);
 
-  // Fetch categories
+  /* Scroll shadow */
   useEffect(() => {
-    fetchCategories();
+    const onScroll = () => setScrolled(window.scrollY > 4);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // Fetch cart count
+  /* Categories */
   useEffect(() => {
-    if (isAuthenticated) {
-      fetchCartCount();
-    } else {
-      setCartCount(0);
-    }
-  }, [isAuthenticated]);
-
-  // Listen for cart updates
-  useEffect(() => {
-    const handleCartUpdate = () => {
-      if (isAuthenticated) {
-        fetchCartCount();
-      }
-    };
-
-    const handleAuthChange = () => {
-      if (isAuthenticated) {
-        fetchCartCount();
-      } else {
-        setCartCount(0);
-      }
-    };
-
-    window.addEventListener('cart-updated', handleCartUpdate);
-    window.addEventListener('customer-auth-changed', handleAuthChange);
-
-    return () => {
-      window.removeEventListener('cart-updated', handleCartUpdate);
-      window.removeEventListener('customer-auth-changed', handleAuthChange);
-    };
-  }, [isAuthenticated]);
-
-  // Handle click outside dropdown
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setShowUserDropdown(false);
-      }
-      if (catDropdownRef.current && !catDropdownRef.current.contains(event.target as Node)) {
-        setShowCatDropdown(false);
-      }
-    };
-
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    catalogService.getCategories().then(setCategories).catch(() => {});
   }, []);
 
-  const fetchCategories = async () => {
-    try {
-      setLoading(true);
-      const data = await catalogService.getCategories();
-      setCategories(data);
-      setError(null);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load categories');
-      console.error('Error fetching categories:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  /* Cart */
+  useEffect(() => {
+    if (!isAuthenticated) { setCartCount(0); return; }
+    cartService.getCartSummary().then(s => setCartCount(s.total_items || 0)).catch(() => setCartCount(0));
+  }, [isAuthenticated]);
 
-  // ✅ Extra safety so guests never hit cart API
-  const fetchCartCount = async () => {
-    try {
-      if (!isAuthenticated) {
-        setCartCount(0);
-        return;
-      }
+  useEffect(() => {
+    const h = () => isAuthenticated
+      ? cartService.getCartSummary().then(s => setCartCount(s.total_items || 0)).catch(() => {})
+      : setCartCount(0);
+    window.addEventListener('cart-updated', h);
+    window.addEventListener('customer-auth-changed', h);
+    return () => { window.removeEventListener('cart-updated', h); window.removeEventListener('customer-auth-changed', h); };
+  }, [isAuthenticated]);
 
-      const summary = await cartService.getCartSummary();
-      setCartCount(summary.total_items || 0);
-    } catch (err: any) {
-      const msg = err?.message || '';
+  /* Click outside */
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (userRef.current && !userRef.current.contains(e.target as Node)) setShowUser(false);
+      if (catsRef.current && !catsRef.current.contains(e.target as Node)) setShowCats(false);
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
 
-      // ✅ If backend returns 401, don't let it bubble into global redirects
-      if (
-        msg.includes('401') ||
-        msg.toLowerCase().includes('unauthenticated') ||
-        msg.toLowerCase().includes('unauthorized')
-      ) {
-        setCartCount(0);
-        return;
-      }
-
-      console.error('Error fetching cart count:', err);
-      setCartCount(0);
-    }
-  };
-
-  const toggleMobileMenu = () => {
-    setIsOpen(!isOpen);
-  };
-
-  const handleDropdownToggle = (categoryId: number) => {
-    setActiveDropdown(activeDropdown === categoryId ? null : categoryId);
-  };
+  /* Close mobile on route change */
+  useEffect(() => { setMobileOpen(false); setShowCats(false); setShowUser(false); }, [pathname]);
 
   const handleLogout = async () => {
-    try {
-      setShowUserDropdown(false);
-      await logout();
-      router.push('/e-commerce');
-    } catch (error) {
-      console.error('Logout error:', error);
-    }
+    setShowUser(false);
+    try { await logout(); router.push('/e-commerce'); } catch {}
   };
 
-  const categorySlug = (category: { name: string; slug?: string }) =>
-    category.slug ||
-    category.name
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9\s-]/g, '')
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-');
+  const isActive = (href: string) => pathname === href;
 
   return (
-    <nav className="bg-white/90 backdrop-blur border-b border-gray-100 sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16">
-          {/* Logo */}
-          <div className="flex-shrink-0">
-            <Link href="/e-commerce" className="flex items-center">
+    <>
+      {/* ── Top announcement bar ─────────────────────────────────────── */}
+      <div className="ec-root hidden sm:block bg-[var(--gold)] text-white text-center py-2 text-[11px] font-medium tracking-widest uppercase">
+        Free delivery on orders above ৳1,000 · Bangladesh-wide shipping
+      </div>
+
+      {/* ── Main navbar ─────────────────────────────────────────────── */}
+      <nav
+        className={`ec-nav sticky top-0 z-50 transition-shadow duration-300 ${scrolled ? 'shadow-[0_4px_24px_rgba(0,0,0,0.35)]' : ''}`}
+        style={{ background: 'var(--ink)' }}
+      >
+        <div className="ec-container">
+          <div className="flex h-16 items-center justify-between gap-6 sm:h-[68px]">
+
+            {/* ── Logo ── */}
+            <Link href="/e-commerce" className="flex-shrink-0 flex items-center">
               <img
                 src="/logo.png"
                 alt="Errum"
-                className="h-10 w-auto object-contain"
-                onError={(e) => {
-                  // Fallback to text if logo image is missing
-                  const img = e.currentTarget as HTMLImageElement;
+                className="h-9 w-auto object-contain"
+                onError={e => {
+                  const img = e.currentTarget;
                   img.style.display = 'none';
-                  const fallback = img.nextElementSibling as HTMLElement;
-                  if (fallback) fallback.style.display = 'block';
+                  const fb = img.nextElementSibling as HTMLElement;
+                  if (fb) fb.style.display = 'flex';
                 }}
               />
-              <div className="text-gray-900 font-bold text-2xl tracking-tight" style={{ display: 'none' }}>
-                ER<span className="text-neutral-900">RUM</span>
+              <div
+                className="items-center gap-1 text-white"
+                style={{ display: 'none', fontFamily: "'Cormorant Garamond', serif", fontSize: '22px', fontWeight: 600, letterSpacing: '0.08em' }}
+              >
+                ERRUM
+                <span style={{ fontSize: '9px', fontFamily: "'DM Mono', monospace", letterSpacing: '0.15em', opacity: 0.5, marginLeft: '4px', alignSelf: 'flex-end', marginBottom: '4px' }}>
+                  STORE
+                </span>
               </div>
             </Link>
-          </div>
 
-          {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-8">
-            <Link
-              href="/e-commerce"
-              className="text-gray-700 hover:text-neutral-900 transition text-sm font-medium"
-            >
-              Home
-            </Link>
+            {/* ── Desktop nav links ── */}
+            <div className="hidden lg:flex items-center gap-8">
+              <Link href="/e-commerce" className={`ec-nav-link ${isActive('/e-commerce') ? 'ec-nav-link-active' : ''}`}>
+                Home
+              </Link>
 
-            {/* Categories Dropdown */}
-            <div className="relative" ref={catDropdownRef}>
-              <button
-                className="text-gray-700 hover:text-neutral-900 transition flex items-center text-sm font-medium"
-                onClick={() => setShowCatDropdown(v => !v)}
-              >
-                Categories
-                <ChevronDown className={`ml-1 h-4 w-4 transition-transform ${showCatDropdown ? 'rotate-180' : ''}`} />
-              </button>
-
-              {/* Dropdown Menu */}
-              {showCatDropdown && !loading && categories.length > 0 && (
-                <div className="absolute left-0 mt-3 w-60 bg-white rounded-xl shadow-xl ring-1 ring-gray-100">
-                  <div className="py-2">
-                    {categories.map((category) => (
-                      <div key={category.id}>
-                        <Link
-                          href={`/e-commerce/${encodeURIComponent(categorySlug(category))}`}
-                          className="block px-4 py-2 text-sm text-gray-700 hover:bg-neutral-50 hover:text-neutral-900 transition"
-                          onClick={() => setShowCatDropdown(false)}
-                        >
-                          {category.name}
-                        </Link>
-
-                        {/* Sub-categories */}
-                        {category.children && category.children.length > 0 && (
-                          <div className="pl-4 pb-1">
-                            {category.children.map((child) => (
-                              <Link
-                                key={child.id}
-                                href={`/e-commerce/${encodeURIComponent(categorySlug(child))}`}
-                                className="block px-4 py-1.5 text-xs text-gray-600 hover:bg-neutral-50 hover:text-neutral-900 transition rounded-md"
-                                onClick={() => setShowCatDropdown(false)}
-                              >
-                                {child.name}
-                              </Link>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* <Link
-              href="/e-commerce/products"
-              className="text-gray-700 hover:text-neutral-900 transition text-sm font-medium"
-            >
-              All Products
-            </Link> */}
-
-            <Link
-              href="/e-commerce/about"
-              className="text-gray-700 hover:text-neutral-900 transition text-sm font-medium"
-            >
-              About
-            </Link>
-
-            <Link
-              href="/e-commerce/contact"
-              className="text-gray-700 hover:text-neutral-900 transition text-sm font-medium"
-            >
-              Contact
-            </Link>
-          </div>
-
-          {/* Right Side Icons */}
-          <div className="hidden md:flex items-center space-x-4">
-            <Link
-              href="/e-commerce/search"
-              className="text-gray-700 hover:text-neutral-900 transition"
-              aria-label="Search"
-            >
-              <Search className="h-5 w-5" />
-            </Link>
-
-            {/* User Account Dropdown */}
-            {isAuthenticated ? (
-              <div className="relative" ref={dropdownRef}>
+              {/* Categories mega-dropdown */}
+              <div className="relative" ref={catsRef}>
                 <button
-                  onClick={() => setShowUserDropdown(!showUserDropdown)}
-                  className="flex items-center gap-2 text-gray-700 hover:text-neutral-900 transition"
+                  onClick={() => setShowCats(v => !v)}
+                  className={`ec-nav-link flex items-center gap-1 ${showCats ? 'ec-nav-link-active' : ''}`}
                 >
-                  <User className="h-5 w-5" />
-                  <span className="text-sm font-medium">
-                    {customer?.name?.split(' ')[0] || 'Account'}
-                  </span>
-                  <ChevronDown className="h-4 w-4" />
+                  Categories
+                  <ChevronDown className={`h-3 w-3 transition-transform duration-200 ${showCats ? 'rotate-180' : ''}`} />
                 </button>
 
-                {showUserDropdown && (
-                  <div className="absolute right-0 mt-3 w-52 bg-white rounded-xl shadow-xl ring-1 ring-gray-100 py-2 z-50">
-                    <Link
-                      href="/e-commerce/my-account"
-                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-neutral-50 hover:text-neutral-900 transition"
-                      onClick={() => setShowUserDropdown(false)}
-                    >
-                      <User className="h-4 w-4" />
-                      My Account
-                    </Link>
-                    <Link
-                      href="/e-commerce/orders"
-                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-neutral-50 hover:text-neutral-900 transition"
-                      onClick={() => setShowUserDropdown(false)}
-                    >
-                      <Package className="h-4 w-4" />
-                      My Orders
-                    </Link>
-                    <Link
-                      href="/e-commerce/wishlist"
-                      className="flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-neutral-50 hover:text-neutral-900 transition"
-                      onClick={() => setShowUserDropdown(false)}
-                    >
-                      <Heart className="h-4 w-4" />
-                      Wishlist
-                    </Link>
-                    <hr className="my-2 border-gray-100" />
-                    <button
-                      onClick={handleLogout}
-                      className="flex items-center gap-2 w-full px-4 py-2 text-sm text-gray-700 hover:bg-neutral-50 hover:text-neutral-900 transition text-left"
-                    >
-                      <LogOut className="h-4 w-4" />
-                      Logout
-                    </button>
+                {showCats && categories.length > 0 && (
+                  <div className="absolute left-1/2 top-full mt-3 -translate-x-1/2 w-[520px] rounded-2xl border border-white/10 bg-[#1a1a1a] shadow-[0_24px_64px_rgba(0,0,0,0.5)] overflow-hidden">
+                    {/* Dropdown header */}
+                    <div className="border-b border-white/10 px-5 py-3 flex items-center justify-between">
+                      <span style={{ fontFamily: "'DM Mono', monospace", fontSize: '10px', letterSpacing: '0.18em', color: 'rgba(255,255,255,0.4)' }}>
+                        ALL CATEGORIES
+                      </span>
+                      <Link
+                        href="/e-commerce/categories"
+                        className="text-[11px] text-[var(--gold-light)] hover:text-[var(--gold)] transition-colors"
+                        onClick={() => setShowCats(false)}
+                      >
+                        View all →
+                      </Link>
+                    </div>
+
+                    {/* Category grid */}
+                    <div className="p-4 grid grid-cols-2 gap-1 max-h-[400px] overflow-y-auto">
+                      {categories.map(cat => (
+                        <div key={cat.id}>
+                          <Link
+                            href={`/e-commerce/${encodeURIComponent(catSlug(cat))}`}
+                            onClick={() => setShowCats(false)}
+                            className="flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-white/80 hover:bg-white/8 hover:text-white transition-all group"
+                            style={{ background: 'transparent' }}
+                            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                          >
+                            <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-[11px] font-bold text-[var(--gold)] border border-white/10"
+                                 style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+                              {cat.name.charAt(0)}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-[13px] font-medium text-white/90 truncate">{cat.name}</p>
+                              {cat.children && cat.children.length > 0 && (
+                                <p className="text-[10px] text-white/35 mt-0.5">{cat.children.length} subcategories</p>
+                              )}
+                            </div>
+                          </Link>
+
+                          {/* Sub-category pills under each parent */}
+                          {cat.children && cat.children.length > 0 && (
+                            <div className="pl-[46px] pb-1 flex flex-col gap-0.5">
+                              {cat.children.slice(0, 3).map(child => (
+                                <Link
+                                  key={child.id}
+                                  href={`/e-commerce/${encodeURIComponent(catSlug(child))}`}
+                                  onClick={() => setShowCats(false)}
+                                  className="text-[11px] text-white/40 hover:text-white/80 py-0.5 transition-colors"
+                                >
+                                  {child.name}
+                                </Link>
+                              ))}
+                              {cat.children.length > 3 && (
+                                <span className="text-[11px] text-white/25">+{cat.children.length - 3} more</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
-            ) : (
-              <Link
-                href="/e-commerce/login"
-                className="text-gray-700 hover:text-neutral-900 transition"
-                aria-label="Login"
-              >
-                <User className="h-5 w-5" />
-              </Link>
-            )}
 
-            <Link
-              href="/e-commerce/cart"
-              className="text-gray-700 hover:text-neutral-900 transition relative"
-              aria-label="Cart"
-            >
-              <ShoppingCart className="h-5 w-5" />
-              {cartCount > 0 && (
-                <span className="absolute -top-2 -right-2 bg-neutral-900 text-white text-xs rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center">
-                  {cartCount > 99 ? '99+' : cartCount}
-                </span>
-              )}
-            </Link>
-          </div>
-
-          {/* Mobile Menu Button */}
-          <div className="md:hidden">
-            <button
-              onClick={toggleMobileMenu}
-              className="text-gray-700 hover:text-neutral-900 focus:outline-none"
-              aria-label="Toggle menu"
-            >
-              {isOpen ? (
-                <X className="h-6 w-6" />
-              ) : (
-                <Menu className="h-6 w-6" />
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Mobile Menu */}
-      {isOpen && (
-        <div className="md:hidden bg-white border-t border-gray-100">
-          <div className="px-4 pt-2 pb-4 space-y-2">
-            {/* User Section for Mobile */}
-            {isAuthenticated ? (
-              <div className="border-b border-gray-100 pb-4 mb-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-10 h-10 bg-neutral-50 rounded-full flex items-center justify-center">
-                    <User className="h-5 w-5 text-neutral-900" />
-                  </div>
-                  <div>
-                    <div className="font-medium text-gray-900">
-                      {customer?.name}
-                    </div>
-                    <div className="text-sm text-gray-500">
-                      {customer?.email}
-                    </div>
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Link
-                    href="/e-commerce/my-account"
-                    className="flex items-center gap-2 py-2 text-gray-700 hover:text-neutral-900"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    <User className="h-4 w-4" />
-                    My Account
-                  </Link>
-                  <Link
-                    href="/e-commerce/orders"
-                    className="flex items-center gap-2 py-2 text-gray-700 hover:text-neutral-900"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    <Package className="h-4 w-4" />
-                    My Orders
-                  </Link>
-                  <Link
-                    href="/e-commerce/wishlist"
-                    className="flex items-center gap-2 py-2 text-gray-700 hover:text-neutral-900"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    <Heart className="h-4 w-4" />
-                    Wishlist
-                  </Link>
-                  <button
-                    onClick={() => {
-                      setIsOpen(false);
-                      handleLogout();
-                    }}
-                    className="flex items-center gap-2 py-2 text-gray-700 hover:text-neutral-900 w-full text-left"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    Logout
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="border-b border-gray-100 pb-4 mb-4">
-                <Link
-                  href="/e-commerce/login"
-                  className="flex items-center gap-2 py-2 text-gray-700 hover:text-neutral-900"
-                  onClick={() => setIsOpen(false)}
-                >
-                  <User className="h-5 w-5" />
-                  Login / Register
-                </Link>
-              </div>
-            )}
-
-            <Link
-              href="/e-commerce"
-              className="block py-2 text-gray-700 hover:text-neutral-900 transition"
-              onClick={() => setIsOpen(false)}
-            >
-              Home
-            </Link>
-
-            {/* Mobile Categories */}
-            <div className="border-t border-gray-100 pt-2">
-              <div className="font-semibold text-gray-900 mb-2">
-                Categories
-              </div>
-              {loading ? (
-                <div className="text-sm text-gray-500">
-                  Loading categories...
-                </div>
-              ) : error ? (
-                <div className="text-sm text-rose-600">{error}</div>
-              ) : categories.length === 0 ? (
-                <div className="text-sm text-gray-500">
-                  No categories available
-                </div>
-              ) : (
-                categories.map((category) => (
-                  <div key={category.id} className="mb-2">
-                    <div className="flex items-center justify-between">
-                      <Link
-                        href={`/e-commerce/${encodeURIComponent(categorySlug(category))}`}
-                        className="flex-1 py-2 text-gray-700 hover:text-neutral-900"
-                        onClick={() => setIsOpen(false)}
-                      >
-                        {category.name}
-                      </Link>
-                      {category.children && category.children.length > 0 && (
-                        <button
-                          onClick={() => handleDropdownToggle(category.id)}
-                          className="p-2 text-gray-700 hover:text-neutral-900"
-                        >
-                          <ChevronDown
-                            className={`h-4 w-4 transition-transform ${
-                              activeDropdown === category.id ? 'rotate-180' : ''
-                            }`}
-                          />
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Sub-categories */}
-                    {activeDropdown === category.id &&
-                      category.children &&
-                      category.children.length > 0 && (
-                        <div className="pl-4 space-y-1 mt-1">
-                          {category.children.map((child) => (
-                            <Link
-                              key={child.id}
-                              href={`/e-commerce/${encodeURIComponent(categorySlug(child))}`}
-                              className="block py-1.5 text-sm text-gray-600 hover:text-neutral-900"
-                              onClick={() => setIsOpen(false)}
-                            >
-                              {child.name}
-                            </Link>
-                          ))}
-                        </div>
-                      )}
-                  </div>
-                ))
-              )}
+              <Link href="/e-commerce/about"   className={`ec-nav-link ${isActive('/e-commerce/about')   ? 'ec-nav-link-active' : ''}`}>About</Link>
+              <Link href="/e-commerce/contact" className={`ec-nav-link ${isActive('/e-commerce/contact') ? 'ec-nav-link-active' : ''}`}>Contact</Link>
             </div>
 
-            {/* <Link
-              href="/e-commerce/products"
-              className="block py-2 text-gray-700 hover:text-neutral-900 transition"
-              onClick={() => setIsOpen(false)}
-            >
-              All Products
-            </Link> */}
+            {/* ── Right icons ── */}
+            <div className="flex items-center gap-1 sm:gap-2">
 
-            <Link
-              href="/e-commerce/about"
-              className="block py-2 text-gray-700 hover:text-neutral-900 transition"
-              onClick={() => setIsOpen(false)}
-            >
-              About
-            </Link>
-
-            <Link
-              href="/e-commerce/contact"
-              className="block py-2 text-gray-700 hover:text-neutral-900 transition"
-              onClick={() => setIsOpen(false)}
-            >
-              Contact
-            </Link>
-
-            {/* Mobile Icons */}
-            <div className="flex items-center space-x-4 pt-4 border-t border-gray-100">
+              {/* Search */}
               <Link
                 href="/e-commerce/search"
-                className="text-gray-700 hover:text-neutral-900 transition"
-                onClick={() => setIsOpen(false)}
+                className="flex h-9 w-9 items-center justify-center rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-all"
                 aria-label="Search"
               >
-                <Search className="h-5 w-5" />
+                <Search className="h-4 w-4" />
               </Link>
 
-              <Link
-                href="/e-commerce/cart"
-                className="text-gray-700 hover:text-neutral-900 transition relative"
-                onClick={() => setIsOpen(false)}
-                aria-label="Cart"
+              {/* Account */}
+              {isAuthenticated ? (
+                <div className="relative hidden sm:block" ref={userRef}>
+                  <button
+                    onClick={() => setShowUser(v => !v)}
+                    className="flex h-9 items-center gap-2 rounded-full px-3 text-white/70 hover:text-white hover:bg-white/10 transition-all"
+                  >
+                    <User className="h-4 w-4" />
+                    <span className="text-[12px] font-medium hidden md:block">{customer?.name?.split(' ')[0]}</span>
+                    <ChevronDown className={`h-3 w-3 transition-transform ${showUser ? 'rotate-180' : ''}`} />
+                  </button>
+                  {showUser && (
+                    <div className="absolute right-0 top-full mt-2 w-52 rounded-2xl border border-white/10 bg-[#1a1a1a] py-2 shadow-[0_16px_48px_rgba(0,0,0,0.4)]">
+                      <div className="px-4 py-3 border-b border-white/10">
+                        <p className="text-[13px] font-semibold text-white">{customer?.name}</p>
+                        <p className="text-[11px] text-white/40 mt-0.5 truncate">{customer?.email}</p>
+                      </div>
+                      {[
+                        { href: '/e-commerce/my-account', icon: User,    label: 'My Account' },
+                        { href: '/e-commerce/orders',     icon: Package, label: 'My Orders' },
+                        { href: '/e-commerce/wishlist',   icon: Heart,   label: 'Wishlist' },
+                      ].map(({ href, icon: Icon, label }) => (
+                        <Link key={href} href={href} onClick={() => setShowUser(false)}
+                          className="flex items-center gap-3 px-4 py-2.5 text-[13px] text-white/70 hover:text-white hover:bg-white/6 transition-all"
+                          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                          onMouseLeave={e => (e.currentTarget.style.background = '')}
+                        >
+                          <Icon className="h-3.5 w-3.5" />
+                          {label}
+                        </Link>
+                      ))}
+                      <div className="mx-4 my-1 border-t border-white/10" />
+                      <button onClick={handleLogout}
+                        className="flex w-full items-center gap-3 px-4 py-2.5 text-[13px] text-white/50 hover:text-white transition-all text-left"
+                        onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                        onMouseLeave={e => (e.currentTarget.style.background = '')}
+                      >
+                        <LogOut className="h-3.5 w-3.5" />
+                        Sign out
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <Link href="/e-commerce/login"
+                  className="hidden sm:flex h-9 w-9 items-center justify-center rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-all"
+                  aria-label="Login"
+                >
+                  <User className="h-4 w-4" />
+                </Link>
+              )}
+
+              {/* Cart */}
+              <Link href="/e-commerce/cart" aria-label="Cart"
+                className="relative flex h-9 w-9 items-center justify-center rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-all"
               >
-                <ShoppingCart className="h-5 w-5" />
+                <ShoppingCart className="h-4 w-4" />
                 {cartCount > 0 && (
-                  <span className="absolute -top-2 -right-2 bg-neutral-900 text-white text-xs rounded-full h-5 min-w-[20px] px-1 flex items-center justify-center">
+                  <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[var(--gold)] px-0.5 text-[9px] font-bold text-white">
                     {cartCount > 99 ? '99+' : cartCount}
                   </span>
                 )}
               </Link>
+
+              {/* Mobile menu button */}
+              <button
+                onClick={() => setMobileOpen(v => !v)}
+                className="lg:hidden flex h-9 w-9 items-center justify-center rounded-full text-white/70 hover:text-white hover:bg-white/10 transition-all ml-1"
+                aria-label="Menu"
+              >
+                {mobileOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+              </button>
             </div>
           </div>
         </div>
-      )}
-    </nav>
+
+        {/* ── Mobile menu ── */}
+        {mobileOpen && (
+          <div className="lg:hidden border-t border-white/10 bg-[#111111]">
+            <div className="ec-container py-4 space-y-1 max-h-[80vh] overflow-y-auto">
+
+              {/* Auth block */}
+              {isAuthenticated ? (
+                <div className="mb-4 pb-4 border-b border-white/10">
+                  <div className="flex items-center gap-3 mb-3 px-3">
+                    <div className="h-9 w-9 rounded-full bg-white/10 flex items-center justify-center">
+                      <User className="h-4 w-4 text-white/60" />
+                    </div>
+                    <div>
+                      <p className="text-[13px] font-semibold text-white">{customer?.name}</p>
+                      <p className="text-[11px] text-white/40">{customer?.email}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    {[
+                      { href: '/e-commerce/my-account', label: 'Account' },
+                      { href: '/e-commerce/orders',     label: 'Orders' },
+                      { href: '/e-commerce/wishlist',   label: 'Wishlist' },
+                    ].map(({ href, label }) => (
+                      <Link key={href} href={href}
+                        className="flex-1 rounded-xl bg-white/8 py-2 text-center text-[12px] font-medium text-white/70 hover:text-white transition-colors"
+                        style={{ background: 'rgba(255,255,255,0.06)' }}
+                      >
+                        {label}
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <Link href="/e-commerce/login"
+                  className="flex items-center gap-3 rounded-xl px-3 py-3 text-white/70 hover:text-white transition-colors mb-2"
+                >
+                  <User className="h-4 w-4" />
+                  <span className="text-[13px] font-medium">Login / Register</span>
+                </Link>
+              )}
+
+              {/* Nav links */}
+              {[
+                { href: '/e-commerce',         label: 'Home' },
+                { href: '/e-commerce/about',   label: 'About' },
+                { href: '/e-commerce/contact', label: 'Contact' },
+              ].map(({ href, label }) => (
+                <Link key={href} href={href}
+                  className="flex items-center rounded-xl px-3 py-3 text-[13px] font-medium text-white/70 hover:text-white hover:bg-white/6 transition-all"
+                  style={{ letterSpacing: '0.08em', textTransform: 'uppercase' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = '')}
+                >
+                  {label}
+                </Link>
+              ))}
+
+              {/* Mobile categories */}
+              <div className="border-t border-white/10 pt-3 mt-1">
+                <p className="px-3 pb-2" style={{ fontFamily: "'DM Mono', monospace", fontSize: '10px', letterSpacing: '0.18em', color: 'rgba(255,255,255,0.3)' }}>
+                  CATEGORIES
+                </p>
+                {categories.map(cat => (
+                  <div key={cat.id}>
+                    <div className="flex items-center">
+                      <Link href={`/e-commerce/${encodeURIComponent(catSlug(cat))}`}
+                        className="flex-1 rounded-xl px-3 py-2.5 text-[13px] text-white/70 hover:text-white transition-colors"
+                      >
+                        {cat.name}
+                      </Link>
+                      {cat.children && cat.children.length > 0 && (
+                        <button
+                          onClick={() => setMobileActiveCat(mobileActiveCat === cat.id ? null : cat.id)}
+                          className="px-3 py-2.5 text-white/40"
+                        >
+                          <ChevronDown className={`h-3.5 w-3.5 transition-transform ${mobileActiveCat === cat.id ? 'rotate-180' : ''}`} />
+                        </button>
+                      )}
+                    </div>
+                    {mobileActiveCat === cat.id && cat.children?.map(child => (
+                      <Link key={child.id} href={`/e-commerce/${encodeURIComponent(catSlug(child))}`}
+                        className="block pl-8 pr-3 py-2 text-[12px] text-white/45 hover:text-white/80 transition-colors"
+                      >
+                        {child.name}
+                      </Link>
+                    ))}
+                  </div>
+                ))}
+              </div>
+
+              {isAuthenticated && (
+                <button onClick={() => { setMobileOpen(false); handleLogout(); }}
+                  className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-[13px] text-white/40 hover:text-white/70 transition-colors mt-2 border-t border-white/10 pt-4"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Sign out
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </nav>
+    </>
   );
 };
 

@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { Eye, Heart } from 'lucide-react';
+import { Heart, ArrowRight } from 'lucide-react';
 import { SimpleProduct } from '@/services/catalogService';
 import { getAdditionalVariantCount, getCardPriceText, getCardStockLabel } from '@/lib/ecommerceCardUtils';
 
@@ -23,82 +23,105 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = ({
   onAddToCart,
   compact = false,
 }) => {
-  const primaryImage = product.images?.[0]?.url || '';
-  const shouldUseFallback = imageErrored || !primaryImage;
-  const imageUrl = shouldUseFallback ? '/images/placeholder-product.jpg' : primaryImage;
-
-  const additionalVariants = getAdditionalVariantCount(product);
-  const stockLabel = getCardStockLabel(product);
-  const hasStock = stockLabel !== 'Out of Stock';
-  const categoryName = typeof product.category === 'object' && product.category ? product.category.name : 'Category';
+  const primaryImage    = product.images?.[0]?.url || '';
+  const shouldFallback  = imageErrored || !primaryImage;
+  const imageUrl        = shouldFallback ? '/images/placeholder-product.jpg' : primaryImage;
+  const extraVariants   = getAdditionalVariantCount(product);
+  const stockLabel      = getCardStockLabel(product);
+  const hasStock        = stockLabel !== 'Out of Stock';
+  const categoryName    = typeof product.category === 'object' && product.category
+    ? product.category.name : '';
 
   return (
     <article
       onClick={() => onOpen(product)}
-      className="ec-card ec-card-hover group cursor-pointer overflow-hidden rounded-2xl"
+      className="ec-card ec-card-hover group cursor-pointer overflow-hidden"
+      style={{ borderRadius: '16px' }}
     >
-      <div className={`relative overflow-hidden bg-neutral-100 ${compact ? 'aspect-[4/5]' : 'aspect-[4/5]'}`}>
+      {/* ── Image ── */}
+      <div className={`relative overflow-hidden bg-neutral-50 ${compact ? 'aspect-[3/4]' : 'aspect-[3/4]'}`}>
         <Image
           src={imageUrl}
           alt={product.display_name || product.base_name || product.name}
           fill
-          className="object-cover transition-transform duration-500 group-hover:scale-[1.04]"
-          onError={shouldUseFallback || !onImageError ? undefined : () => onImageError(product.id)}
+          className="object-cover transition-transform duration-700 group-hover:scale-[1.06]"
+          onError={shouldFallback || !onImageError ? undefined : () => onImageError(product.id)}
         />
 
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/10 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        {/* Gradient */}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/30 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
 
-        <div className="absolute left-2 top-2 flex flex-wrap gap-1.5">
-          {additionalVariants > 0 && (
-            <span className="rounded-full border border-white/70 bg-white/90 px-2 py-1 text-[10px] font-medium text-neutral-800 shadow-sm backdrop-blur">
-              {additionalVariants + 1} options
+        {/* Variant badge */}
+        {extraVariants > 0 && (
+          <div className="absolute left-2.5 top-2.5">
+            <span className="rounded-full px-2.5 py-1 text-[10px] font-semibold text-white backdrop-blur"
+                  style={{ background: 'rgba(13,13,13,0.55)', border: '1px solid rgba(255,255,255,0.15)', letterSpacing: '0.04em' }}>
+              {extraVariants + 1} options
             </span>
-          )}
-        </div>
+          </div>
+        )}
 
-        <div className="absolute right-2 top-2 flex items-center gap-1.5">
-          <span
-            className={`rounded-full border px-2 py-1 text-[10px] font-medium shadow-sm ${
-              stockLabel === 'In Stock'
-                ? 'border-green-200 bg-green-50/95 text-green-700'
-                : hasStock
-                  ? 'border-amber-200 bg-amber-50/95 text-amber-700'
-                  : 'border-neutral-200 bg-white/90 text-neutral-700'
-            }`}
-          >
-            {stockLabel}
-          </span>
-        </div>
+        {/* Stock badge — only "In Stock" shown cleanly */}
+        {hasStock && (
+          <div className="absolute right-2.5 top-2.5">
+            <span className="rounded-full px-2 py-1 text-[9px] font-medium"
+                  style={{ background: 'rgba(255,255,255,0.9)', color: '#16a34a', letterSpacing: '0.06em', fontFamily: "'DM Mono', monospace" }}>
+              IN STOCK
+            </span>
+          </div>
+        )}
 
-        <div className="absolute right-2 top-10 flex translate-x-2 flex-col gap-1.5 opacity-0 transition-all duration-300 group-hover:translate-x-0 group-hover:opacity-100">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-neutral-200 bg-white/95 text-neutral-700 shadow-sm backdrop-blur">
-            <Heart className="h-3.5 w-3.5" />
-          </span>
-          <span className="flex h-8 w-8 items-center justify-center rounded-full border border-neutral-200 bg-white/95 text-neutral-700 shadow-sm backdrop-blur">
-            <Eye className="h-3.5 w-3.5" />
-          </span>
-        </div>
-
-        <div className="absolute inset-x-3 bottom-3 translate-y-2 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
-          <button
-            onClick={(e) => onAddToCart(product, e)}
-            className="w-full rounded-xl border border-neutral-200 bg-white/95 px-3 py-2 text-xs font-semibold text-neutral-900 shadow-sm backdrop-blur hover:bg-white"
-          >
-            {product.has_variants ? 'Select options' : 'Add to cart'}
-          </button>
+        {/* Hover action row */}
+        <div className="absolute inset-x-0 bottom-0 translate-y-full transition-transform duration-300 group-hover:translate-y-0">
+          <div className="flex items-center gap-1.5 p-2.5">
+            <button
+              onClick={e => onAddToCart(product, e)}
+              className="flex-1 rounded-xl py-2.5 text-[11px] font-semibold text-white transition-all"
+              style={{ background: 'var(--ink)', letterSpacing: '0.08em', textTransform: 'uppercase' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--gold)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'var(--ink)'; }}
+            >
+              {product.has_variants ? 'Select Options' : 'Add to Cart'}
+            </button>
+            <button
+              onClick={e => { e.stopPropagation(); }}
+              className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl text-white transition-all"
+              style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.25)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.15)'; }}
+            >
+              <Heart className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className={compact ? 'p-3 sm:p-4' : 'p-4'}>
-        <p className="mb-1 line-clamp-1 text-[10px] font-medium uppercase tracking-[0.18em] text-neutral-500">
-          {categoryName}
-        </p>
-        <h3 className={`line-clamp-3 text-neutral-900 ${compact ? 'min-h-[3.75rem] text-sm font-semibold' : 'min-h-[4rem] text-sm font-semibold sm:text-[15px]'}`}>
+      {/* ── Info ── */}
+      <div className={compact ? 'p-3 sm:p-3.5' : 'p-4'}>
+        {categoryName && (
+          <p className="mb-1 text-[9px] font-semibold tracking-[0.2em] text-neutral-400 uppercase truncate"
+             style={{ fontFamily: "'DM Mono', monospace" }}>
+            {categoryName}
+          </p>
+        )}
+        <h3
+          className="line-clamp-3 text-neutral-900 font-medium leading-snug"
+          style={{
+            fontFamily: "'Jost', sans-serif",
+            fontSize: compact ? '13px' : '14px',
+            minHeight: compact ? '3.5rem' : '3.75rem',
+          }}
+        >
           {product.display_name || product.base_name || product.name}
         </h3>
-        <div className="mt-2 flex items-end justify-between gap-2">
-          <div className="text-base font-bold text-amber-600">{getCardPriceText(product)}</div>
-          <span className="text-[11px] text-neutral-500">{product.has_variants ? 'Choose' : 'Ready'}</span>
+        <div className="mt-2.5 flex items-center justify-between gap-2">
+          <span className="text-base font-bold" style={{ color: 'var(--gold)', fontFamily: "'Jost', sans-serif" }}>
+            {getCardPriceText(product)}
+          </span>
+          <span className="flex items-center gap-1 text-[10px] text-neutral-400 transition-colors group-hover:text-neutral-600"
+                style={{ fontFamily: "'DM Mono', monospace", letterSpacing: '0.06em' }}>
+            {product.has_variants ? 'CHOOSE' : 'VIEW'} <ArrowRight className="h-2.5 w-2.5" />
+          </span>
         </div>
       </div>
     </article>

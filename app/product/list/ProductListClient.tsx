@@ -125,7 +125,7 @@ const goToPage = useCallback(
     setIsLoading(true);
     try {
       const [productsData, categoriesData, vendorsData] = await Promise.all([
-        productService.getAll({ per_page: 10000 }),
+        productService.getAll({ per_page: 5000 }),
         // Only count/show active categories in product list stats & filters
         categoryService.getTree(true),
         vendorService.getAll(),

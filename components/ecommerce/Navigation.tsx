@@ -41,18 +41,24 @@ const Navbar = () => {
   }, []);
 
   /* Cart */
+  const refreshCartCount = () =>
+    cartService
+      .getCartSummary()
+      .then((s) => setCartCount(Number((s as any)?.total_items || 0)))
+      .catch(() => setCartCount(0));
+
   useEffect(() => {
-    if (!isAuthenticated) { setCartCount(0); return; }
-    cartService.getCartSummary().then(s => setCartCount(s.total_items || 0)).catch(() => setCartCount(0));
+    refreshCartCount();
   }, [isAuthenticated]);
 
   useEffect(() => {
-    const h = () => isAuthenticated
-      ? cartService.getCartSummary().then(s => setCartCount(s.total_items || 0)).catch(() => {})
-      : setCartCount(0);
+    const h = () => refreshCartCount();
     window.addEventListener('cart-updated', h);
     window.addEventListener('customer-auth-changed', h);
-    return () => { window.removeEventListener('cart-updated', h); window.removeEventListener('customer-auth-changed', h); };
+    return () => {
+      window.removeEventListener('cart-updated', h);
+      window.removeEventListener('customer-auth-changed', h);
+    };
   }, [isAuthenticated]);
 
   /* Click outside */

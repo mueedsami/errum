@@ -560,7 +560,13 @@ export default function CategoryPage() {
     return (
       <>
         <Navigation />
-        <div className="ec-root min-h-screen">
+        {/*
+          Category pages still use a few legacy light-tailwind utility classes
+          (bg-white, text-gray-900, etc.) inside the filter/sidebar.
+          Wrap with ec-darkify so those utilities render correctly on the
+          site-wide dark background.
+        */}
+        <div className="ec-root ec-darkify min-h-screen">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
             <div className="animate-pulse">
               <div className="h-8 rounded w-1/4 mb-8 animate-pulse" style={{ background: 'rgba(255,255,255,0.08)' }}></div>
@@ -589,7 +595,7 @@ export default function CategoryPage() {
     <>
       <Navigation />
 
-      <div className="ec-root min-h-screen">
+      <div className="ec-root ec-darkify min-h-screen">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="mb-8">
             <h1 className="text-3xl font-bold text-gray-900 mb-2">{activeCategoryName || 'Products'}</h1>

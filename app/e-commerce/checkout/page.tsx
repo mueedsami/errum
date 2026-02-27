@@ -278,7 +278,7 @@ export default function CheckoutPage() {
       quantity: item.quantity,
       price: unitPrice,
       total: totalPrice,
-      product_image: item.images?.[0]?.image_url || '/placeholder-product.png',
+      product_image: item.images?.find((i: any) => i?.is_primary)?.image_url || (item.images?.[0] as any)?.image_url || (item.images?.[0] as any)?.url || '/placeholder-product.png',
       sku: item.sku || '',
     };
   });
@@ -802,7 +802,7 @@ export default function CheckoutPage() {
                       <div className="w-12 h-12 bg-neutral-100 rounded-xl overflow-hidden flex-shrink-0">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={item.images?.[0]?.image_url || '/placeholder-product.png'}
+                          src={item.images?.find((i: any) => i?.is_primary)?.image_url || (item.images?.[0] as any)?.image_url || (item.images?.[0] as any)?.url || '/placeholder-product.png'}
                           alt={item.name}
                           className="w-full h-full object-cover"
                         />
@@ -1449,7 +1449,7 @@ export default function CheckoutPage() {
                   return (
                     <div key={item.id} className="flex gap-3">
                       <img
-                        src={item.images?.[0]?.image_url || '/placeholder-product.png'}
+                        src={item.images?.find((i: any) => i?.is_primary)?.image_url || (item.images?.[0] as any)?.image_url || (item.images?.[0] as any)?.url || '/placeholder-product.png'}
                         alt={item.name}
                         className="w-16 h-16 object-cover rounded"
                         onError={(e) => {

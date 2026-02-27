@@ -170,26 +170,23 @@ export default function BestSellerProducts() {
     }
 
     setAddingProductId(product.id);
-    
+
     const variation = product.variations[0];
-    const cartItem = {
-      id: variation.id,
-      name: product.name,
-      image: product.image,
-      price: variation.price, // Use raw number price from variation
-      sku: variation.attributes.SKU || '',
-      quantity: 1,
-    };
 
-    // Log cart item for debugging
-    console.log('Adding to cart:', cartItem);
+    try {
+      const variantId = Number(variation?.id);
+      if (!variantId || Number.isNaN(variantId)) {
+        throw new Error('Invalid product variant');
+      }
 
-    addToCart(cartItem, 1);
-
-    setTimeout(() => {
+      await addToCart(variantId, 1);
       setAddingProductId(null);
-      setIsCartOpen(true); // Open cart sidebar after adding
-    }, 1200);
+      setIsCartOpen(true);
+    } catch (err: any) {
+      console.error('Add to cart failed:', err);
+      setAddingProductId(null);
+      alert(err?.message || 'Failed to add to cart');
+    }
   };
 
   const handleCloseCart = () => {

@@ -359,7 +359,11 @@ export default function CartPage() {
                   ? parseFloat(item.total_price) 
                   : item.total_price;
                 const isItemUpdating = isUpdating.has(item.id);
-                const productImage = item.product.images?.[0]?.image_url || '/placeholder-product.png';
+                const productImage =
+                  item.product.images?.find((i: any) => i?.is_primary)?.image_url ||
+                  (item.product.images?.[0] as any)?.image_url ||
+                  (item.product.images?.[0] as any)?.url ||
+                  '/placeholder-product.png';
 
                 return (
                   <div 

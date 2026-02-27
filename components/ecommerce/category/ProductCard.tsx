@@ -28,22 +28,20 @@ export default function ProductCard({ product, onCartOpen }: ProductCardProps) {
 
     setIsAdding(true);
 
-    // Keep your existing cart item shape to avoid breaking behavior
-    const cartItem = {
-      id: product.variations[0].id,
-      name: product.baseName,
-      image: product.image,
-      price: product.variations[0].price,
-      sku: product.variations[0].attributes?.SKU || "",
-      quantity: 1,
-    };
+    try {
+      const variantId = Number(product?.variations?.[0]?.id);
+      if (!variantId || Number.isNaN(variantId)) {
+        throw new Error('Invalid product variant');
+      }
 
-    addToCart(cartItem as any, 1);
-
-    setTimeout(() => {
+      await addToCart(variantId, 1);
       setIsAdding(false);
       onCartOpen?.();
-    }, 1200);
+    } catch (err: any) {
+      console.error('Add to cart failed:', err);
+      setIsAdding(false);
+      alert(err?.message || 'Failed to add to cart');
+    }
   };
 
   const priceText = (() => {

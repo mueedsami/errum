@@ -67,8 +67,8 @@ export default function CategorySidebar({
         <div
           className={`flex items-center justify-between p-2 rounded cursor-pointer transition-colors ${
             isActive(category)
-              ? 'bg-rose-50 text-neutral-900 font-medium'
-              : 'hover:bg-gray-100 text-gray-700'
+              ? 'bg-[rgba(212,169,106,0.16)] text-white font-medium border border-[rgba(212,169,106,0.25)]'
+              : 'hover:bg-white/5 text-white/70'
           }`}
           style={{ paddingLeft: `${8 + level * 16}px` }}
         >
@@ -78,13 +78,13 @@ export default function CategorySidebar({
           >
             {category.name}
             {!hasChildren && category.product_count !== undefined && (
-              <span className="text-sm text-gray-500 ml-1">({category.product_count})</span>
+              <span className="text-sm text-white/40 ml-1">({category.product_count})</span>
             )}
           </span>
           {hasChildren && (
             <button
               onClick={() => toggleCategory(category.id)}
-              className="p-1 hover:bg-gray-200 rounded"
+              className="p-1 hover:bg-white/5 rounded"
             >
               {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
             </button>
@@ -101,14 +101,14 @@ export default function CategorySidebar({
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-lg shadow-sm p-4">
-        <h3 className="font-semibold text-gray-900 mb-4">Categories</h3>
+      <div className="ec-dark-card p-4">
+        <h3 className="font-semibold text-white mb-4">Categories</h3>
         <div className="space-y-1">
           <div
             className={`p-2 rounded cursor-pointer transition-colors ${
               activeCategory === 'all'
-                ? 'bg-rose-50 text-neutral-900 font-medium'
-                : 'hover:bg-gray-100 text-gray-700'
+                ? 'bg-[rgba(212,169,106,0.16)] text-white font-medium border border-[rgba(212,169,106,0.25)]'
+                : 'hover:bg-white/5 text-white/70'
             }`}
             onClick={() => onCategoryChange('all')}
           >
@@ -118,8 +118,8 @@ export default function CategorySidebar({
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm p-4">
-        <h3 className="font-semibold text-gray-900 mb-4">Price Range</h3>
+      <div className="ec-dark-card p-4">
+        <h3 className="font-semibold text-white mb-4">Price Range</h3>
         <div className="space-y-2">
           {[
             { value: 'all', label: 'All Prices' },
@@ -136,16 +136,16 @@ export default function CategorySidebar({
                 value={range.value}
                 checked={selectedPriceRange === range.value}
                 onChange={(e) => onPriceRangeChange(e.target.value)}
-                className="mr-2 text-rose-600 focus:ring-neutral-200"
+                className="mr-2 accent-[var(--gold)] focus:ring-neutral-200"
               />
-              <span className="text-sm text-gray-700">{range.label}</span>
+              <span className="text-sm text-white/70">{range.label}</span>
             </label>
           ))}
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm p-4">
-        <h3 className="font-semibold text-gray-900 mb-4">Availability</h3>
+      <div className="ec-dark-card p-4">
+        <h3 className="font-semibold text-white mb-4">Availability</h3>
         <div className="space-y-2">
           {[
             { value: 'all', label: 'All Products' },
@@ -159,9 +159,9 @@ export default function CategorySidebar({
                 value={stock.value}
                 checked={selectedStock === stock.value}
                 onChange={(e) => onStockChange(e.target.value)}
-                className="mr-2 text-rose-600 focus:ring-neutral-200"
+                className="mr-2 accent-[var(--gold)] focus:ring-neutral-200"
               />
-              <span className="text-sm text-gray-700">{stock.label}</span>
+              <span className="text-sm text-white/70">{stock.label}</span>
             </label>
           ))}
         </div>

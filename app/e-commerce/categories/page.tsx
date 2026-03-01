@@ -15,26 +15,55 @@ const PALETTE = [
   ['#e0e4e8','#9aaab8'],['#ece8e0','#ccc0a0'],['#e4e8e4','#a0b8a0'],['#e8e4e0','#c0b8b0'],
 ];
 
-/** Image card that gracefully falls back to a colour gradient on load error */
+/**
+ * Build a usable image URL from whatever the API returns.
+ * The API gives image_url as a relative path like /storage/categories/xxx.jpg
+ * We route it through our own proxy to avoid backend CORS / domain issues.
+ */
+function buildImgUrl(raw: string | null | undefined): string {
+  if (!raw) return '';
+
+  // Determine the backend origin from env vars
+  const backendBase = (
+    (process.env.NEXT_PUBLIC_API_URL || '').replace(/\/api(\/v\d+)?$/i, '').replace(/\/$/, '') ||
+    (process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/$/, '') ||
+    ''
+  );
+
+  let absolute = raw;
+
+  if (/^https?:\/\//i.test(raw)) {
+    // Already absolute — use as-is for proxying
+    absolute = raw;
+  } else {
+    // Relative path — prepend backend origin
+    const path = raw.startsWith('/') ? raw : `/${raw}`;
+    if (!backendBase) return ''; // can't build a valid URL without base
+    absolute = `${backendBase}${path}`;
+  }
+
+  return `/api/proxy-image?url=${encodeURIComponent(absolute)}`;
+}
+
+/** Image card with graceful gradient fallback */
 function CategoryImage({
   src,
   alt,
   gradientFrom,
   gradientTo,
-  className = '',
 }: {
   src: string;
   alt: string;
   gradientFrom: string;
   gradientTo: string;
-  className?: string;
 }) {
   const [failed, setFailed] = useState(false);
+  const url = buildImgUrl(src);
 
-  if (!src || failed) {
+  if (!url || failed) {
     return (
       <div
-        className={`absolute inset-0 ${className}`}
+        className="absolute inset-0"
         style={{ background: `linear-gradient(160deg, ${gradientFrom} 0%, ${gradientTo} 100%)` }}
       />
     );
@@ -42,9 +71,9 @@ function CategoryImage({
 
   return (
     <img
-      src={src}
+      src={url}
       alt={alt}
-      className={`absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105 ${className}`}
+      className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
       onError={() => setFailed(true)}
     />
   );
@@ -94,7 +123,7 @@ export default function CategoriesPage() {
             <div className="space-y-10">
               {categories.map((cat, ci) => {
                 const [from, to] = PALETTE[ci % PALETTE.length];
-                const imgSrc = cat.image || cat.image_url || '';
+                const imgSrc = cat.image_url || cat.image || '';
                 const href = `/e-commerce/${encodeURIComponent(cat.slug || slugify(cat.name))}`;
                 const children = cat.children || [];
 
@@ -130,7 +159,7 @@ export default function CategoriesPage() {
                       <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
                         {children.map((child, cIdx) => {
                           const [cf, ct] = PALETTE[(ci * 3 + cIdx) % PALETTE.length];
-                          const cImg = child.image || child.image_url || '';
+                          const cImg = child.image_url || child.image || '';
                           return (
                             <Link
                               key={child.id}
@@ -138,12 +167,7 @@ export default function CategoriesPage() {
                               className="group block"
                             >
                               <div className="relative overflow-hidden rounded-xl transition-all duration-300 group-hover:-translate-y-1 group-hover:shadow-lg" style={{ aspectRatio: '3/4' }}>
-                                <CategoryImage
-                                  src={cImg}
-                                  alt={child.name}
-                                  gradientFrom={cf}
-                                  gradientTo={ct}
-                                />
+                                <CategoryImage src={cImg} alt={child.name} gradientFrom={cf} gradientTo={ct} />
                                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/15 to-transparent" />
                                 <div className="absolute inset-x-0 bottom-0 p-2">
                                   <p className="text-white font-medium leading-tight text-[11px]" style={{ fontFamily: "'Jost', sans-serif" }}>{child.name}</p>
@@ -157,12 +181,7 @@ export default function CategoriesPage() {
                       /* Leaf category (no children) - bigger card */
                       <Link href={href} className="group block">
                         <div className="relative overflow-hidden rounded-2xl h-24 transition-all duration-300 group-hover:-translate-y-0.5 group-hover:shadow-lg">
-                          <CategoryImage
-                            src={imgSrc}
-                            alt={cat.name}
-                            gradientFrom={from}
-                            gradientTo={to}
-                          />
+                          <CategoryImage src={imgSrc} alt={cat.name} gradientFrom={from} gradientTo={to} />
                           <div className="absolute inset-0 bg-gradient-to-r from-black/50 to-transparent" />
                           <div className="absolute inset-0 flex items-center px-5">
                             <p className="text-white text-lg font-semibold" style={{ fontFamily: "'Cormorant Garamond', serif" }}>{cat.name}</p>

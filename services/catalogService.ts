@@ -264,25 +264,11 @@ const toAbsoluteAssetUrl = (value: any): string => {
     return raw;
   }
 
-  // Prefer explicit envs
   const apiBase = normalizeString(process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
   const appBase = normalizeString(process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/$/, '');
 
-  // Runtime fallback (helps when deployment env is missing/misconfigured but API calls still work)
-  // Uses axios baseURL from our shared instance (e.g. https://backend.example.com/api)
-  let runtimeApiBase = '';
-  try {
-    runtimeApiBase = normalizeString((api as any)?.defaults?.baseURL || '').replace(/\/$/, '');
-  } catch {
-    runtimeApiBase = '';
-  }
-
   const backendBase =
-    // 1) NEXT_PUBLIC_API_URL (strip /api)
     (apiBase ? apiBase.replace(/\/api(?:\/v\d+)?$/i, '') : '') ||
-    // 2) axios runtime baseURL (strip /api)
-    (runtimeApiBase ? runtimeApiBase.replace(/\/api(?:\/v\d+)?$/i, '') : '') ||
-    // 3) explicit base
     appBase ||
     '';
 
@@ -333,6 +319,71 @@ const normalizeImages = (images: any): ProductImage[] => {
 
   return normalized;
 };
+
+
+/**
+ * -----------------------------
+ * Image propagation helpers
+ * -----------------------------
+ * Some API payloads attach images to only one variant (or omit images for related products).
+ * For a better UX, if any item in a variant group has images, we reuse that image set for siblings
+ * that have an empty images array.
+ */
+const cloneImages = (imgs: ProductImage[]): ProductImage[] => imgs.map((i) => ({ ...i }));
+
+const pickSharedImages = (items: Array<{ images?: ProductImage[] | null }>): ProductImage[] => {
+  for (const it of items) {
+    const imgs = Array.isArray(it?.images) ? (it.images as ProductImage[]) : [];
+    if (imgs.length) return cloneImages(imgs);
+  }
+  return [];
+};
+
+const propagateSharedImages = <T extends { images?: ProductImage[]; variants?: any[] }>(product: T): T => {
+  if (!product) return product;
+
+  const variants = Array.isArray((product as any).variants) ? (product as any).variants : [];
+  const shared = pickSharedImages([product as any, ...variants]);
+
+  if (shared.length) {
+    if (!Array.isArray((product as any).images) || (product as any).images.length === 0) {
+      (product as any).images = cloneImages(shared);
+    }
+    for (const v of variants) {
+      if (!v) continue;
+      if (!Array.isArray(v.images) || v.images.length === 0) {
+        v.images = cloneImages(shared);
+      }
+    }
+  }
+
+  return product;
+};
+
+const propagateSharedImagesBySku = <T extends { sku?: string; images?: ProductImage[] }>(items: T[]): T[] => {
+  if (!Array.isArray(items) || items.length === 0) return items;
+
+  const sharedBySku = new Map<string, ProductImage[]>();
+
+  for (const it of items) {
+    const sku = normalizeString((it as any)?.sku || '').trim();
+    const imgs = Array.isArray((it as any)?.images) ? ((it as any).images as ProductImage[]) : [];
+    if (sku && imgs.length && !sharedBySku.has(sku)) {
+      sharedBySku.set(sku, cloneImages(imgs));
+    }
+  }
+
+  for (const it of items) {
+    const sku = normalizeString((it as any)?.sku || '').trim();
+    const imgs = Array.isArray((it as any)?.images) ? ((it as any).images as ProductImage[]) : [];
+    if (sku && imgs.length === 0 && sharedBySku.has(sku)) {
+      (it as any).images = cloneImages(sharedBySku.get(sku)!);
+    }
+  }
+
+  return items;
+};
+
 
 const normalizeCategory = (category: any): ProductCategory | null => {
   if (!category) return null;
@@ -560,6 +611,20 @@ const normalizeGroupedProduct = (rawGroup: any): CatalogGroupedProduct => {
   const variants = normalizedAllVariants.filter((v: Product) => v.id !== mainVariant.id);
 
   const all = [mainVariant, ...variants];
+
+  // If only one variant has images, reuse them for siblings that have none.
+  const sharedImages = pickSharedImages(all);
+  if (sharedImages.length) {
+    if (!mainVariant.images || mainVariant.images.length === 0) {
+      mainVariant.images = cloneImages(sharedImages);
+    }
+    for (const v of variants) {
+      if (!v.images || v.images.length === 0) {
+        v.images = cloneImages(sharedImages);
+      }
+    }
+  }
+
 
   const allPrices = all.map((v) => toNumber(v.selling_price, 0));
   const minPrice = allPrices.length ? Math.min(...allPrices) : 0;
@@ -800,7 +865,7 @@ const catalogService = {
             ? payload.variants
             : [];
 
-        (product as any).variants = variantsRaw.map((v: any) =>
+        const normalizedVariants = variantsRaw.map((v: any) =>
           normalizeProduct(v, {
             base_name: baseName,
             description,
@@ -808,11 +873,23 @@ const catalogService = {
           })
         );
 
+        (product as any).variants = normalizedVariants;
+
+        // Ensure missing variant images inherit from any sibling that has an image.
+        propagateSharedImages(product as any);
+
+        const related = Array.isArray(payload.related_products)
+          ? payload.related_products.map((p: any) =>
+              normalizeProduct(p, { base_name: baseName, description, category }) as SimpleProduct
+            )
+          : [];
+
+        // Related products often omit images for sibling variants. Reuse by SKU when possible.
+        propagateSharedImagesBySku([...(product as any).variants || [], ...(related as any)]);
+
         return {
           product,
-          related_products: Array.isArray(payload.related_products)
-            ? payload.related_products.map((p: any) => normalizeProduct(p) as SimpleProduct)
-            : [],
+          related_products: related,
         };
       }
 
@@ -840,11 +917,21 @@ const catalogService = {
 
         (product as any).variants = variants;
 
+        // Ensure missing variant images inherit from any sibling that has an image.
+        propagateSharedImages(product as any);
+
+        const related = Array.isArray(payload.related_products)
+          ? payload.related_products.map((p: any) =>
+              normalizeProduct(p, { base_name: baseName, description, category }) as SimpleProduct
+            )
+          : [];
+
+        // Related products often omit images for sibling variants. Reuse by SKU when possible.
+        propagateSharedImagesBySku([...(product as any).variants || [], ...(related as any)]);
+
         return {
           product,
-          related_products: Array.isArray(payload.related_products)
-            ? payload.related_products.map((p: any) => normalizeProduct(p) as SimpleProduct)
-            : [],
+          related_products: related,
         };
       }
 

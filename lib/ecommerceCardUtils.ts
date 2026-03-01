@@ -49,6 +49,13 @@ const dedupeVariants = (variants: SimpleProduct[]): SimpleProduct[] => {
   return list;
 };
 
+const pickBestImages = (variants: SimpleProduct[]): SimpleProduct['images'] => {
+  for (const v of variants) {
+    if (Array.isArray(v?.images) && v.images.length > 0) return v.images;
+  }
+  return [];
+};
+
 const groupToCardProduct = (group: GroupedProduct): SimpleProduct => {
   const rawVariants = [group.main_variant, ...(group.variants || [])].filter(Boolean) as SimpleProduct[];
   const allVariants = dedupeVariants(rawVariants);
@@ -74,6 +81,13 @@ const groupToCardProduct = (group: GroupedProduct): SimpleProduct => {
     };
   }
 
+  // Some endpoints attach media/stock only to certain variants. Prefer the best available signals.
+  const bestImages = pickBestImages(allVariants);
+
+  const groupedTotalStock = toNumber((group as any)?.total_stock);
+  const groupedInStockVariants = toNumber((group as any)?.in_stock_variants);
+  const groupedHasStock = groupedTotalStock > 0 || groupedInStockVariants > 0;
+
   return {
     ...main,
     name: group.base_name || main.base_name || main.display_name || main.name,
@@ -81,6 +95,9 @@ const groupToCardProduct = (group: GroupedProduct): SimpleProduct => {
     base_name: group.base_name || main.base_name || main.display_name || main.name,
     description: group.description ?? main.description,
     category: group.category || main.category,
+    images: (Array.isArray(main.images) && main.images.length > 0) ? main.images : bestImages,
+    stock_quantity: groupedTotalStock > 0 ? groupedTotalStock : toNumber((main as any)?.stock_quantity),
+    in_stock: groupedHasStock ? true : (typeof (main as any)?.in_stock === 'boolean' ? (main as any).in_stock : toNumber((main as any)?.stock_quantity) > 0),
     has_variants: Boolean(group.has_variants || allVariants.length > 1),
     total_variants: allVariants.length,
     variants: allVariants,
@@ -122,13 +139,17 @@ export const getAdditionalVariantCount = (product: SimpleProduct): number => {
 };
 
 export const getCardStockLabel = (product: SimpleProduct): string => {
-  const mainStock = Number(product.stock_quantity || 0);
+  // Trust explicit boolean when the API provides it.
+  if (typeof (product as any)?.in_stock === 'boolean' && (product as any).in_stock) return 'In Stock';
+
+  const mainStock = Number((product as any)?.stock_quantity || 0);
   if (mainStock > 0) return 'In Stock';
 
   const allVariants = getVariantListForCard(product);
   const hasOtherStock = allVariants.some((variant) => {
     if (variant.id && product.id && variant.id === product.id) return false;
-    return Number(variant.stock_quantity || 0) > 0;
+    if (typeof (variant as any)?.in_stock === 'boolean' && (variant as any).in_stock) return true;
+    return Number((variant as any)?.stock_quantity || 0) > 0;
   });
 
   if (hasOtherStock) return 'Available in other variants';

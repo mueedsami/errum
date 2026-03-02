@@ -13,8 +13,7 @@ import catalogService, {
   SimpleProduct,
   GetProductsParams,
 } from '@/services/catalogService';
-import { getCardPriceText, getCardStockLabel } from '@/lib/ecommerceCardUtils';
-import { groupProductsByMother } from '@/lib/ecommerceProductGrouping';
+import { buildCardProductsFromResponse, getCardPriceText, getCardStockLabel } from '@/lib/ecommerceCardUtils';
 
 interface CategoryPageParams {
   slug: string;
@@ -101,93 +100,9 @@ const productMatchesAllowedCategory = (
 };
 
 const UI_CARDS_PER_PAGE = 20;
-const MAX_API_PAGES = 50;
-
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 const getProductsSilent = (params: GetProductsParams) =>
   catalogService.getProducts({ ...(params as any), _suppressErrorLog: true } as GetProductsParams);
-
-const getPageSizeFromResponse = (response: Awaited<ReturnType<typeof catalogService.getProducts>> | null | undefined) => {
-  const p = Number(response?.pagination?.per_page || 0);
-  if (Number.isFinite(p) && p > 0) return p;
-  const len = Array.isArray(response?.products) ? response!.products.length : 0;
-  return Math.max(1, len || 20);
-};
-
-
-const buildCardProductsFromFlatCatalog = (rawProducts: (Product | SimpleProduct)[]): SimpleProduct[] => {
-  const grouped = groupProductsByMother(rawProducts as any[], {
-    useCategoryInKey: true,
-    preferSkuGrouping: true,
-  });
-
-  return grouped.map((group) => {
-    const rawVariants = (group.variants || [])
-      .map((variant) => variant.raw)
-      .filter(Boolean) as SimpleProduct[];
-
-    const uniqueVariants = new Map<number, SimpleProduct>();
-    rawVariants.forEach((variant) => {
-      const id = Number((variant as any)?.id) || 0;
-      if (!id) return;
-      if (!uniqueVariants.has(id)) uniqueVariants.set(id, variant);
-    });
-
-    const all = Array.from(uniqueVariants.values());
-
-    // Propagate images: find whichever variant has images and copy to all others
-    const fallbackImages =
-      all.find((v) => (v as any).images?.some((img: any) => img?.is_primary))?.images ||
-      all.find((v) => Array.isArray((v as any).images) && (v as any).images.length > 0)?.images ||
-      [];
-    const allWithImages = fallbackImages.length
-      ? all.map((v) =>
-          Array.isArray((v as any).images) && (v as any).images.length > 0
-            ? v
-            : { ...(v as any), images: fallbackImages }
-        )
-      : all;
-
-    const representative =
-      (allWithImages.find((v) => Number(v.id) === Number((group.representative as any)?.id)) as SimpleProduct) ||
-      (group.representative as SimpleProduct) ||
-      allWithImages.find((variant) => Number(variant.stock_quantity || 0) > 0) ||
-      allWithImages[0];
-
-    if (!representative) {
-      return {
-        id: Number(group.representativeId || 0),
-        name: group.baseName || 'Product',
-        display_name: group.baseName || 'Product',
-        base_name: group.baseName || 'Product',
-        sku: '',
-        selling_price: 0,
-        stock_quantity: 0,
-        description: '',
-        images: [],
-        in_stock: false,
-        has_variants: false,
-        total_variants: 0,
-        variants: [],
-      } as SimpleProduct;
-    }
-
-    const variantsWithoutRepresentative = allWithImages.filter(
-      (variant) => Number(variant.id) !== Number(representative.id)
-    );
-
-    return {
-      ...representative,
-      name: group.baseName || (representative as any).base_name || representative.name,
-      display_name: group.baseName || (representative as any).display_name || (representative as any).base_name || representative.name,
-      base_name: group.baseName || (representative as any).base_name || representative.name,
-      has_variants: all.length > 1,
-      total_variants: all.length,
-      variants: variantsWithoutRepresentative,
-    } as SimpleProduct;
-  });
-};
 
 export default function CategoryPage() {
   const params = useParams() as CategoryPageParams;
@@ -241,87 +156,6 @@ export default function CategoryPage() {
       setCategoriesLoading(false);
     }
   };
-
-
-  const recoverFailedApiPageRange = async (
-    attemptParams: Record<string, any>,
-    failedApiPage: number,
-    rawPageSize: number
-  ): Promise<{ recovered: (Product | SimpleProduct)[]; unrecoverableItemSlots: number; perPageOverrideSupported: boolean }> => {
-    const recovered: (Product | SimpleProduct)[] = [];
-    const divisors = [100, 50, 20, 10, 5, 1]
-      .filter((size) => rawPageSize % size === 0 && size < rawPageSize)
-      .sort((a, b) => b - a);
-
-    if (divisors.length === 0) {
-      return { recovered, unrecoverableItemSlots: rawPageSize, perPageOverrideSupported: false };
-    }
-
-    const startIndex = (failedApiPage - 1) * rawPageSize;
-    const endIndexExclusive = startIndex + rawPageSize;
-    let perPageOverrideSupported: boolean | null = null;
-
-    const fetchChunkRecursive = async (
-      chunkStart: number,
-      chunkEndExclusive: number,
-      divisorIndex: number
-    ): Promise<number> => {
-      const chunkSize = divisors[Math.min(divisorIndex, divisors.length - 1)] || 1;
-      let unrecoverableSlots = 0;
-
-      for (let cursor = chunkStart; cursor < chunkEndExclusive; cursor += chunkSize) {
-        const page = Math.floor(cursor / chunkSize) + 1;
-        try {
-          const response = await getProductsSilent({
-            ...(attemptParams as any),
-            page,
-            per_page: chunkSize,
-          } as GetProductsParams);
-
-          if (perPageOverrideSupported === null) {
-            const returnedPageSize = getPageSizeFromResponse(response);
-            perPageOverrideSupported = returnedPageSize === chunkSize || (chunkSize === 1 && returnedPageSize === 1);
-          }
-
-          if (perPageOverrideSupported === false) {
-            // Backend is ignoring per_page overrides, so chunk-based recovery is impossible.
-            return chunkEndExclusive - chunkStart;
-          }
-
-          if (Array.isArray(response?.products) && response.products.length > 0) {
-            recovered.push(...(response.products as any[]));
-          }
-        } catch (chunkErr) {
-          if (perPageOverrideSupported === false) {
-            return chunkEndExclusive - chunkStart;
-          }
-
-          if (chunkSize === 1) {
-            unrecoverableSlots += 1;
-            console.warn(`Skipping malformed product item at raw index ${cursor} (api page ${failedApiPage})`);
-          } else {
-            unrecoverableSlots += await fetchChunkRecursive(
-              cursor,
-              Math.min(cursor + chunkSize, chunkEndExclusive),
-              divisorIndex + 1
-            );
-          }
-        }
-      }
-
-      return unrecoverableSlots;
-    };
-
-    const unrecoverableItemSlots = await fetchChunkRecursive(startIndex, endIndexExclusive, 0);
-    return {
-      recovered,
-      unrecoverableItemSlots,
-      perPageOverrideSupported: perPageOverrideSupported !== false,
-    };
-  };
-
-
-
   const fetchProducts = async (uiPage = 1) => {
     if (categoriesLoading) return;
 
@@ -329,8 +163,8 @@ export default function CategoryPage() {
     setPartialLoadWarning(null);
     try {
       const baseParams: GetProductsParams = {
-        page: 1,
-        per_page: 200,
+        page: uiPage,
+        per_page: UI_CARDS_PER_PAGE,
         sort_by: selectedSort as GetProductsParams['sort_by'],
       };
 
@@ -377,126 +211,37 @@ export default function CategoryPage() {
       }
 
       let matched = false;
-      let hadRecoverableFailures = false;
       let lastFatalError: unknown = null;
 
       for (const attempt of attempts) {
-        const aggregatedRaw: (Product | SimpleProduct)[] = [];
-        const seenProductIds = new Set<number>();
-        const failedApiPages = new Set<number>();
-        const allowedCategory = buildAllowedCategoryKeys(activeCategory || null, categorySlug);
-
-        const appendFilteredUniqueProducts = (items: (Product | SimpleProduct)[] | undefined | null) => {
-          if (!Array.isArray(items) || items.length === 0) return 0;
-
-          let added = 0;
-          for (const rawItem of items) {
-            if (!rawItem) continue;
-            if (!productMatchesAllowedCategory(rawItem, allowedCategory)) continue;
-
-            const itemId = Number((rawItem as any).id || 0);
-            if (itemId > 0) {
-              if (seenProductIds.has(itemId)) continue;
-              seenProductIds.add(itemId);
-            }
-
-            aggregatedRaw.push(rawItem);
-            added += 1;
-          }
-          return added;
-        };
-
-        let initialResponse: Awaited<ReturnType<typeof catalogService.getProducts>> | null = null;
         try {
-          initialResponse = await getProductsSilent({ ...(attempt as any), page: 1 } as GetProductsParams);
-        } catch (pageErr) {
-          console.error('Error fetching products page 1 for attempt:', attempt, pageErr);
-          lastFatalError = pageErr;
-          continue;
-        }
+          const response = await getProductsSilent({ ...(attempt as any), page: uiPage, per_page: UI_CARDS_PER_PAGE } as GetProductsParams);
+          const cards = buildCardProductsFromResponse(response);
 
-        if (Array.isArray(initialResponse?.products) && initialResponse.products.length > 0) {
-          appendFilteredUniqueProducts(initialResponse.products as any[]);
-        }
+          // Some backends are permissive with category filters; keep a lightweight guard.
+          const allowedCategory = buildAllowedCategoryKeys(activeCategory || null, categorySlug);
+          const filteredCards = cards.filter((p) => productMatchesAllowedCategory(p as any, allowedCategory));
 
-        const rawPageSize = getPageSizeFromResponse(initialResponse);
-        const apiLastPage = Math.max(1, Number(initialResponse?.pagination?.last_page || 1));
-        if (apiLastPage > 1) {
-          const safeLastPage = Math.min(apiLastPage, MAX_API_PAGES);
-          for (let apiPage = 2; apiPage <= safeLastPage; apiPage += 1) {
-            try {
-              const nextResponse = await getProductsSilent({ ...(attempt as any), page: apiPage } as GetProductsParams);
-              const nextProducts = Array.isArray(nextResponse?.products) ? (nextResponse.products as any[]) : [];
-              const addedCount = appendFilteredUniqueProducts(nextProducts as any[]);
-
-              // Some backends return incorrect pagination metadata (e.g. global last_page for every category).
-              // Stop early on empty pages, no new unique category-matching rows (repeated/global pages), or normal paginator end.
-              if (nextProducts.length === 0) break;
-              if (addedCount === 0) break;
-              if (!nextResponse?.pagination?.has_more_pages) break;
-            } catch (pageErr) {
-              console.warn(`Backend page ${apiPage} returned an error. Attempting recovery...`);
-              hadRecoverableFailures = true;
-
-              try {
-                const recovery = await recoverFailedApiPageRange(attempt, apiPage, rawPageSize);
-                if (Array.isArray(recovery.recovered) && recovery.recovered.length > 0) {
-                  appendFilteredUniqueProducts(recovery.recovered as any[]);
-                }
-
-                if (!recovery.perPageOverrideSupported) {
-                  console.warn(`Backend ignored per_page override, so frontend could not isolate bad item(s) on backend page ${apiPage}. Skipping that page.`);
-                  failedApiPages.add(apiPage);
-                } else if (recovery.unrecoverableItemSlots > 0) {
-                  failedApiPages.add(apiPage);
-                } else {
-                  console.info(`Recovered backend page ${apiPage} using smaller chunk retries`);
-                }
-              } catch (recoveryErr) {
-                console.error(`Recovery failed for products page ${apiPage}:`, recoveryErr);
-                failedApiPages.add(apiPage);
-              }
-
-              continue;
-            }
-          }
-        }
-
-        const cards = buildCardProductsFromFlatCatalog(aggregatedRaw);
-
-        if (cards.length > 0) {
-          const computedTotalPages = Math.max(1, Math.ceil(cards.length / UI_CARDS_PER_PAGE));
-          const safeUiPage = clamp(uiPage, 1, computedTotalPages);
-          const startIndex = (safeUiPage - 1) * UI_CARDS_PER_PAGE;
-          const pageCards = cards.slice(startIndex, startIndex + UI_CARDS_PER_PAGE);
-
-          setProducts(pageCards);
-          setTotalResults(cards.length);
-          setCurrentPage(safeUiPage);
-          setTotalPages(computedTotalPages);
+          setProducts(filteredCards);
+          setTotalResults(
+            Number(response?.pagination?.total || response?.meta?.total_results || filteredCards.length || 0)
+          );
+          setCurrentPage(Number(response?.pagination?.current_page || uiPage || 1));
+          setTotalPages(Math.max(1, Number(response?.pagination?.last_page || 1)));
           setError(null);
-
-          if (failedApiPages.size > 0) {
-            const sortedFailedPages = Array.from(failedApiPages).sort((a, b) => a - b);
-            setPartialLoadWarning(
-              `Some products were skipped due to a server data issue. We recovered what we could, but backend page${sortedFailedPages.length > 1 ? 's' : ''} ${sortedFailedPages.join(', ')} still has invalid item data.`
-            );
-          } else if (hadRecoverableFailures) {
-            setPartialLoadWarning('Some backend pages had data issues, but products were recovered automatically.');
-          } else {
-            setPartialLoadWarning(null);
-          }
+          setPartialLoadWarning(null);
 
           matched = true;
           break;
+        } catch (pageErr) {
+          console.error('Error fetching products for attempt:', attempt, pageErr);
+          lastFatalError = pageErr;
+          continue;
         }
       }
 
       if (!matched) {
-        if (hadRecoverableFailures) {
-          setError('Some products could not be loaded because of a server data issue.');
-          setPartialLoadWarning('Try changing sort order or filters to continue browsing other products.');
-        } else if (lastFatalError) {
+        if (lastFatalError) {
           throw lastFatalError;
         } else {
           setError(null);

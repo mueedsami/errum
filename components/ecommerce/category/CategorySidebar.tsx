@@ -120,51 +120,113 @@ export default function CategorySidebar({
 
       <div className="ec-dark-card p-4">
         <h3 className="font-semibold text-white mb-4">Price Range</h3>
-        <div className="space-y-2">
-          {[
+        {(() => {
+          const ranges = [
             { value: 'all', label: 'All Prices' },
             { value: '0-500', label: 'Under ৳500' },
             { value: '500-1000', label: '৳500 - ৳1,000' },
             { value: '1000-2000', label: '৳1,000 - ৳2,000' },
             { value: '2000-5000', label: '৳2,000 - ৳5,000' },
             { value: '5000-999999', label: 'Above ৳5,000' },
-          ].map((range) => (
-            <label key={range.value} className="flex items-center cursor-pointer">
-              <input
-                type="radio"
-                name="priceRange"
-                value={range.value}
-                checked={selectedPriceRange === range.value}
-                onChange={(e) => onPriceRangeChange(e.target.value)}
-                className="mr-2 accent-[var(--gold)] focus:ring-neutral-200"
-              />
-              <span className="text-sm text-white/70">{range.label}</span>
-            </label>
-          ))}
-        </div>
+          ];
+
+          return (
+            <>
+              {/* Mobile: pill buttons */}
+              <div className="sm:hidden flex flex-wrap gap-2">
+                {ranges.map((range) => {
+                  const active = selectedPriceRange === range.value;
+                  return (
+                    <button
+                      key={range.value}
+                      type="button"
+                      onClick={() => onPriceRangeChange(range.value)}
+                      className={
+                        `px-3 py-2 rounded-full text-xs border transition-colors ` +
+                        (active
+                          ? 'bg-[rgba(212,169,106,0.18)] border-[rgba(212,169,106,0.35)] text-white'
+                          : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10')
+                      }
+                    >
+                      {range.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Desktop: radios */}
+              <div className="hidden sm:block space-y-2">
+                {ranges.map((range) => (
+                  <label key={range.value} className="flex items-center cursor-pointer">
+                    <input
+                      type="radio"
+                      name="priceRange"
+                      value={range.value}
+                      checked={selectedPriceRange === range.value}
+                      onChange={(e) => onPriceRangeChange(e.target.value)}
+                      className="mr-2 accent-[var(--gold)] focus:ring-neutral-200"
+                    />
+                    <span className="text-sm text-white/70">{range.label}</span>
+                  </label>
+                ))}
+              </div>
+            </>
+          );
+        })()}
       </div>
 
       <div className="ec-dark-card p-4">
         <h3 className="font-semibold text-white mb-4">Availability</h3>
-        <div className="space-y-2">
-          {[
+        {(() => {
+          const stocks = [
             { value: 'all', label: 'All Products' },
             { value: 'in_stock', label: 'In Stock' },
             { value: 'out_of_stock', label: 'Out of Stock' },
-          ].map((stock) => (
-            <label key={stock.value} className="flex items-center cursor-pointer">
-              <input
-                type="radio"
-                name="stock"
-                value={stock.value}
-                checked={selectedStock === stock.value}
-                onChange={(e) => onStockChange(e.target.value)}
-                className="mr-2 accent-[var(--gold)] focus:ring-neutral-200"
-              />
-              <span className="text-sm text-white/70">{stock.label}</span>
-            </label>
-          ))}
-        </div>
+          ];
+
+          return (
+            <>
+              {/* Mobile: pill buttons */}
+              <div className="sm:hidden flex flex-wrap gap-2">
+                {stocks.map((stock) => {
+                  const active = selectedStock === stock.value;
+                  return (
+                    <button
+                      key={stock.value}
+                      type="button"
+                      onClick={() => onStockChange(stock.value)}
+                      className={
+                        `px-3 py-2 rounded-full text-xs border transition-colors ` +
+                        (active
+                          ? 'bg-[rgba(212,169,106,0.18)] border-[rgba(212,169,106,0.35)] text-white'
+                          : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10')
+                      }
+                    >
+                      {stock.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Desktop: radios */}
+              <div className="hidden sm:block space-y-2">
+                {stocks.map((stock) => (
+                  <label key={stock.value} className="flex items-center cursor-pointer">
+                    <input
+                      type="radio"
+                      name="stock"
+                      value={stock.value}
+                      checked={selectedStock === stock.value}
+                      onChange={(e) => onStockChange(e.target.value)}
+                      className="mr-2 accent-[var(--gold)] focus:ring-neutral-200"
+                    />
+                    <span className="text-sm text-white/70">{stock.label}</span>
+                  </label>
+                ))}
+              </div>
+            </>
+          );
+        })()}
       </div>
     </div>
   );

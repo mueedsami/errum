@@ -208,7 +208,8 @@ export default function CategoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [partialLoadWarning, setPartialLoadWarning] = useState<string | null>(null);
 
-  const [selectedSort, setSelectedSort] = useState('newest');
+  // Always sort newest first on category pages, but don't expose a sort UI.
+  const selectedSort: GetProductsParams['sort_by'] = 'newest';
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalResults, setTotalResults] = useState(0);
@@ -263,11 +264,13 @@ export default function CategoryPage() {
 
 
   const buildAttemptParams = (): Record<string, any> => {
-    const baseParams: GetProductsParams = {
+    const baseParams: GetProductsParams & Record<string, any> = {
       page: 1,
       per_page: API_PER_PAGE,
-      sort_by: selectedSort as GetProductsParams['sort_by'],
     };
+
+    // Only send sort_by when user explicitly selects it.
+    baseParams.sort_by = selectedSort;
 
     if (selectedStock === 'in_stock') {
       baseParams.in_stock = true;
@@ -433,7 +436,7 @@ export default function CategoryPage() {
     cacheRef.current = {};
     fetchProducts(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCategory?.id, categoriesLoading, selectedSort, selectedPriceRange, selectedStock]);
+  }, [activeCategory?.id, categoriesLoading, selectedPriceRange, selectedStock]);
 
   const handleImageError = (productId: number) => {
     setImageErrors((prev) => {
@@ -548,30 +551,9 @@ export default function CategoryPage() {
                 >
                   Filters
                 </button>
-
-                <select
-                  value={selectedSort}
-                  onChange={(e) => setSelectedSort(e.target.value)}
-                  className="flex-1 px-4 py-3 rounded-xl border border-white/10 bg-[rgba(255,255,255,0.06)] text-white focus:outline-none focus:ring-2 focus:ring-white/15"
-                >
-                  <option value="newest">Newest First</option>
-                  <option value="price_asc">Price: Low to High</option>
-                  <option value="price_desc">Price: High to Low</option>
-                  <option value="name">Name A-Z</option>
-                </select>
               </div>
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                 <div className="text-sm text-gray-600">Showing {products.length} of {totalResults} products</div>
-                <select
-                  value={selectedSort}
-                  onChange={(e) => setSelectedSort(e.target.value)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                >
-                  <option value="newest">Newest First</option>
-                  <option value="price_asc">Price: Low to High</option>
-                  <option value="price_desc">Price: High to Low</option>
-                  <option value="name">Name A-Z</option>
-                </select>
               </div>
 
               {partialLoadWarning && !error && (

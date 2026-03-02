@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { ChevronDown, Filter, ShoppingBag } from 'lucide-react';
 
@@ -14,11 +13,10 @@ import catalogService, {
   PaginationMeta,
   SimpleProduct,
 } from '@/services/catalogService';
+import PremiumProductCard from '@/components/ecommerce/ui/PremiumProductCard';
+
 import {
   buildCardProductsFromResponse,
-  getAdditionalVariantCount,
-  getCardPriceText,
-  getCardStockLabel,
 } from '@/lib/ecommerceCardUtils';
 
 type ProductSort = NonNullable<GetProductsParams['sort_by']>;
@@ -45,6 +43,8 @@ export default function ProductsPage() {
   const [pagination, setPagination] = useState<PaginationMeta | null>(null);
 
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
   const { addToCart } = useCart();
 
   useEffect(() => {
@@ -69,7 +69,7 @@ export default function ProductsPage() {
     try {
       const params: GetProductsParams = {
         page: 1,
-        per_page: 20,
+        per_page: 200,
       };
 
       if (selectedCategory !== 'all') {
@@ -102,7 +102,15 @@ export default function ProductsPage() {
     }
   };
 
-  const handleAddToCart = async (product: SimpleProduct) => {
+  
+  const markImageError = (id: number) => {
+    setImageErrors(prev => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  };
+const handleAddToCart = async (product: SimpleProduct) => {
     if (product.has_variants) {
       router.push(`/e-commerce/product/${product.id}`);
       return;
@@ -122,136 +130,191 @@ export default function ProductsPage() {
 
   return (
     <>
-      <div className="ec-root min-h-screen">
+      <div className="ec-root ec-darkify min-h-screen">
         <Navigation />
 
-        <div className="max-w-7xl mx-auto px-4 py-8">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="text-center mb-8">
-            <h1 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">All Products</h1>
-            <p className="text-gray-600">Browse our complete collection</p>
+            <h1 className="text-3xl md:text-4xl font-bold text-white mb-4">All Products</h1>
+            <p className="text-white/70">Browse our complete collection</p>
           </div>
 
-          <div className="bg-gray-50 rounded-lg p-4 mb-8">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="md:col-span-2">
-                <input
-                  type="text"
-                  placeholder="Search products..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-200"
-                />
-              </div>
+          
+          {/* Filters */}
+          <div className="mb-8">
+            {/* Mobile: compact bar + drawer */}
+            <div className="md:hidden flex gap-3">
+              <input
+                type="text"
+                placeholder="Search products..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="flex-1 px-4 py-3 rounded-xl border border-white/10 bg-white/5 text-white placeholder:text-white/50 focus:outline-none focus:ring-2 focus:ring-white/15"
+              />
 
-              <div className="relative">
-                <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <select
-                  value={selectedCategory}
-                  onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="w-full pl-10 pr-8 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-200 appearance-none bg-white"
-                >
-                  <option value="all">All Categories</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id.toString()}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-              </div>
+              <button
+                type="button"
+                onClick={() => setIsFiltersOpen(true)}
+                className="inline-flex items-center gap-2 px-4 py-3 rounded-xl border border-white/10 bg-white/5 text-white"
+              >
+                <Filter className="h-4 w-4" />
+                Filters
+              </button>
+            </div>
 
-              <div className="relative">
-                <select
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as ProductSort)}
-                  className="w-full pl-4 pr-8 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-neutral-200 appearance-none bg-white"
-                >
-                  <option value="newest">Newest</option>
-                  <option value="name">Name</option>
-                  <option value="price_asc">Price: Low to High</option>
-                  <option value="price_desc">Price: High to Low</option>
-                </select>
-                <ChevronDown className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
+            {/* Desktop: inline filters */}
+            <div className="hidden md:block ec-dark-card p-4">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="md:col-span-2">
+                  <input
+                    type="text"
+                    placeholder="Search products..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full px-4 py-2 rounded-lg border border-white/10 bg-white/5 text-white placeholder:text-white/50 focus:outline-none focus:ring-2 focus:ring-white/15"
+                  />
+                </div>
+
+                <div className="relative">
+                  <Filter className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/50" />
+                  <select
+                    value={selectedCategory}
+                    onChange={(e) => setSelectedCategory(e.target.value)}
+                    className="w-full pl-10 pr-9 py-2 rounded-lg border border-white/10 bg-white/5 text-white focus:outline-none focus:ring-2 focus:ring-white/15 appearance-none"
+                  >
+                    <option value="all">All Categories</option>
+                    {categories.map((category) => (
+                      <option key={category.id} value={category.id.toString()}>
+                        {category.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/50 pointer-events-none" />
+                </div>
+
+                <div className="relative">
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as ProductSort)}
+                    className="w-full pl-4 pr-9 py-2 rounded-lg border border-white/10 bg-white/5 text-white focus:outline-none focus:ring-2 focus:ring-white/15 appearance-none"
+                  >
+                    <option value="newest">Newest</option>
+                    <option value="name">Name</option>
+                    <option value="price_asc">Price: Low to High</option>
+                    <option value="price_desc">Price: High to Low</option>
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/50 pointer-events-none" />
+                </div>
               </div>
             </div>
+
+            {/* Mobile Drawer */}
+            {isFiltersOpen && (
+              <div className="fixed inset-0 z-[60]">
+                <button
+                  type="button"
+                  aria-label="Close filters"
+                  onClick={() => setIsFiltersOpen(false)}
+                  className="absolute inset-0 bg-black/60"
+                />
+                <div className="absolute right-0 top-0 h-full w-[86%] max-w-sm ec-dark-card border-l border-white/10 p-5 overflow-y-auto">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="text-white font-semibold text-lg">Filters</div>
+                    <button
+                      type="button"
+                      onClick={() => setIsFiltersOpen(false)}
+                      className="px-3 py-2 rounded-lg border border-white/10 bg-white/5 text-white"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="space-y-5">
+                    <div>
+                      <div className="text-sm text-white/70 mb-2">Category</div>
+                      <select
+                        value={selectedCategory}
+                        onChange={(e) => setSelectedCategory(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl border border-white/10 bg-white/5 text-white focus:outline-none focus:ring-2 focus:ring-white/15"
+                      >
+                        <option value="all">All Categories</option>
+                        {categories.map((category) => (
+                          <option key={category.id} value={category.id.toString()}>
+                            {category.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <div className="text-sm text-white/70 mb-2">Sort</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        {[
+                          { v: 'newest', label: 'Newest' },
+                          { v: 'name', label: 'Name' },
+                          { v: 'price_asc', label: 'Low → High' },
+                          { v: 'price_desc', label: 'High → Low' },
+                        ].map((opt) => (
+                          <button
+                            key={opt.v}
+                            type="button"
+                            onClick={() => setSortBy(opt.v as ProductSort)}
+                            className={[
+                              'px-3 py-3 rounded-xl border text-sm',
+                              sortBy === opt.v ? 'border-white/30 bg-white/10 text-white' : 'border-white/10 bg-white/5 text-white/80',
+                            ].join(' ')}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setIsFiltersOpen(false)}
+                      className="w-full px-4 py-3 rounded-xl bg-white text-black font-medium"
+                    >
+                      Show Products
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {isLoading ? (
+ ? (
             <div className="text-center py-12">
               <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-neutral-900" />
-              <p className="mt-4 text-gray-600">Loading products...</p>
+              <p className="mt-4 text-white/70">Loading products...</p>
             </div>
           ) : products.length === 0 ? (
             <div className="text-center py-12">
               <ShoppingBag className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">No products found</h3>
-              <p className="text-gray-600">Try adjusting your search or filters</p>
+              <h3 className="text-xl font-semibold text-white mb-2">No products found</h3>
+              <p className="text-white/70">Try adjusting your search or filters</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-              {products.map((product) => {
-                const imageUrl = product.images?.[0]?.url || '/images/placeholder-product.jpg';
-                const additionalVariants = getAdditionalVariantCount(product);
-                const stockLabel = getCardStockLabel(product);
-                const hasStock = stockLabel !== 'Out of Stock';
-
-                return (
-                  <div
-                    key={product.id}
-                    className="group bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-lg transition-all duration-300"
-                  >
-                    <div className="relative aspect-[3/4] bg-gray-100 overflow-hidden">
-                      <Image
-                        src={imageUrl}
-                        alt={product.display_name || product.base_name || product.name}
-                        fill
-                        className="object-cover group-hover:scale-105 transition-transform duration-300"
-                      />
-
-                      {additionalVariants > 0 && (
-                        <span className="absolute top-2 left-2 bg-purple-600 text-white text-xs px-2 py-1 rounded-full">
-                          +{additionalVariants} variation options
-                        </span>
-                      )}
-
-                      <span
-                        className={`absolute top-2 right-2 text-xs px-2 py-1 rounded-full ${
-                          stockLabel === 'In Stock'
-                            ? 'bg-green-100 text-green-700'
-                            : hasStock
-                              ? 'bg-amber-100 text-amber-700'
-                              : 'bg-rose-50 text-neutral-900'
-                        }`}
-                      >
-                        {stockLabel}
-                      </span>
-                    </div>
-
-                    <div className="p-4 text-center">
-                      <h3
-                        onClick={() => navigateToProduct(product.id)}
-                        className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 group-hover:text-rose-600 transition-colors cursor-pointer"
-                      >
-                        {product.display_name || product.base_name || product.name}
-                      </h3>
-
-                      <span className="text-lg font-bold text-neutral-900">{getCardPriceText(product)}</span>
-
-                      <button
-                        onClick={() => handleAddToCart(product)}
-                        className="mt-3 w-full bg-rose-600 text-white py-2 rounded-md text-sm font-medium hover:bg-neutral-900 transition-colors"
-                      >
-                        {product.has_variants ? 'Select Variation' : 'Add to Cart'}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
+              {products.map((product) => (
+                <PremiumProductCard
+                  key={product.id}
+                  product={product}
+                  imageErrored={imageErrors.has(Number(product.id))}
+                  onImageError={(id) => markImageError(id)}
+                  onOpen={(p) => router.push(`/e-commerce/product/${p.id}`)}
+                  onAddToCart={(p, e) => {
+                    e.stopPropagation();
+                    handleAddToCart(p);
+                  }}
+                />
+              ))}
             </div>
           )}
 
           {pagination && pagination.last_page > 1 && (
-            <div className="mt-8 text-center text-sm text-gray-600">
+            <div className="mt-8 text-center text-sm text-white/70">
               Page {pagination.current_page} of {pagination.last_page}
             </div>
           )}

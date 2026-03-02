@@ -330,12 +330,24 @@ const normalizeImages = (images: any): ProductImage[] => {
  */
 const cloneImages = (imgs: ProductImage[]): ProductImage[] => imgs.map((i) => ({ ...i }));
 
+/**
+ * Collect ALL images from ALL items that have images, de-duplicated by id.
+ * This ensures a variant with no images shows every image from every
+ * sibling variant — not just the images from the first sibling found.
+ */
 const pickSharedImages = (items: Array<{ images?: ProductImage[] | null }>): ProductImage[] => {
+  const seen = new Set<number>();
+  const all: ProductImage[] = [];
   for (const it of items) {
     const imgs = Array.isArray(it?.images) ? (it.images as ProductImage[]) : [];
-    if (imgs.length) return cloneImages(imgs);
+    for (const img of imgs) {
+      if (!seen.has(img.id)) {
+        seen.add(img.id);
+        all.push({ ...img });
+      }
+    }
   }
-  return [];
+  return all;
 };
 
 const propagateSharedImages = <T extends { images?: ProductImage[]; variants?: any[] }>(product: T): T => {
@@ -364,12 +376,15 @@ const propagateSharedImagesBySku = <T extends { sku?: string; images?: ProductIm
 
   const sharedBySku = new Map<string, ProductImage[]>();
 
+  // First pass: pool ALL images for each SKU across all items (not just first found)
   for (const it of items) {
     const sku = normalizeString((it as any)?.sku || '').trim();
     const imgs = Array.isArray((it as any)?.images) ? ((it as any).images as ProductImage[]) : [];
-    if (sku && imgs.length && !sharedBySku.has(sku)) {
-      sharedBySku.set(sku, cloneImages(imgs));
-    }
+    if (!sku || !imgs.length) continue;
+    const existing = sharedBySku.get(sku) || [];
+    const existingIds = new Set(existing.map((i) => i.id));
+    const merged = [...existing, ...imgs.filter((i) => !existingIds.has(i.id)).map((i) => ({ ...i }))];
+    sharedBySku.set(sku, merged);
   }
 
   for (const it of items) {
@@ -458,19 +473,29 @@ const normalizeProduct = (
   const inStock = typeof explicitInStock === 'boolean' ? explicitInStock : stockQty > 0;
 
   // Pull images from the root product first.
-  // If the root has no images but the API nested images inside variants[],
-  // find the first variant that has images and use those as the fallback.
-  // This is the canonical fix for list endpoints that return:
+  // If the root has no images, pool ALL images from ALL sibling variants
+  // (not just the first one found), de-duplicated by id.
+  // This handles list endpoints that return:
   //   { images: [], variants: [ { images: [] }, { images: [{...}] } ] }
   const rawImages = raw?.images || raw?.product_images || raw?.media || [];
   const rawVariants: any[] = Array.isArray(raw?.variants) ? raw.variants : [];
-  const fallbackRawImages =
+  const fallbackRawImages: any[] =
     (!Array.isArray(rawImages) || rawImages.length === 0) && rawVariants.length > 0
-      ? (
-          rawVariants.find((v: any) => Array.isArray(v?.images) && v.images.some((img: any) => img?.is_primary))?.images ||
-          rawVariants.find((v: any) => Array.isArray(v?.images) && v.images.length > 0)?.images ||
-          []
-        )
+      ? (() => {
+          const seen = new Set<any>();
+          const pool: any[] = [];
+          for (const v of rawVariants) {
+            if (!Array.isArray(v?.images)) continue;
+            for (const img of v.images) {
+              const key = img?.id ?? img?.url ?? img;
+              if (key && !seen.has(key)) {
+                seen.add(key);
+                pool.push(img);
+              }
+            }
+          }
+          return pool;
+        })()
       : [];
   const images = normalizeImages(rawImages.length > 0 ? rawImages : fallbackRawImages);
 

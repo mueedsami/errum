@@ -41,6 +41,7 @@ export default function ProductsPage() {
 
   const [products, setProducts] = useState<SimpleProduct[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
@@ -52,8 +53,13 @@ export default function ProductsPage() {
   }, []);
 
   useEffect(() => {
-    fetchProducts();
+    // Reset to first page when filters change
+    setCurrentPage(1);
   }, [selectedCategory, searchTerm, sortBy]);
+
+  useEffect(() => {
+    fetchProducts(currentPage);
+  }, [currentPage, selectedCategory, searchTerm, sortBy]);
 
   const fetchCategories = async () => {
     try {
@@ -64,11 +70,11 @@ export default function ProductsPage() {
     }
   };
 
-  const fetchProducts = async () => {
+  const fetchProducts = async (page = 1) => {
     setIsLoading(true);
     try {
       const params: GetProductsParams = {
-        page: 1,
+        page,
         per_page: 200,
       };
 
@@ -97,9 +103,18 @@ export default function ProductsPage() {
     } catch (error) {
       console.error('Error fetching products:', error);
       setProducts([]);
+      setPagination(null);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handlePageChange = (page: number) => {
+    if (!pagination) return;
+    const next = Math.max(1, Math.min(page, Number(pagination.last_page || 1)));
+    setCurrentPage(next);
+    // Scroll a bit up so user sees products immediately
+    if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   
@@ -217,13 +232,14 @@ const handleAddToCart = async (product: SimpleProduct) => {
                   onClick={() => setIsFiltersOpen(false)}
                   className="absolute inset-0 bg-black/60"
                 />
-                <div className="absolute right-0 top-0 h-full w-[86%] max-w-sm ec-dark-card border-l border-white/10 p-5 overflow-y-auto">
+                {/* Drawer panel (solid dark bg to match ec-root pages) */}
+                <div className="absolute right-0 top-0 h-full w-[86%] max-w-sm border-l border-white/10 p-5 overflow-y-auto bg-[#0b1220]">
                   <div className="flex items-center justify-between mb-4">
                     <div className="text-white font-semibold text-lg">Filters</div>
                     <button
                       type="button"
                       onClick={() => setIsFiltersOpen(false)}
-                      className="px-3 py-2 rounded-lg border border-white/10 bg-white/5 text-white"
+                      className="px-3 py-2 rounded-lg border border-white/10 bg-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.10)] text-white"
                     >
                       Close
                     </button>
@@ -273,7 +289,7 @@ const handleAddToCart = async (product: SimpleProduct) => {
                     <button
                       type="button"
                       onClick={() => setIsFiltersOpen(false)}
-                      className="w-full px-4 py-3 rounded-xl bg-white text-black font-medium"
+                      className="w-full px-4 py-3 rounded-xl border border-white/10 bg-[rgba(255,255,255,0.08)] hover:bg-[rgba(255,255,255,0.12)] text-white font-semibold"
                     >
                       Show Products
                     </button>
@@ -284,7 +300,6 @@ const handleAddToCart = async (product: SimpleProduct) => {
           </div>
 
           {isLoading ? (
- ? (
             <div className="text-center py-12">
               <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-neutral-900" />
               <p className="mt-4 text-white/70">Loading products...</p>
@@ -313,9 +328,51 @@ const handleAddToCart = async (product: SimpleProduct) => {
             </div>
           )}
 
-          {pagination && pagination.last_page > 1 && (
-            <div className="mt-8 text-center text-sm text-white/70">
-              Page {pagination.current_page} of {pagination.last_page}
+          {pagination && Number(pagination.last_page || 1) > 1 && (
+            <div className="mt-10 flex flex-col items-center gap-3">
+              <div className="text-sm text-white/70">Page {currentPage} of {pagination.last_page}</div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage <= 1}
+                  className="px-4 py-2 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed border border-white/10 bg-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.10)] text-white"
+                >
+                  Previous
+                </button>
+
+                {(() => {
+                  const last = Number(pagination.last_page || 1);
+                  const windowSize = 5;
+                  const start = Math.max(1, Math.min(currentPage - 2, last - (windowSize - 1)));
+                  const pages = Array.from({ length: Math.min(windowSize, last) }, (_, i) => start + i);
+
+                  return pages.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => handlePageChange(p)}
+                      className={
+                        p === currentPage
+                          ? 'px-4 py-2 rounded-xl border border-white/20 bg-[rgba(255,255,255,0.14)] text-white'
+                          : 'px-4 py-2 rounded-xl border border-white/10 bg-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.10)] text-white/90'
+                      }
+                    >
+                      {p}
+                    </button>
+                  ));
+                })()}
+
+                <button
+                  type="button"
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={currentPage >= Number(pagination.last_page || 1)}
+                  className="px-4 py-2 rounded-xl disabled:opacity-50 disabled:cursor-not-allowed border border-white/10 bg-[rgba(255,255,255,0.06)] hover:bg-[rgba(255,255,255,0.10)] text-white"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           )}
         </div></div>

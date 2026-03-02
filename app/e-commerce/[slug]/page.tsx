@@ -101,7 +101,7 @@ const productMatchesAllowedCategory = (
 
 // We fetch more raw rows than the UI shows because products are grouped by variation.
 // ~100 raw rows typically becomes ~20 grouped cards for busy categories.
-const UI_CARDS_PER_PAGE = 120;
+const UI_CARDS_PER_PAGE = 100;
 
 const getProductsSilent = (params: GetProductsParams) =>
   catalogService.getProducts({ ...(params as any), _suppressErrorLog: true } as GetProductsParams);
@@ -126,6 +126,9 @@ export default function CategoryPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalResults, setTotalResults] = useState(0);
   const [isCartOpen, setIsCartOpen] = useState(false);
+
+  // Mobile: keep filters out of the way. Show a single "Filters" button that opens a drawer.
+  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
 
   const [selectedPriceRange, setSelectedPriceRange] = useState<string>('all');
   const [selectedStock, setSelectedStock] = useState<string>('all');
@@ -357,6 +360,48 @@ export default function CategoryPage() {
     <>
       <Navigation />
 
+      {/* Mobile filter drawer */}
+      {isMobileFiltersOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          <div
+            className="absolute inset-0"
+            style={{ background: 'rgba(0,0,0,0.6)' }}
+            onClick={() => setIsMobileFiltersOpen(false)}
+          />
+          <div
+            className="absolute right-0 top-0 h-full w-[88%] max-w-sm overflow-y-auto ec-root ec-darkify"
+            style={{ background: 'rgba(10,10,10,0.98)', borderLeft: '1px solid rgba(255,255,255,0.10)' }}
+          >
+            <div className="p-4 flex items-center justify-between" style={{ borderBottom: '1px solid rgba(255,255,255,0.10)' }}>
+              <div className="text-base font-semibold" style={{ color: 'rgba(255,255,255,0.92)' }}>Filters</div>
+              <button
+                onClick={() => setIsMobileFiltersOpen(false)}
+                className="px-3 py-2 rounded-lg"
+                style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.10)', color: 'rgba(255,255,255,0.80)' }}
+                aria-label="Close filters"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-4">
+              <CategorySidebar
+                categories={categories}
+                activeCategory={categorySlug}
+                onCategoryChange={(v) => {
+                  setIsMobileFiltersOpen(false);
+                  handleCategoryChange(v);
+                }}
+                selectedPriceRange={selectedPriceRange}
+                onPriceRangeChange={setSelectedPriceRange}
+                selectedStock={selectedStock}
+                onStockChange={setSelectedStock}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="ec-root ec-darkify min-h-screen">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
           <div className="mb-8">
@@ -367,7 +412,8 @@ export default function CategoryPage() {
           </div>
 
           <div className="flex flex-col lg:flex-row gap-8">
-            <aside className="w-full lg:w-64 flex-shrink-0">
+            {/* Desktop sidebar */}
+            <aside className="hidden lg:block w-64 flex-shrink-0">
               <CategorySidebar
                 categories={categories}
                 activeCategory={categorySlug}
@@ -381,7 +427,22 @@ export default function CategoryPage() {
 
             <main className="flex-1">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-                <div className="text-sm text-gray-600">Showing {products.length} of {totalResults} products</div>
+                {/* Mobile: a single Filters button instead of showing the whole sidebar on top */}
+                <div className="w-full flex items-center justify-between gap-3 sm:hidden">
+                  <button
+                    onClick={() => setIsMobileFiltersOpen(true)}
+                    className="px-4 py-2 rounded-lg text-sm font-medium"
+                    style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.85)' }}
+                  >
+                    Filters
+                  </button>
+
+                  <div className="text-xs" style={{ color: 'rgba(255,255,255,0.55)' }}>
+                    Showing {products.length} of {totalResults}
+                  </div>
+                </div>
+
+                <div className="hidden sm:block text-sm text-gray-600">Showing {products.length} of {totalResults} products</div>
                 <select
                   value={selectedSort}
                   onChange={(e) => setSelectedSort(e.target.value)}

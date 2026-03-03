@@ -438,3 +438,14 @@ body {
     box-shadow: 0 2px 28px rgba(0,0,0,0.55) !important;
   }
 }
+
+
+/* Ecommerce: make native <select> dropdown options dark (mobile & desktop where supported) */
+.ecom-select option {
+  background-color: rgba(10, 10, 12, 0.98);
+  color: #fff;
+}
+.ecom-select optgroup {
+  background-color: rgba(10, 10, 12, 0.98);
+  color: #fff;
+}

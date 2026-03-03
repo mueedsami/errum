@@ -210,7 +210,7 @@ const handleAddToCart = async (product: SimpleProduct) => {
                   <select
                     value={selectedCategory}
                     onChange={(e) => setSelectedCategory(e.target.value)}
-                    className="w-full pl-10 pr-9 py-2 rounded-lg border border-white/10 bg-white/5 text-white focus:outline-none focus:ring-2 focus:ring-white/15 appearance-none"
+                    className="ecom-select w-full pl-10 pr-9 py-2 rounded-lg border border-white/10 bg-white/5 text-white focus:outline-none focus:ring-2 focus:ring-white/15 appearance-none"
                   >
                     <option value="all">All Categories</option>
                     {categories.map((category) => (
@@ -245,7 +245,7 @@ const handleAddToCart = async (product: SimpleProduct) => {
                   type="button"
                   aria-label="Close filters"
                   onClick={() => setIsFiltersOpen(false)}
-                  className="absolute inset-0 bg-black/60"
+                  className="absolute inset-0 bg-black/80 backdrop-blur-sm"
                 />
                 <div className="absolute right-0 top-0 h-full w-[86%] max-w-sm ec-dark-card border-l border-white/10 p-5 overflow-y-auto">
                   <div className="flex items-center justify-between mb-4">

@@ -694,7 +694,7 @@ export default function CategoryPage() {
             type="button"
             aria-label="Close filters"
             onClick={() => setIsFiltersOpen(false)}
-            className="absolute inset-0 bg-black/60"
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
           />
           <div className="absolute right-0 top-0 h-full w-[86%] max-w-sm ec-dark-card border-l border-white/10 p-5 overflow-y-auto">
             <div className="flex items-center justify-between mb-4">

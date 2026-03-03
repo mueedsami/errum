@@ -70,6 +70,12 @@ export function toAbsoluteAssetUrl(value?: string | null): string {
 
   let path = raw.replace(/^['"]|['"]$/g, '');
 
+  // Legacy category image paths
+  // Some API responses return `category/...` but the real public path is `/storage/category/...`.
+  if (/^\/?category\//i.test(path) && !/\/storage\/category\//i.test(path)) {
+    path = path.replace(/^\/?category\//i, '/storage/category/');
+  }
+
   // Some backends return /api/storage/... for files; strip /api for direct asset access.
   if (/^\/?api\//i.test(path) && /\/storage\//i.test(path)) {
     path = path.replace(/^\/?api\//i, '/');

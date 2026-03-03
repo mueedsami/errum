@@ -263,6 +263,13 @@ const toAbsoluteAssetUrl = (value: any): string => {
     return raw;
   }
 
+  // Legacy category image paths: `category/...` should resolve from `/storage/category/...`.
+  // This is important for the e-commerce homepage/category sections.
+  let normalizedRaw = raw;
+  if (/^\/?category\//i.test(normalizedRaw) && !/\/storage\/category\//i.test(normalizedRaw)) {
+    normalizedRaw = normalizedRaw.replace(/^\/?category\//i, '/storage/category/');
+  }
+
   const apiBase = normalizeString(process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
   const appBase = normalizeString(process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/$/, '');
 
@@ -271,9 +278,9 @@ const toAbsoluteAssetUrl = (value: any): string => {
     appBase ||
     '';
 
-  if (!backendBase) return raw;
+  if (!backendBase) return normalizedRaw;
 
-  const path = raw.startsWith('/') ? raw : `/${raw}`;
+  const path = normalizedRaw.startsWith('/') ? normalizedRaw : `/${normalizedRaw}`;
   return `${backendBase}${path}`;
 };
 

@@ -41,6 +41,7 @@ export default function ProductsPage() {
 
   const [products, setProducts] = useState<SimpleProduct[]>([]);
   const [pagination, setPagination] = useState<PaginationMeta | null>(null);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
@@ -51,9 +52,14 @@ export default function ProductsPage() {
     fetchCategories();
   }, []);
 
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedCategory, searchTerm, sortBy]);
+
   useEffect(() => {
     fetchProducts();
-  }, [selectedCategory, searchTerm, sortBy]);
+  }, [selectedCategory, searchTerm, sortBy, currentPage]);
 
   const fetchCategories = async () => {
     try {
@@ -68,8 +74,9 @@ export default function ProductsPage() {
     setIsLoading(true);
     try {
       const params: GetProductsParams = {
-        page: 1,
-        per_page: 200,
+        page: currentPage,
+        // Keep page sizes reasonable so backend pagination works and UI stays fast.
+        per_page: 100,
       };
 
       if (selectedCategory !== 'all') {
@@ -100,6 +107,29 @@ export default function ProductsPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const getPageWindow = (current: number, last: number) => {
+    // Returns a compact page list with ellipses.
+    // Example: [1, '…', 7, 8, 9, '…', 22]
+    const pages: Array<number | '…'> = [];
+    if (last <= 7) {
+      for (let i = 1; i <= last; i++) pages.push(i);
+      return pages;
+    }
+
+    const push = (v: number | '…') => pages.push(v);
+    push(1);
+
+    const left = Math.max(2, current - 1);
+    const right = Math.min(last - 1, current + 1);
+
+    if (left > 2) push('…');
+    for (let i = left; i <= right; i++) push(i);
+    if (right < last - 1) push('…');
+
+    push(last);
+    return pages;
   };
 
   
@@ -313,8 +343,52 @@ const handleAddToCart = async (product: SimpleProduct) => {
           )}
 
           {pagination && pagination.last_page > 1 && (
-            <div className="mt-8 text-center text-sm text-white/70">
-              Page {pagination.current_page} of {pagination.last_page}
+            <div className="mt-8">
+              <div className="text-center text-sm text-white/70 mb-3">
+                Page {pagination.current_page} of {pagination.last_page}
+              </div>
+
+              <div className="flex items-center justify-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  disabled={pagination.current_page <= 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="px-3 py-2 rounded-lg border border-white/10 bg-white/5 text-white/90 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white/10"
+                >
+                  Prev
+                </button>
+
+                {getPageWindow(pagination.current_page, pagination.last_page).map((p, idx) =>
+                  p === '…' ? (
+                    <span key={`dots-${idx}`} className="px-2 text-white/50">
+                      …
+                    </span>
+                  ) : (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setCurrentPage(p)}
+                      className={[
+                        'min-w-10 px-3 py-2 rounded-lg border text-sm',
+                        p === pagination.current_page
+                          ? 'border-white/30 bg-white/10 text-white'
+                          : 'border-white/10 bg-white/5 text-white/85 hover:bg-white/10',
+                      ].join(' ')}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+
+                <button
+                  type="button"
+                  disabled={pagination.current_page >= pagination.last_page}
+                  onClick={() => setCurrentPage((p) => Math.min(pagination.last_page, p + 1))}
+                  className="px-3 py-2 rounded-lg border border-white/10 bg-white/5 text-white/90 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-white/10"
+                >
+                  Next
+                </button>
+              </div>
             </div>
           )}
         </div></div>

@@ -1,8 +1,6 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Heart, Eye, ShoppingCart } from "lucide-react";
-import { useCart } from "@/app/e-commerce/CartContext";
-import { fireToast } from "@/lib/globalToast";
+import { Heart, Eye } from "lucide-react";
 
 interface ProductCardProps {
   product: any;
@@ -10,42 +8,9 @@ interface ProductCardProps {
 }
 
 export default function ProductCard({ product, onCartOpen }: ProductCardProps) {
-  const router = useRouter();
-  const { addToCart } = useCart();
-  const [isHovered, setIsHovered] = useState(false);
-  const [isAdding, setIsAdding] = useState(false);
-
-  const navigateToProduct = (productId: string | number) => {
+  const router = useRouter();  const [isHovered, setIsHovered] = useState(false);  const navigateToProduct = (productId: string | number) => {
     router.push(`/e-commerce/product/${productId}`);
   };
-
-  const handleAddToCart = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-
-    if (product.variations.length > 1) {
-      navigateToProduct(product.variations[0].id);
-      return;
-    }
-
-    setIsAdding(true);
-
-    try {
-      const variantId = Number(product?.variations?.[0]?.id);
-      if (!variantId || Number.isNaN(variantId)) {
-        throw new Error('Invalid product variant');
-      }
-
-      await addToCart(variantId, 1);
-      fireToast(`Added to cart: ${product?.baseName || product?.name || 'Item'}`, 'success');
-      setIsAdding(false);
-      onCartOpen?.();
-    } catch (err: any) {
-      console.error('Add to cart failed:', err);
-      setIsAdding(false);
-      fireToast(err?.message || 'Failed to add to cart', 'error');
-      }
-  };
-
   const priceText = (() => {
     try {
       if (product.priceRange?.includes("-")) return `${product.priceRange}৳`;
@@ -109,12 +74,11 @@ export default function ProductCard({ product, onCartOpen }: ProductCardProps) {
           }`}
         >
           <button
-            onClick={handleAddToCart}
-            disabled={isAdding}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:bg-black transition disabled:opacity-60"
+            onClick={() => navigateToProduct(product?.variations?.[0]?.id)}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:bg-black transition"
           >
-            <ShoppingCart className="h-4 w-4" />
-            {isAdding ? "Adding..." : "Add to cart"}
+            <Eye className="h-4 w-4" />
+            View Product
           </button>
         </div>
       </div>

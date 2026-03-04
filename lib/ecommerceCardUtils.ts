@@ -152,7 +152,11 @@ const groupToCardProduct = (group: GroupedProduct): SimpleProduct => {
     name: group.base_name || (main as any).base_name || (main as any).display_name || (main as any).name,
     display_name: group.base_name || (main as any).display_name || (main as any).base_name || (main as any).name,
     base_name: group.base_name || (main as any).base_name || (main as any).display_name || (main as any).name,
-    description: (group as any).description ?? (main as any).description,
+    // IMPORTANT: Don't blindly fall back to `group.description`.
+    // Some APIs incorrectly attach a "group" description to multiple unrelated items,
+    // which makes products with no description show a random description.
+    // If the variant itself has no description, keep it empty.
+    description: (main as any).description || '',
     category: (group as any).category || (main as any).category,
     has_variants: Boolean((group as any).has_variants || allVariants.length > 1),
     total_variants: allVariants.length,

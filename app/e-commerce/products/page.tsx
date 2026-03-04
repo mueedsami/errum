@@ -13,7 +13,7 @@ import catalogService, {
   PaginationMeta,
   SimpleProduct,
 } from '@/services/catalogService';
-import PremiumProductCard from '@/components/ecommerce/ui/PremiumProductCard';
+import SlugStyleProductCard from '@/components/ecommerce/ui/SlugStyleProductCard';
 
 import {
   buildCardProductsFromResponse,
@@ -140,7 +140,7 @@ export default function ProductsPage() {
       return next;
     });
   };
-const handleAddToCart = async (product: SimpleProduct) => {
+  const handleAddToCart = async (product: SimpleProduct) => {
     if (product.has_variants) {
       router.push(`/e-commerce/product/${product.id}`);
       return;
@@ -327,16 +327,12 @@ const handleAddToCart = async (product: SimpleProduct) => {
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6">
               {products.map((product) => (
-                <PremiumProductCard
+                <SlugStyleProductCard
                   key={product.id}
                   product={product}
                   imageErrored={imageErrors.has(Number(product.id))}
                   onImageError={(id) => markImageError(id)}
-                  onOpen={(p) => router.push(`/e-commerce/product/${p.id}`)}
-                  onAddToCart={(p, e) => {
-                    e.stopPropagation();
-                    handleAddToCart(p);
-                  }}
+                  onViewProduct={(id) => router.push(`/e-commerce/product/${id}`)}
                 />
               ))}
             </div>

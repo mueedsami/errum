@@ -197,7 +197,7 @@ export default function CategoryPage() {
   const params = useParams() as CategoryPageParams;
   const router = useRouter();
   const { addToCart } = useCart();
-
+  
   const categorySlug = params.slug || '';
 
   const [products, setProducts] = useState<(Product | SimpleProduct)[]>([]);
@@ -459,7 +459,7 @@ export default function CategoryPage() {
       console.error('Error adding to cart:', err);
     }
   };
-
+  
   const handleProductClick = (productId: number | string) => {
     router.push(`/e-commerce/product/${productId}`);
   };
@@ -633,10 +633,10 @@ export default function CategoryPage() {
                             </div>
 
                             <button
-                              onClick={() => handleAddToCart(product)}
+                              onClick={() => handleProductClick(product.id)}
                               className="w-full bg-neutral-900 text-white py-2 px-4 rounded-lg hover:bg-neutral-800 transition-colors"
                             >
-                              {(product as any).has_variants ? 'Select Variation' : 'Add to Cart'}
+                              View Product
                             </button>
                           </div>
                         </div>

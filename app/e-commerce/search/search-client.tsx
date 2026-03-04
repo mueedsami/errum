@@ -12,8 +12,9 @@ import type { SimpleProduct } from '@/services/catalogService';
 
 /* ─── helpers ─────────────────────────────────────────────────────────────── */
 
+// Use the same placeholder used across the e-commerce UI.
 const getPrimaryImageUrl = (p: SimpleProduct) =>
-  (Array.isArray(p.images) && p.images[0]?.url) || '/placeholder-product.png';
+  (Array.isArray(p.images) && p.images[0]?.url) || '/images/placeholder-product.jpg';
 
 const getCategoryName = (p: SimpleProduct) =>
   typeof p.category === 'object' && p.category ? p.category.name : typeof p.category === 'string' ? p.category : '';
@@ -197,20 +198,20 @@ export default function SearchClient({ initialQuery = '' }: { initialQuery?: str
                     className="group ec-card ec-card-hover overflow-hidden rounded-2xl"
                   >
                     {/* image */}
-                    <div className="relative aspect-[4/5] overflow-hidden bg-neutral-100">
+                    <div className="relative aspect-[4/5] overflow-hidden" style={{ background: 'rgba(255,255,255,0.03)' }}>
                       <img
                         src={imageUrl}
                         alt={product.display_name || product.base_name || product.name}
                         className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
-                        onError={e => { (e.currentTarget as HTMLImageElement).src = '/placeholder-product.png'; }}
+                        onError={e => { (e.currentTarget as HTMLImageElement).src = '/images/placeholder-product.jpg'; }}
                       />
 
                       {/* stock badge */}
                       <span
                         className={`absolute right-2 top-2 rounded-full border px-2 py-1 text-[10px] font-medium shadow-sm ${
                           inStock
-                            ? 'border-green-200 bg-green-50/95 text-green-700'
-                            : 'border-neutral-200 bg-white/90 text-neutral-600'
+                            ? 'border-green-400/30 bg-green-500/15 text-green-300'
+                            : 'border-white/15 bg-white/10 text-white/60'
                         }`}
                       >
                         {inStock ? 'In Stock' : 'Out of Stock'}
@@ -218,14 +219,14 @@ export default function SearchClient({ initialQuery = '' }: { initialQuery?: str
 
                       {/* variants badge */}
                       {hasVariants && (
-                        <span className="absolute left-2 top-2 rounded-full border border-white/70 bg-white/90 px-2 py-1 text-[10px] font-medium text-neutral-800 shadow-sm backdrop-blur">
+                        <span className="absolute left-2 top-2 rounded-full border border-white/15 bg-black/30 px-2 py-1 text-[10px] font-medium text-white/80 shadow-sm backdrop-blur">
                           {product.total_variants ?? ''}+ options
                         </span>
                       )}
 
                       {/* hover CTA */}
                       <div className="absolute inset-x-3 bottom-3 translate-y-2 opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
-                        <div className="w-full rounded-xl border border-neutral-200 bg-white/95 px-3 py-2 text-center text-xs font-semibold text-neutral-900 shadow-sm backdrop-blur">
+                        <div className="w-full rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-center text-xs font-semibold text-white shadow-sm backdrop-blur">
                           {hasVariants ? 'Select options' : 'View product'}
                         </div>
                       </div>
@@ -234,14 +235,14 @@ export default function SearchClient({ initialQuery = '' }: { initialQuery?: str
                     {/* info */}
                     <div className="p-3 sm:p-4">
                       {categoryName && (
-                        <p className="mb-1 line-clamp-1 text-[10px] font-medium uppercase tracking-[0.18em] text-neutral-400">
+                        <p className="mb-1 line-clamp-1 text-[10px] font-medium uppercase tracking-[0.18em] text-white/35">
                           {categoryName}
                         </p>
                       )}
-                      <h3 className="line-clamp-3 min-h-[3.75rem] text-sm font-semibold text-neutral-900 group-hover:text-neutral-700 transition-colors">
+                      <h3 className="line-clamp-3 min-h-[3.75rem] text-sm font-semibold text-white/90 group-hover:text-white transition-colors">
                         {product.display_name || product.base_name || product.name}
                       </h3>
-                      <p className="mt-2 text-base font-bold text-amber-600">{priceText}</p>
+                      <p className="mt-2 text-base font-bold" style={{ color: 'var(--gold)' }}>{priceText}</p>
                     </div>
                   </Link>
                 );

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTheme } from "@/contexts/ThemeContext";
+import { useAuth } from '@/contexts/AuthContext';
 import { useSearchParams } from 'next/navigation';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
@@ -303,6 +304,8 @@ type PathaoArea = { area_id: number; area_name: string };
 
 export default function OrdersDashboard() {
   const { darkMode, setDarkMode } = useTheme();
+  const { isRole } = useAuth();
+  const isBranchManager = isRole('branch-manager');
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -3406,7 +3409,7 @@ export default function OrdersDashboard() {
 
                         <button
                           onClick={handleBulkSendToPathao}
-                          disabled={isSendingBulk}
+                          disabled={isSendingBulk || isRole('branch-manager')}
                           className="flex items-center gap-1 px-2 py-1 bg-black dark:bg-white hover:bg-gray-800 dark:hover:bg-gray-200 text-white dark:text-black rounded transition-colors disabled:opacity-50 text-[10px] font-medium"
                         >
                           <Truck className="w-3 h-3" />
@@ -3916,7 +3919,8 @@ export default function OrdersDashboard() {
               const order = filteredOrders.find((o) => o.id === activeMenu);
               if (order) handleEditOrder(order);
             }}
-            className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700"
+            disabled={isBranchManager}
+            className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700 disabled:opacity-50"
           >
             <Edit className="h-5 w-5 flex-shrink-0" />
             <span>Edit Order</span>
@@ -3929,7 +3933,8 @@ export default function OrdersDashboard() {
                 const order = filteredOrders.find((o) => o.id === activeMenu);
                 if (order) openCourierEditor(order);
               }}
-              className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700"
+              disabled={isBranchManager}
+              className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700 disabled:opacity-50"
             >
               <Truck className="h-5 w-5 flex-shrink-0" />
               <span>Add Order Marker</span>
@@ -4014,7 +4019,7 @@ export default function OrdersDashboard() {
               }}
               disabled={(() => {
                 const order = filteredOrders.find((o) => o.id === activeMenu);
-                return order ? isSingleLoading(order.id, 'pathao') : false;
+                return (order ? isSingleLoading(order.id, 'pathao') : false) || isBranchManager;
               })()}
               className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700 disabled:opacity-50"
             >
@@ -4065,7 +4070,8 @@ export default function OrdersDashboard() {
               const order = filteredOrders.find((o) => o.id === activeMenu);
               if (order) handleCancelOrder(order.id);
             }}
-            className="w-full px-4 py-3 text-left text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-3 rounded-b-lg"
+            disabled={isBranchManager}
+            className="w-full px-4 py-3 text-left text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors flex items-center gap-3 rounded-b-lg disabled:opacity-50"
           >
             <XCircle className="h-5 w-5 flex-shrink-0" />
             <span>Cancel Order</span>

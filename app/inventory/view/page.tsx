@@ -434,7 +434,7 @@ function ViewInventoryPageContent() {
 
       const [categoriesResponse, inventoryResponse] = await Promise.all([
         categoryService.getCategories(),
-        inventoryService.getGlobalInventory(),
+        inventoryService.getGlobalInventory({ skipStoreScope: true }),
       ]);
 
       const categoriesData = (categoriesResponse as any)?.data?.data || (categoriesResponse as any)?.data || [];

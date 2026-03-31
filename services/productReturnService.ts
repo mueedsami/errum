@@ -73,6 +73,7 @@ export interface ProductReturnFilters {
   sort_order?: 'asc' | 'desc';
   per_page?: number;
   page?: number;
+  skipStoreScope?: boolean;
 }
 
 export interface CreateReturnRequest {
@@ -133,6 +134,7 @@ export interface StatisticsFilters {
   from_date?: string;
   to_date?: string;
   store_id?: number;
+  skipStoreScope?: boolean;
 }
 
 // Service Class
@@ -143,7 +145,11 @@ class ProductReturnService {
    * Get all product returns with filters and pagination
    */
   async getAll(filters?: ProductReturnFilters) {
-    const response = await axiosInstance.get(this.basePath, { params: filters });
+    const { skipStoreScope, ...params } = filters || {};
+    const response = await axiosInstance.get(this.basePath, { 
+      params,
+      skipStoreScope
+    } as any);
     return response.data;
   }
 
@@ -240,9 +246,11 @@ class ProductReturnService {
    * Get return statistics
    */
   async getStatistics(filters?: StatisticsFilters) {
+    const { skipStoreScope, ...params } = filters || {};
     const response = await axiosInstance.get(`${this.basePath}/statistics`, {
-      params: filters,
-    });
+      params,
+      skipStoreScope
+    } as any);
     return response.data;
   }
 

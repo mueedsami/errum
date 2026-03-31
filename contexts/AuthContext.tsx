@@ -244,7 +244,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const storeId = user?.store_id ? Number(user.store_id) : undefined;
-  const canSelectStore = isSuperAdmin || hasAnyPermission(['stores.create', 'stores.edit', 'stores.delete']);
+  const canSelectStore = isSuperAdmin || role === 'branch-manager' || hasAnyPermission(['stores.create', 'stores.edit', 'stores.delete']);
   const scopedStoreId = canSelectStore ? undefined : storeId;
 
   const value: AuthContextType = {
@@ -288,11 +288,12 @@ export function useAuth() {
     isRole,
     // Named helpers
     canAccessPOS:              isRole(['super-admin', 'admin', 'branch-manager', 'pos-salesman']),
-    canAccessSocialCommerce:   isRole(['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman']),
+    canAccessSocialCommerce:   isRole(['super-admin', 'admin', 'online-moderator', 'pos-salesman']),
     canAccessInventory:        isRole(['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman']),
     canAccessOrders:           isRole(['super-admin', 'admin', 'branch-manager', 'online-moderator']),
-    canAccessPurchaseOrders:   isRole(['super-admin', 'admin', 'branch-manager', 'online-moderator']),
+    canAccessPurchaseOrders:   isRole(['super-admin', 'admin', 'online-moderator']),
     canAccessPackagePage:      isRole(['super-admin', 'admin', 'branch-manager', 'pos-salesman']),
-    canAccessStoreAssignment:  isRole(['super-admin', 'admin', 'branch-manager', 'online-moderator']),
+    canAccessStoreAssignment:  isRole(['super-admin', 'admin', 'online-moderator']),
+    canAccessDailyCashReport:  isRole(['super-admin', 'admin', 'branch-manager']),
   };
 }

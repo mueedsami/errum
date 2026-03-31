@@ -16,14 +16,14 @@ export const PAGE_ACCESS: Record<string, RoleSlug[]> = {
   '/dashboard/stores-summary': ['super-admin', 'admin'],
 
   // Vendor Management
-  '/vendor': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
-  '/purchase-order': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
+  '/vendor': ['super-admin', 'admin', 'online-moderator'],
+  '/purchase-order': ['super-admin', 'admin', 'online-moderator'],
 
   // Basic Setup
   '/store': ['super-admin', 'admin'],
-  '/store-assingment': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
-  '/category': ['super-admin', 'admin', 'branch-manager'],
-  '/gallery': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
+  '/store-assingment': ['super-admin', 'admin', 'online-moderator'],
+  '/category': ['super-admin', 'admin'],
+  '/gallery': ['super-admin', 'admin'],
 
   // Products
   '/product/field': ['super-admin', 'admin', 'online-moderator'],
@@ -37,14 +37,14 @@ export const PAGE_ACCESS: Record<string, RoleSlug[]> = {
   '/inventory/view': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman'],
   '/inventory/batch-price-update': ['super-admin', 'admin', 'branch-manager'],
   '/inventory/outlet-stock': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman', 'employee'],
-  '/inventory/reports': ['super-admin', 'admin', 'branch-manager'],
+  '/inventory/reports': ['super-admin', 'admin'],
 
   // Sales & Orders
   '/pos': ['super-admin', 'admin', 'branch-manager', 'pos-salesman'],
   '/purchase-history': ['super-admin', 'admin', 'branch-manager'],
-  '/social-commerce': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
+  '/social-commerce': ['super-admin', 'admin', 'online-moderator'],
   '/social-commerce/package': ['super-admin', 'admin', 'branch-manager', 'pos-salesman'],
-  '/social-commerce/amount-details': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman'],
+  '/social-commerce/amount-details': ['super-admin', 'admin', 'online-moderator'],
   '/orders': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
   '/preorders': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
   '/returns': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman'],
@@ -60,14 +60,11 @@ export const PAGE_ACCESS: Record<string, RoleSlug[]> = {
   '/extra': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman'],
   '/lookup': ['super-admin', 'admin', 'branch-manager', 'pos-salesman', 'employee'],
   '/activity-logs': ['super-admin', 'admin'],
-  '/transaction': ['super-admin', 'admin', 'branch-manager'],
-  '/accounting': ['super-admin', 'admin', 'branch-manager'],
-  '/employees': ['super-admin', 'admin', 'branch-manager'],
+  '/transaction': ['super-admin', 'admin'],
+  '/accounting': ['super-admin', 'admin'],
+  '/employees': ['super-admin', 'admin'],
   '/settings': ['super-admin', 'admin'],
 
-  // Access Control
-  '/roles': ['super-admin', 'admin'],
-  '/permissions': ['super-admin', 'admin'],
 };
 
 /**

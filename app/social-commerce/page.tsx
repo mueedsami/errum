@@ -544,6 +544,7 @@ export default function SocialCommercePage() {
       return;
     }
 
+    let active = true;
     const delayDebounce = setTimeout(async () => {
       try {
         setIsLoadingData(true);
@@ -556,7 +557,7 @@ export default function SocialCommercePage() {
           group_by_sku: false,
         });
 
-        if (response && response.products) {
+        if (active && response && response.products) {
           const results: ProductSearchResult[] = response.products.map(product => {
             const branchMap = new Map<number, { store_name: string, quantity: number }>();
 
@@ -613,11 +614,14 @@ export default function SocialCommercePage() {
         console.error('❌ Search failed:', error);
         fireToast('Search failed. Please try again.', 'error');
       } finally {
-        setIsLoadingData(false);
+        if (active) setIsLoadingData(false);
       }
-    }, 500);
+    }, 1000);
 
-    return () => clearTimeout(delayDebounce);
+    return () => {
+      active = false;
+      clearTimeout(delayDebounce);
+    };
   }, [searchQuery, stores]);
 
   useEffect(() => {
@@ -1108,11 +1112,11 @@ export default function SocialCommercePage() {
                     <div className="flex gap-2 mb-4">
                       <input
                         type="text"
-                        placeholder={isLoadingData ? 'Loading inventory...' : 'Search product name or SKU...'}
+                        placeholder="Search product name or SKU..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        disabled={isLoadingData}
-                        className="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={false} // Keep input enabled even during loading so as not to lose focus
+                        className="flex-1 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400"
                       />
                       <button
                         disabled={isLoadingData}

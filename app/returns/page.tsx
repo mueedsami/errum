@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useTheme } from "@/contexts/ThemeContext";
+import { useAuth } from '@/contexts/AuthContext';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import productReturnService, {
@@ -48,7 +49,7 @@ const STATUS_CONFIG: Record<ReturnStatus, { label: string; bg: string; text: str
   pending:    { label: 'Pending',    bg: 'bg-amber-100 dark:bg-amber-900/20',  text: 'text-amber-700 dark:text-amber-400',  icon: Clock },
   approved:   { label: 'Approved',   bg: 'bg-blue-100 dark:bg-blue-900/20',    text: 'text-blue-700 dark:text-blue-400',    icon: CheckCircle },
   rejected:   { label: 'Rejected',   bg: 'bg-red-100 dark:bg-red-900/20',      text: 'text-red-700 dark:text-red-400',      icon: XCircle },
-  processing: { label: 'Processing', bg: 'bg-purple-100 dark:bg-purple-900/20',text: 'text-purple-700 dark:text-purple-400',icon: RefreshCcw },
+  processed: { label: 'Processing', bg: 'bg-purple-100 dark:bg-purple-900/20',text: 'text-purple-700 dark:text-purple-400',icon: RefreshCcw },
   completed:  { label: 'Completed',  bg: 'bg-green-100 dark:bg-green-900/20',  text: 'text-green-700 dark:text-green-400',  icon: CheckCircle },
   refunded:   { label: 'Refunded',   bg: 'bg-teal-100 dark:bg-teal-900/20',    text: 'text-teal-700 dark:text-teal-400',    icon: DollarSign },
 };
@@ -608,7 +609,10 @@ function DetailModal({ ret, onClose, onAction }: DetailModalProps) {
 // ─── Main page ────────────────────────────────────────────────
 export default function ReturnsPage() {
   const { darkMode, setDarkMode } = useTheme();
+  const { role } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  
+  const isBranchManager = role === 'branch-manager';
 
   const [returns, setReturns] = useState<ProductReturn[]>([]);
   const [loading, setLoading] = useState(false);
@@ -641,6 +645,7 @@ export default function ReturnsPage() {
         ...(search ? { search } : {}),
         ...(fromDate ? { from_date: fromDate } : {}),
         ...(toDate ? { to_date: toDate } : {}),
+        skipStoreScope: isBranchManager
       };
       const res = await productReturnService.getAll(filters);
       const data = res?.data?.data || res?.data || [];
@@ -654,7 +659,7 @@ export default function ReturnsPage() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    productReturnService.getStatistics().then(r => setStats(r?.data || null)).catch(() => {});
+    productReturnService.getStatistics({ skipStoreScope: isBranchManager }).then(r => setStats(r?.data || null)).catch(() => {});
     storeService.getStores({ per_page: 100, is_active: true }).then((r: any) => {
       const list = Array.isArray(r) ? r : Array.isArray(r?.data) ? r.data : Array.isArray(r?.data?.data) ? r.data.data : [];
       setStores(list);

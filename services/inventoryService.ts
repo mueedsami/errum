@@ -129,6 +129,7 @@ export interface GlobalInventoryParams {
   product_id?: number;
   store_id?: number;
   low_stock?: boolean;
+  skipStoreScope?: boolean;
 }
 
 export interface SearchProductParams {
@@ -148,9 +149,10 @@ const inventoryService = {
    * Get global inventory overview across all stores
    */
   getGlobalInventory: async (params?: GlobalInventoryParams) => {
+    const { skipStoreScope, ...rest } = params || {};
     const response = await axiosInstance.get<ApiResponse<GlobalInventoryItem[]>>(
       '/catalog/inventory/global',
-      { params }
+      { params: rest, skipStoreScope }
     );
     return response.data;
   },

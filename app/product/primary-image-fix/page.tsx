@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 60;
 
 function imageUrlFor(image: Partial<ProductImage> | null | undefined): string {
   if (!image) return '/placeholder-product.svg';
@@ -176,8 +176,43 @@ export default function PrimaryImageFixPage() {
     [rows]
   );
 
-  const handlePick = (productId: number, imageId: number) => {
-    setRows((prev) => prev.map((row) => (row.product.id === productId ? { ...row, selectedImageId: imageId } : row)));
+  const handlePickAndSave = async (productId: number, imageId: number) => {
+    const row = rows.find((r) => r.product.id === productId);
+    if (!row || imageId === row.originalPrimaryId || row.saving) return;
+
+    // Optimistically update selection and show loading state
+    setRows((prev) =>
+      prev.map((r) =>
+        r.product.id === productId ? { ...r, selectedImageId: imageId, saving: true } : r
+      )
+    );
+
+    try {
+      await productImageService.makePrimary(imageId);
+      // Refresh only this product row to sync status
+      const fetchedImages = sortImages(await productImageService.getProductImages(productId));
+      const currentPrimary = fetchedImages.find((img) => img.is_primary) || null;
+
+      setRows((prev) =>
+        prev.map((r) =>
+          r.product.id === productId
+            ? {
+                ...r,
+                images: fetchedImages,
+                selectedImageId: currentPrimary?.id ?? (fetchedImages.length > 0 ? fetchedImages[0].id : null),
+                originalPrimaryId: currentPrimary?.id ?? null,
+                loadingImages: false,
+                saving: false,
+              }
+            : r
+        )
+      );
+      setToast({ message: `Primary image updated`, type: 'success' });
+    } catch (error: any) {
+      console.error('Failed to save primary image:', error);
+      setRows((prev) => prev.map((r) => (r.product.id === productId ? { ...r, saving: false } : r)));
+      setToast({ message: error?.message || 'Failed to update primary image.', type: 'error' });
+    }
   };
 
   const refreshOne = async (productId: number) => {
@@ -207,40 +242,7 @@ export default function PrimaryImageFixPage() {
     }
   };
 
-  const saveOne = async (productId: number) => {
-    const row = rows.find((item) => item.product.id === productId);
-    if (!row?.selectedImageId || row.selectedImageId === row.originalPrimaryId) return;
 
-    setRows((prev) => prev.map((item) => (item.product.id === productId ? { ...item, saving: true } : item)));
-    try {
-      await productImageService.makePrimary(row.selectedImageId);
-      await refreshOne(productId);
-      setToast({ message: `Updated primary image for ${row.product.name}`, type: 'success' });
-    } catch (error: any) {
-      console.error('Failed to save primary image:', error);
-      setRows((prev) => prev.map((item) => (item.product.id === productId ? { ...item, saving: false } : item)));
-      setToast({ message: error?.message || 'Failed to update primary image.', type: 'error' });
-    }
-  };
-
-  const saveAllChanged = async () => {
-    const changedRows = rows.filter((row) => row.selectedImageId && row.selectedImageId !== row.originalPrimaryId);
-    if (!changedRows.length) return;
-
-    setToast({ message: `Saving ${changedRows.length} updates...`, type: 'warning' });
-    
-    for (const row of changedRows) {
-      try {
-        await productImageService.makePrimary(row.selectedImageId!);
-        // We delay refresh until end or do it per row
-      } catch (err) {
-        console.error(`Failed to save ${row.product.id}`, err);
-      }
-    }
-    
-    setRefreshTick(v => v + 1);
-    setToast({ message: 'All changes processed.', type: 'success' });
-  };
 
   if (!isMounted) return null;
 
@@ -283,14 +285,6 @@ export default function PrimaryImageFixPage() {
                   title="Refresh products"
                 >
                   <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
-                </button>
-                <button
-                  onClick={saveAllChanged}
-                  disabled={dirtyCount === 0 || loading}
-                  className="flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-semibold shadow-lg shadow-blue-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:grayscale disabled:pointer-events-none"
-                >
-                  <Save className="w-5 h-5" />
-                  <span>Save All Changes ({dirtyCount})</span>
                 </button>
               </div>
             </div>
@@ -372,28 +366,24 @@ export default function PrimaryImageFixPage() {
                       </div>
 
                       <div className="flex items-center gap-3">
-                        {isDirty ? (
-                          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 text-xs font-bold ring-1 ring-amber-200/50 dark:ring-amber-800/50">
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-                            Unsaved Changes
+                        {row.saving ? (
+                          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 text-xs font-bold ring-1 ring-blue-200/50 dark:ring-blue-800/50">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            Auto-Saving...
+                          </div>
+                        ) : isDirty ? (
+                          <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 text-xs font-bold ring-1 ring-blue-200/50 dark:ring-blue-800/50">
+                            <Save className="w-3.5 h-3.5" />
+                            Primary Image Changed
                           </div>
                         ) : (
                           <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 text-xs font-bold">
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            Primary Sync Correct
+                            Primary Correct
                           </div>
                         )}
                         
                         <div className="h-4 w-[1px] bg-gray-200 dark:bg-gray-700 mx-1"></div>
-                        
-                        <button
-                          onClick={() => saveOne(row.product.id)}
-                          disabled={!isDirty || row.saving || row.loadingImages}
-                          className="flex items-center gap-2 px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg text-xs font-bold disabled:opacity-30 transition-all hover:scale-105 active:scale-95 shadow-lg shadow-black/5"
-                        >
-                          {row.saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                          Update Row
-                        </button>
                       </div>
                     </div>
 
@@ -425,8 +415,9 @@ export default function PrimaryImageFixPage() {
                             return (
                               <button
                                 key={image.id}
-                                onClick={() => handlePick(row.product.id, image.id)}
-                                className={`relative group/img flex flex-col p-2.5 rounded-2xl border-2 text-left transition-all duration-300 ${
+                                onClick={() => handlePickAndSave(row.product.id, image.id)}
+                                disabled={row.saving || row.loadingImages}
+                                className={`relative group/img flex flex-col p-2.5 rounded-2xl border-2 text-left transition-all duration-300 disabled:opacity-70 ${
                                   isSelected 
                                     ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-500/10 ring-4 ring-blue-500/10 shadow-md' 
                                     : 'border-white dark:border-gray-800 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 shadow-sm'

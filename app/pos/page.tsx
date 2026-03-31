@@ -81,7 +81,7 @@ export interface ExtendedCartItem extends CartItem {
 }
 
 export default function POSPage() {
-  const { user, scopedStoreId, canSelectStore } = useAuth();
+  const { user, role, scopedStoreId, canSelectStore, canAccessDailyCashReport } = useAuth();
   // UI State
   const { darkMode, setDarkMode } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -1466,13 +1466,15 @@ export default function POSPage() {
                   )}
 
                   {/* ✅ Daily Cash Report Button */}
-                  <button
-                    onClick={() => setShowDailyReportModal(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all text-sm font-medium shadow-sm hover:shadow-md h-10"
-                  >
-                    <Download className="w-4 h-4" />
-                    Daily Cash Report
-                  </button>
+                  {canAccessDailyCashReport && (
+                    <button
+                      onClick={() => setShowDailyReportModal(true)}
+                      className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all text-sm font-medium shadow-sm hover:shadow-md h-10"
+                    >
+                      <Download className="w-4 h-4" />
+                      Daily Cash Report
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1526,7 +1528,7 @@ export default function POSPage() {
                   <select
                     value={selectedOutlet}
                     onChange={(e) => setSelectedOutlet(e.target.value)}
-                      disabled={!canSelectStore}
+                      disabled={!canSelectStore || role === 'branch-manager'}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   >
                     <option value="">Choose an Outlet</option>

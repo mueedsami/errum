@@ -7,14 +7,11 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import StoreCard from '@/components/StoreCard';
 import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
-import { batchService, storeService, type Batch, type Store } from '@/services';
+import { storeService } from '@/services';
+import type { Store } from '@/services/storeService';
+import type { Batch } from '@/services/batchService';
 
-interface StoreCardData {
-  id: string;
-  name: string;
-  location: string;
-  type: 'Warehouse' | 'Store';
-  pathao_key: string;
+interface StoreCardData extends Store {
   revenue: number;
   revenueChange: number;
   products: number;
@@ -83,10 +80,10 @@ function ManageStockPageContent() {
     const storeId = localStorage.getItem('storeId') || '';
     setUserRole(role);
     setUserStoreId(storeId);
-    fetchData(role, storeId);
+    fetchData();
   }, []);
 
-  const fetchData = async (role: string, storeId: string) => {
+  const fetchData = async () => {
     setLoading(true);
     setError('');
 
@@ -94,7 +91,7 @@ function ManageStockPageContent() {
       // Fetch stores
       try {
         console.log('🏪 Fetching stores...');
-        const storesResponse = await storeService.getStores({ is_active: true });
+        const storesResponse = await storeService.getStores({ is_active: true }, { skipStoreScope: true });
         
         console.log('📦 Stores response:', storesResponse);
 
@@ -113,24 +110,14 @@ function ManageStockPageContent() {
 
         // Map stores to StoreCardData
         const mappedStores = storesArray.map((store: Store): StoreCardData => ({
-          id: String(store.id),
-          name: store.name,
-          location: store.address || '',
-          type: store.is_warehouse ? 'Warehouse' : 'Store',
-          pathao_key: store.pathao_key || '',
+          ...store,
           revenue: 0,
           revenueChange: 0,
           products: 0,
           orders: 0,
         }));
 
-        // Filter stores based on user role
-        if (role === 'store_manager' && storeId) {
-          const userStore = mappedStores.find((s) => s.id === String(storeId));
-          setStores(userStore ? [userStore] : []);
-        } else {
-          setStores(mappedStores);
-        }
+        setStores(mappedStores);
       } catch (storeError: any) {
         console.error('❌ Error fetching stores:', storeError);
         const errorMsg = storeError?.response?.data?.message || 'Failed to load stores.';
@@ -150,7 +137,7 @@ function ManageStockPageContent() {
     router.push(`/inventory/admit-batch?batchId=${batchId}`);
   };
 
-  const handleManageStock = (storeId: string) => {
+  const handleManageStock = (storeId: number) => {
     const qs = searchParams.toString();
     const returnTo = qs ? `${pathname}?${qs}` : pathname;
     router.push(`/inventory/outlet-stock?storeId=${storeId}&returnTo=${encodeURIComponent(returnTo)}`);
@@ -159,7 +146,7 @@ function ManageStockPageContent() {
   const filteredStores = stores.filter(
     (store) =>
       store.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (store.location && store.location.toLowerCase().includes(searchTerm.toLowerCase()))
+      (store.address && store.address.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   // Loading State

@@ -16,7 +16,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from "@/contexts/ThemeContext";
 import storeService from '@/services/storeService';
 
-interface OrderItem {
+interface PurchaseHistoryOrderItem {
   id: number;
   product_id: number;
   product_name: string;
@@ -33,7 +33,7 @@ interface OrderItem {
   total_price: string;
 }
 
-interface Order {
+interface PurchaseHistoryOrder {
   id: number;
   order_number: string;
   order_type: string;
@@ -67,7 +67,7 @@ interface Order {
   is_installment: boolean;
   order_date: string;
   created_at: string;
-  items?: OrderItem[];
+  items?: PurchaseHistoryOrderItem[];
   payments?: Array<{
     id: number;
     amount: string;
@@ -89,7 +89,7 @@ export default function PurchaseHistoryPage() {
   const { user, scopedStoreId, canSelectStore } = useAuth();
   const { darkMode, setDarkMode } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
   const [stores, setStores] = useState<Store[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStore, setSelectedStore] = useState('');
@@ -108,7 +108,7 @@ export default function PurchaseHistoryPage() {
   // Modal states
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [showExchangeModal, setShowExchangeModal] = useState(false);
-  const [selectedOrderForAction, setSelectedOrderForAction] = useState<Order | null>(null);
+  const [selectedOrderForAction, setSelectedOrderForAction] = useState<any | null>(null);
 
   useEffect(() => {
     const roleSlug = user?.role?.slug || '';
@@ -116,8 +116,10 @@ export default function PurchaseHistoryPage() {
     setUserRole(roleSlug);
     setUserStoreId(storeId);
 
-    if (storeId && !canSelectStore) {
-      setSelectedStore(storeId);
+    if (storeId && (roleSlug === 'branch-manager' || !canSelectStore)) {
+      if (selectedStore === '') {
+        setSelectedStore(storeId);
+      }
     }
 
     fetchOrders();
@@ -234,7 +236,7 @@ export default function PurchaseHistoryPage() {
     }
   };
 
-  const handleReturnClick = async (order: Order) => {
+  const handleReturn = async (order: PurchaseHistoryOrder) => {
     setActiveMenu(null);
     
     if (!order.items || order.items.length === 0) {
@@ -253,7 +255,7 @@ export default function PurchaseHistoryPage() {
     setShowReturnModal(true);
   };
 
-  const handleExchangeClick = async (order: Order) => {
+  const handleExchange = async (order: PurchaseHistoryOrder) => {
     setActiveMenu(null);
     
     if (!order.items || order.items.length === 0) {
@@ -272,7 +274,7 @@ export default function PurchaseHistoryPage() {
     setShowExchangeModal(true);
   };
 
-  const handlePrintReceipt = async (order: Order) => {
+  const handlePrint = async (order: PurchaseHistoryOrder) => {
     setActiveMenu(null);
 
     try {
@@ -375,7 +377,7 @@ export default function PurchaseHistoryPage() {
       }
 
       console.log('🔄 Refreshing order list...');
-      await fetchOrders(userRole, userStoreId);
+      await fetchOrders();
       
       alert('✅ Return processed successfully!');
       setShowReturnModal(false);
@@ -526,7 +528,7 @@ export default function PurchaseHistoryPage() {
       console.log('✅ New order completed - Inventory reduced for new products');
 
       console.log('\n🔄 STEP 6: Refreshing order list...');
-      await fetchOrders(userRole, userStoreId);
+      await fetchOrders();
       
       console.log('\n✅ ========================================');
       console.log('✅ EXCHANGE COMPLETED SUCCESSFULLY!');
@@ -685,7 +687,7 @@ export default function PurchaseHistoryPage() {
                     />
                   </div>
                   
-                  {!canSelectStore && scopedStoreId ? (
+                  {!canSelectStore && userRole !== 'branch-manager' && scopedStoreId ? (
                     <input
                       type="text"
                       readOnly
@@ -839,7 +841,7 @@ export default function PurchaseHistoryPage() {
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handlePrintReceipt(order);
+                                       handlePrint(order);
                                     }}
                                     className="w-full px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 rounded-t-lg transition-colors"
                                   >
@@ -851,7 +853,7 @@ export default function PurchaseHistoryPage() {
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleExchangeClick(order);
+                                       handleExchange(order);
                                     }}
                                     className="w-full px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-3 transition-colors"
                                   >
@@ -863,7 +865,7 @@ export default function PurchaseHistoryPage() {
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleReturnClick(order);
+                                       handleReturn(order);
                                     }}
                                     className="w-full px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-3 rounded-b-lg transition-colors"
                                   >
@@ -939,7 +941,7 @@ export default function PurchaseHistoryPage() {
                                       </tr>
                                     </thead>
                                     <tbody className="bg-white dark:bg-gray-800">
-                                      {order.items.map((item) => (
+                                      {order.items?.map((item: any, itemIndex: number) => (
                                         <tr key={item.id} className="border-t border-gray-200 dark:border-gray-700">
                                           <td className="px-3 py-2 text-gray-900 dark:text-white">
                                             {item.product_name}
@@ -1015,7 +1017,7 @@ export default function PurchaseHistoryPage() {
                                   {order.payments && order.payments.length > 0 && (
                                     <div className="pt-2 mt-2 border-t border-gray-200 dark:border-gray-700 space-y-2">
                                       <div className="text-xs font-medium text-gray-700 dark:text-gray-300">Payment History:</div>
-                                      {order.payments.map((payment) => (
+                                      {order.payments?.map((payment: any, payIndex: number) => (
                                         <div key={payment.id} className="flex justify-between text-xs">
                                           <span className="text-gray-600 dark:text-gray-400">
                                             {payment.payment_method} ({payment.payment_type})

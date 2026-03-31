@@ -9,7 +9,7 @@ export default function SocialCommerceLayout({
   children: React.ReactNode;
 }) {
   return (
-    <RouteGuard allowedRoles={PAGE_ACCESS['/social-commerce']}>
+    <RouteGuard allowedRoles={['super-admin', 'admin', 'online-moderator', 'branch-manager', 'pos-salesman']}>
       {children}
     </RouteGuard>
   );

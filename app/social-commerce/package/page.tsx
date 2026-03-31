@@ -289,10 +289,17 @@ export default function WarehouseFulfillmentPage() {
       let allOrders: any[] = [];
 
       if (isRole('pos-salesman')) {
-        // POS Salesman sees local/walking/video orders
-        const response = await orderService.getPendingFulfillment({ 
-          per_page: 100, 
-          order_types: ['pos', 'video-shopping', 'walking-customer'] 
+        // POS Salesman sees pos/ecommerce/social-commerce
+        const response = await orderService.getPendingFulfillment({
+          per_page: 100,
+          order_types: ['counter', 'social_commerce', 'ecommerce']
+        });
+        allOrders = response.data || [];
+      } else if (isRole('branch-manager')) {
+        // Branch Manager: social_commerce for their branch only (store_id auto-injected by interceptor)
+        const response = await orderService.getPendingFulfillment({
+          per_page: 100,
+          order_type: 'social_commerce',
         });
         allOrders = response.data || [];
       } else {
@@ -981,14 +988,19 @@ export default function WarehouseFulfillmentPage() {
 
                   <button
                     onClick={handleFulfillOrder}
-                    disabled={isProcessing || progress.percentage !== 100}
-                    className={`w-full mt-6 px-6 py-4 rounded-lg font-semibold text-white transition-all flex items-center justify-center gap-2 ${progress.percentage === 100 && !isProcessing ? 'bg-green-600 hover:bg-green-700 shadow-lg' : 'bg-gray-400 cursor-not-allowed'
+                    disabled={isProcessing || progress.percentage !== 100 || isRole('branch-manager')}
+                    className={`w-full mt-6 px-6 py-4 rounded-lg font-semibold text-white transition-all flex items-center justify-center gap-2 ${progress.percentage === 100 && !isProcessing && !isRole('branch-manager') ? 'bg-green-600 hover:bg-green-700 shadow-lg' : 'bg-gray-400 cursor-not-allowed'
                       }`}
                   >
                     {isProcessing ? (
                       <>
                         <Loader className="h-5 w-5 animate-spin" />
                         Processing Order...
+                      </>
+                    ) : isRole('branch-manager') ? (
+                      <>
+                        <AlertTriangle className="h-5 w-5" />
+                        View Only Mode
                       </>
                     ) : progress.percentage === 100 ? (
                       <>

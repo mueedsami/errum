@@ -141,6 +141,7 @@ export interface AvailableCourier {
 
 export interface OrderFilters {
   order_type?: string;
+  order_types?: string[];
   status?: string;
   payment_status?: string;
   fulfillment_status?: string;
@@ -437,6 +438,7 @@ const orderService = {
     store_id?: number;
     per_page?: number;
     order_type?: 'social_commerce' | 'ecommerce';
+    order_types?: string[];
   }): Promise<{
     data: Order[];
     total: number;

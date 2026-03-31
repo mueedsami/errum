@@ -1,5 +1,5 @@
 // lib/socialInvoiceHtml.ts
-// Social commerce invoice (A5 / Half A4), corporate style.
+// Social commerce invoice (A5 / Half A4), cleaner print-first layout.
 // - Includes Delivery Fee
 // - No VAT row
 // - Invoice No = part after 'ORD' prefix from Order No
@@ -43,42 +43,57 @@ function wrapHtml(title: string, inner: string, opts?: { embed?: boolean }) {
   <title>${escapeHtml(title)}</title>
   <style>
     @page { size: A5; margin: 10mm; }
-    body { font-family: Arial, Helvetica, sans-serif; color:#111; }
-    .row { display:flex; gap: 12px; }
-    .col { flex: 1; }
-    .brand { font-size: 22px; font-weight: 800; margin:0; letter-spacing: 0.3px; }
-    .brandSub { font-size: 12px; margin-top: 2px; }
-    .muted { color:#555; }
-    .box { border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px; }
-    .metaGrid { display:grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; font-size: 12px; }
-    .metaGrid .k { color:#555; }
-    .metaGrid .v { text-align:right; font-weight: 600; }
-    .sectionTitle { font-size: 12px; font-weight: 700; margin: 0 0 6px; }
-    .addr { font-size: 12px; line-height: 1.35; }
-    table { width:100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
-    th { text-align:left; padding: 8px 6px; border-bottom: 1px solid #111; }
-    td { padding: 7px 6px; border-bottom: 1px solid #eee; vertical-align: top; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: #fff; color:#111827; }
+    body { font-family: Inter, Arial, Helvetica, sans-serif; }
+    .page { padding: 0; }
+    .top { display:flex; justify-content:space-between; gap: 14px; align-items:flex-start; }
+    .invoiceTitle { font-size: 26px; font-weight: 900; letter-spacing: 0.08em; margin: 0; }
+    .subtle { color:#6b7280; }
+    .tag { display:inline-flex; align-items:center; min-height: 28px; padding: 6px 12px; border-radius: 999px; border: 1px solid #d1d5db; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+    .company {
+      border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 14px; text-align: right; min-width: 235px;
+      background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+    }
+    .company .name { font-size: 20px; font-weight: 900; margin: 0; }
+    .company .line { margin-top: 4px; font-size: 11px; color:#4b5563; line-height: 1.4; }
+    .spacer { height: 12px; }
+    .row { display:grid; grid-template-columns: 1.15fr 0.85fr; gap: 12px; }
+    .box { border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px; }
+    .sectionTitle { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; color:#6b7280; margin: 0 0 8px; }
+    .billName { font-size: 18px; font-weight: 800; margin-bottom: 4px; }
+    .addr { font-size: 12px; line-height: 1.45; color:#111827; }
+    .metaGrid { display:grid; grid-template-columns: 1fr auto; gap: 8px 12px; font-size: 12px; }
+    .metaGrid .k { color:#6b7280; }
+    .metaGrid .v { text-align:right; font-weight: 700; }
+    table { width:100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
+    th { text-align:left; padding: 9px 8px; border-bottom: 1px solid #111827; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    td { padding: 9px 8px; border-bottom: 1px solid #eef2f7; vertical-align: top; }
     .right { text-align:right; }
-    .totals { width: 60%; margin-left: auto; margin-top: 10px; }
-    .totals td { border: none; padding: 4px 6px; }
-    .totals tr:last-child td { border-top: 1px solid #111; padding-top: 8px; }
-    .footer { margin-top: 14px; font-size: 11px; color:#444; text-align:center; }
+    .itemTitle { font-weight: 700; }
+    .itemSub { font-size: 11px; color:#6b7280; margin-top: 2px; }
+    .summaryArea { display:grid; grid-template-columns: 1fr 240px; gap: 14px; align-items:start; margin-top: 12px; }
+    .paymentCard { border: 1px dashed #cbd5e1; border-radius: 14px; padding: 12px; background: #f8fafc; }
+    .paymentCard .big { font-size: 18px; font-weight: 900; margin-top: 4px; }
+    .totals { width:100%; border-collapse: collapse; }
+    .totals td { border: none; padding: 5px 0; font-size: 12px; }
+    .totals tr:last-child td { border-top: 1px solid #111827; padding-top: 8px; font-weight: 800; }
+    .footer { margin-top: 16px; font-size: 10.5px; color:#6b7280; text-align:center; }
     ${opts?.embed ? 'html,body{height:100%;}' : ''}
   </style>
 </head>
 <body>
-${inner}
+  <div class="page">${inner}</div>
 </body>
 </html>`;
 }
 
 function companyInfoBlock() {
   return `
-    <div class="center">
-      <div class="h">Errum BD</div>
-      <div class="small muted">Errum BD</div>
-      <div class="tiny muted"> Level 03, Lift 2, Haji Kujrot Ali Mollah Super Market, Dhaka 1216</div>
-      <div class="tiny muted">Mobile: 01942-565664</div>
+    <div class="company">
+      <div class="name">Errum BD</div>
+      <div class="line">Level 03, Lift 2, Haji Kujrot Ali Mollah Super Market, Dhaka 1216</div>
+      <div class="line">Mobile: 01942-565664</div>
     </div>
   `;
 }
@@ -91,54 +106,63 @@ function render(order: any) {
 
   const sub = Number(r.totals?.subtotal ?? 0);
   const disc = Number(r.totals?.discount ?? 0);
-  const delivery = Number(r.totals?.shipping ?? 0); // Delivery Fee
-  // VAT is intentionally ignored
+  const delivery = Number(r.totals?.shipping ?? 0);
   const grand = Number(r.totals?.total ?? Math.max(0, sub - disc + delivery));
+  const due = Number(r.totals?.due ?? 0);
+  const paid = Number(r.totals?.paid ?? 0);
 
   const billToLines = [
-    r.customerName ? `<b>${escapeHtml(r.customerName)}</b>` : '<b>Customer</b>',
+    r.customerName ? `<div class="billName">${escapeHtml(r.customerName)}</div>` : '<div class="billName">Customer</div>',
     r.customerPhone ? `Phone: ${escapeHtml(r.customerPhone)}` : '',
     ...(r.customerAddressLines || []).map((x: string) => escapeHtml(x)),
   ].filter(Boolean);
 
   const items = (r.items || []).map((it: any, i: number) => {
-    const desc = [it.name, it.variant].filter(Boolean).join(' - ');
+    const desc = escapeHtml(it.name || 'Item');
+    const subline = it.variant ? `<div class="itemSub">${escapeHtml(it.variant)}</div>` : '';
     return `
       <tr>
-        <td class="right">${i + 1}</td>
-        <td>${escapeHtml(desc)}</td>
-        <td class="right">${escapeHtml(it.qty)}</td>
-        <td class="right">${escapeHtml(money(it.unitPrice))}</td>
-        <td class="right">${escapeHtml(money(it.lineTotal))}</td>
+        <td class="right" style="width:38px;">${i + 1}</td>
+        <td>
+          <div class="itemTitle">${desc}</div>
+          ${subline}
+        </td>
+        <td class="right" style="width:56px;">${escapeHtml(it.qty)}</td>
+        <td class="right" style="width:88px;">${escapeHtml(money(it.unitPrice))}</td>
+        <td class="right" style="width:96px;">${escapeHtml(money(it.lineTotal))}</td>
       </tr>
     `;
   }).join('');
 
+  const paymentLabel = due > 0 ? (paid > 0 ? 'Partial Advance' : 'Cash on Delivery') : 'Fully Paid';
+  const paymentAmount = due > 0 ? due : grand;
+
   return `
-    <div class="row">
-      <div class="col">
-        <h1 class="brand">INVOICE</h1>
-        <div class="brandSub muted">Social Commerce Order</div>
+    <div class="top">
+      <div>
+        <h1 class="invoiceTitle">INVOICE</h1>
+        <div class="subtle" style="margin-top:4px; font-size:12px;">Social Commerce Order Document</div>
+        <div style="margin-top:10px;"><span class="tag">${escapeHtml(paymentLabel)}</span></div>
       </div>
-      <div class="col">
-        ${companyInfoBlock()}
-      </div>
+      ${companyInfoBlock()}
     </div>
 
-    <div style="height:10px;"></div>
+    <div class="spacer"></div>
 
     <div class="row">
-      <div class="col box">
+      <div class="box">
         <div class="sectionTitle">Bill To</div>
         <div class="addr">${billToLines.join('<br/>')}</div>
       </div>
 
-      <div class="col box">
+      <div class="box">
         <div class="sectionTitle">Invoice Details</div>
         <div class="metaGrid">
           <div class="k">Invoice No</div><div class="v">${escapeHtml(invNo)}</div>
           <div class="k">Order No</div><div class="v">${escapeHtml(orderNo)}</div>
           <div class="k">Date</div><div class="v">${escapeHtml(date)}</div>
+          ${r.orderTypeLabel || r.orderType ? `<div class="k">Order Type</div><div class="v">${escapeHtml(r.orderTypeLabel || r.orderType || '')}</div>` : ''}
+          ${r.paymentStatus ? `<div class="k">Payment Status</div><div class="v">${escapeHtml(r.paymentStatus)}</div>` : ''}
           ${r.storeName ? `<div class="k">Store</div><div class="v">${escapeHtml(r.storeName)}</div>` : ''}
         </div>
       </div>
@@ -147,26 +171,38 @@ function render(order: any) {
     <table>
       <thead>
         <tr>
-          <th style="width:36px;" class="right">#</th>
+          <th class="right">#</th>
           <th>Item</th>
-          <th style="width:60px;" class="right">Qty</th>
-          <th style="width:90px;" class="right">Unit</th>
-          <th style="width:100px;" class="right">Amount</th>
+          <th class="right">Qty</th>
+          <th class="right">Unit</th>
+          <th class="right">Amount</th>
         </tr>
       </thead>
       <tbody>
-        ${items || `<tr><td colspan="5" class="muted">No items</td></tr>`}
+        ${items || `<tr><td colspan="5" class="subtle">No items</td></tr>`}
       </tbody>
     </table>
 
-    <table class="totals">
-      <tbody>
-        <tr><td>Subtotal</td><td class="right">${escapeHtml(money(sub))}</td></tr>
-        <tr><td>Delivery Fee</td><td class="right">${escapeHtml(money(delivery))}</td></tr>
-        ${disc > 0 ? `<tr><td>Discount</td><td class="right">-${escapeHtml(money(disc))}</td></tr>` : ''}
-        <tr><td><b>Grand Total</b></td><td class="right"><b>${escapeHtml(money(grand))}</b></td></tr>
-      </tbody>
-    </table>
+    <div class="summaryArea">
+      <div class="paymentCard">
+        <div class="sectionTitle" style="margin-bottom:6px;">Collection Summary</div>
+        <div class="subtle" style="font-size:12px;">${due > 0 ? 'Amount to collect from customer upon delivery' : 'Amount already settled for this order'}</div>
+        <div class="big">৳${escapeHtml(money(paymentAmount))}</div>
+      </div>
+
+      <div class="box">
+        <table class="totals">
+          <tbody>
+            <tr><td>Subtotal</td><td class="right">${escapeHtml(money(sub))}</td></tr>
+            <tr><td>Delivery Fee</td><td class="right">${escapeHtml(money(delivery))}</td></tr>
+            ${disc > 0 ? `<tr><td>Discount</td><td class="right">-${escapeHtml(money(disc))}</td></tr>` : ''}
+            ${paid > 0 ? `<tr><td>Paid</td><td class="right">${escapeHtml(money(paid))}</td></tr>` : ''}
+            ${due > 0 ? `<tr><td>Due</td><td class="right">${escapeHtml(money(due))}</td></tr>` : ''}
+            <tr><td>Grand Total</td><td class="right">${escapeHtml(money(grand))}</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
     <div class="footer">
       This is a computer-generated invoice. Please keep it for your records.

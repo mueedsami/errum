@@ -13,6 +13,7 @@ import catalogService from '@/services/catalogService';
 import Toast from '@/components/Toast';
 import AccessDenied from '@/components/AccessDenied';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 
 import {
   ProductVariant,
@@ -20,22 +21,24 @@ import {
 } from '@/types/product';
 
 export default function ProductPage() {
-  const { hasAnyPermission, hasPermission, permissionsResolved } = useAuth();
-  const canViewProducts = hasAnyPermission(['products.view', 'products.create', 'products.edit', 'products.delete']);
-  const canCreateProducts = hasPermission('products.create');
-  const canEditProducts = hasPermission('products.edit');
-  const canDeleteProducts = hasPermission('products.delete');
+  const { isRole } = useAuth();
+  const canCreateProducts = isRole(['super-admin', 'admin', 'online-moderator']);
+  const canEditProducts = isRole(['super-admin', 'admin', 'online-moderator']);
+  const canDeleteProducts = isRole(['super-admin', 'admin']);
   const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const isUpdatingUrlRef = useRef(false);
+  // Ref to track the latest fetch request ID to prevent race conditions
+  const fetchIdRef = useRef(0);
 
-  
+
   // Read URL parameters
   const [selectMode, setSelectMode] = useState(false);
   const [redirectPath, setRedirectPath] = useState('');
-  
-  const [darkMode, setDarkMode] = useState(false);
+
+  const { darkMode, setDarkMode } = useTheme();
+  const [isMounted, setIsMounted] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -53,16 +56,15 @@ export default function ProductPage() {
   const [selectedVendor, setSelectedVendor] = useState<string>('');
   const [minPrice, setMinPrice] = useState<string>('');
   const [maxPrice, setMaxPrice] = useState<string>('');
+  const [debouncedMinPrice, setDebouncedMinPrice] = useState<string>('');
+  const [debouncedMaxPrice, setDebouncedMaxPrice] = useState<string>('');
+  const [sortBy, setSortBy] = useState<string>('newest');
+  const [stockStatus, setStockStatus] = useState<'all' | 'in_stock' | 'not_in_stock'>('all');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
   const [showFilters, setShowFilters] = useState(false);
   const SERVER_PAGE_SIZE = 60;
-  const SEARCH_DEBOUNCE_MS = 350;
+  const SEARCH_DEBOUNCE_MS = 1000;
 
-  // If permissions are not yet reliably resolved from the API (common when /me does not
-  // include role.permissions), do NOT block the page. Backend will still enforce 403.
-  if (permissionsResolved && !canViewProducts) {
-    return <AccessDenied />;
-  }
 
   const updateQueryParams = useCallback(
     (
@@ -86,16 +88,21 @@ export default function ProductPage() {
     },
     [router, pathname, searchParams]
   );
-const goToPage = useCallback(
-  (page: number) => {
-    const safe = Number.isFinite(page) && page > 0 ? page : 1;
-    setCurrentPage(safe);
-    updateQueryParams({ page: String(safe) }, 'push');
-  },
-  [updateQueryParams]
-);
+  const goToPage = useCallback(
+    (page: number) => {
+      const safe = Number.isFinite(page) && page > 0 ? page : 1;
+      setCurrentPage(safe);
+      updateQueryParams({ page: String(safe) }, 'push');
+    },
+    [updateQueryParams]
+  );
 
-// Keep state in sync with URL params (supports refresh + back/forward)
+  // Hydration fix
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // Keep state in sync with URL params (supports refresh + back/forward)
   useEffect(() => {
     // If we just updated the URL ourselves, don't overwrite state.
     if (isUpdatingUrlRef.current) {
@@ -110,17 +117,30 @@ const goToPage = useCallback(
     const maxP = searchParams.get('maxPrice') ?? '';
     const pageRaw = Number(searchParams.get('page') ?? '1');
 
-    setSearchQuery(q);
-    setDebouncedSearchQuery(q);
-    setSelectedCategory(category);
-    setSelectedVendor(vendor);
-    setMinPrice(minP);
-    setMaxPrice(maxP);
-    setCurrentPage(Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1);
+    const sort = searchParams.get('sortBy') ?? 'newest';
+    const inStockParam = searchParams.get('in_stock');
+    const stock = inStockParam === 'true' ? 'in_stock' : inStockParam === 'false' ? 'not_in_stock' : 'all';
 
-    setSelectMode(searchParams.get('selectMode') === 'true');
-    setRedirectPath(searchParams.get('redirect') || '');
-  }, [searchParams]);
+    if (q !== searchQuery) {
+      setSearchQuery(q);
+      setDebouncedSearchQuery(q);
+    }
+    if (category !== selectedCategory) setSelectedCategory(category);
+    if (vendor !== selectedVendor) setSelectedVendor(vendor);
+    if (minP !== minPrice) setMinPrice(minP);
+    if (maxP !== maxPrice) setMaxPrice(maxP);
+    if (sort !== sortBy) setSortBy(sort);
+    if (stock !== stockStatus) setStockStatus(stock);
+
+    const nextP = Number.isFinite(pageRaw) && pageRaw > 0 ? pageRaw : 1;
+    if (nextP !== currentPage) setCurrentPage(nextP);
+
+    const sm = searchParams.get('selectMode') === 'true';
+    if (sm !== selectMode) setSelectMode(sm);
+
+    const rp = searchParams.get('redirect') || '';
+    if (rp !== redirectPath) setRedirectPath(rp);
+  }, [searchParams, searchQuery, selectedCategory, selectedVendor, minPrice, maxPrice, sortBy, stockStatus, currentPage, selectMode, redirectPath]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -129,6 +149,46 @@ const goToPage = useCallback(
 
     return () => window.clearTimeout(timer);
   }, [searchQuery]);
+
+  // Price validation and query update delay (1000ms)
+  useEffect(() => {
+    // Determine current values in URL to avoid resetting page=1 on initial load or sync
+    const urlMin = searchParams.get('minPrice') || '';
+    const urlMax = searchParams.get('maxPrice') || '';
+
+    // If those values are exactly what's currently in the URL, we skip the immediate 
+    // refresh logic. This prevents the "reset to page 1" bug on first load.
+    if (minPrice === urlMin && maxPrice === urlMax) {
+      setDebouncedMinPrice(minPrice);
+      setDebouncedMaxPrice(maxPrice);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      let finalMin = minPrice;
+      let finalMax = maxPrice;
+
+      if (minPrice && maxPrice) {
+        const minVal = parseFloat(minPrice);
+        const maxVal = parseFloat(maxPrice);
+        if (!isNaN(minVal) && !isNaN(maxVal) && minVal > maxVal) {
+          // Equalize as requested: if min > max, change to equal (using max as master for current typing)
+          finalMin = maxPrice;
+          setMinPrice(maxPrice);
+        }
+      }
+
+      setDebouncedMinPrice(finalMin);
+      setDebouncedMaxPrice(finalMax);
+      updateQueryParams({
+        minPrice: finalMin || null,
+        maxPrice: finalMax || null,
+        page: '1'
+      });
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [minPrice, maxPrice, updateQueryParams, searchParams]);
 
   const fetchFilterData = useCallback(async () => {
     try {
@@ -159,40 +219,105 @@ const goToPage = useCallback(
   }, []);
 
   const fetchData = useCallback(async (pageOverride?: number) => {
+    // Increment the fetch ID for each new request
+    const currentFetchId = ++fetchIdRef.current;
     setIsLoading(true);
     try {
       const pageToLoad = Number.isFinite(pageOverride) && pageOverride && pageOverride > 0 ? pageOverride : currentPage;
-      const response = await productService.getAll({
-        page: pageToLoad,
-        per_page: SERVER_PAGE_SIZE,
-        search: debouncedSearchQuery || undefined,
-        category_id: selectedCategory ? Number(selectedCategory) : undefined,
-        vendor_id: selectedVendor ? Number(selectedVendor) : undefined,
-      });
+
+      let response: { data: any[]; total: number; current_page: number; last_page: number };
+
+      let apiSortBy = 'created_at';
+      let apiSortDir: 'asc' | 'desc' = 'desc';
+
+      if (sortBy === 'oldest') {
+        apiSortDir = 'asc';
+      } else if (sortBy === 'price_asc') {
+        apiSortBy = 'price';
+        apiSortDir = 'asc';
+      } else if (sortBy === 'price_desc') {
+        apiSortBy = 'price';
+        apiSortDir = 'desc';
+      }
+
+      // Proposal 5: use advanced search when query is ≥ 2 chars
+      if (debouncedSearchQuery.trim().length >= 2) {
+        try {
+          response = await productService.advancedSearch({
+            query: debouncedSearchQuery.trim(),
+            category_id: selectedCategory ? Number(selectedCategory) : undefined,
+            vendor_id: selectedVendor ? Number(selectedVendor) : undefined,
+            per_page: SERVER_PAGE_SIZE,
+            page: pageToLoad,
+            enable_fuzzy: true,
+            in_stock: stockStatus === 'in_stock' ? 'true' : stockStatus === 'not_in_stock' ? 'false' : undefined,
+          });
+        } catch {
+          // Advanced search unavailable — fall back to standard endpoint
+          response = await productService.getAll({
+            page: pageToLoad,
+            per_page: SERVER_PAGE_SIZE,
+            search: debouncedSearchQuery || undefined,
+            category_id: selectedCategory ? Number(selectedCategory) : undefined,
+            vendor_id: selectedVendor ? Number(selectedVendor) : undefined,
+            group_by_sku: true,
+            min_price: minPrice ? Number(minPrice) : undefined,
+            max_price: maxPrice ? Number(maxPrice) : undefined,
+            in_stock: stockStatus === 'in_stock' ? 'true' : stockStatus === 'not_in_stock' ? 'false' : undefined,
+            sort_by: apiSortBy,
+            sort_direction: apiSortDir,
+          });
+        }
+      } else {
+        // Proposal 1 + 2: grouped endpoint with optional server-side price filter
+        response = await productService.getAll({
+          page: pageToLoad,
+          per_page: SERVER_PAGE_SIZE,
+          search: debouncedSearchQuery || undefined,
+          category_id: selectedCategory ? Number(selectedCategory) : undefined,
+          vendor_id: selectedVendor ? Number(selectedVendor) : undefined,
+          group_by_sku: true,
+          min_price: minPrice ? Number(minPrice) : undefined,
+          max_price: maxPrice ? Number(maxPrice) : undefined,
+          in_stock: stockStatus === 'in_stock' ? 'true' : stockStatus === 'not_in_stock' ? 'false' : undefined,
+          sort_by: apiSortBy,
+          sort_direction: apiSortDir,
+        });
+      }
 
       const nextProducts = Array.isArray(response.data) ? response.data : [];
       const nextLastPage = Math.max(1, Number(response.last_page || 1));
       const safePage = Math.min(pageToLoad, nextLastPage);
+
+      // Check if this is still the most recent request before updating state
+      if (currentFetchId !== fetchIdRef.current) return;
 
       setProducts(nextProducts);
       setTotalProducts(Number(response.total || 0));
       setServerLastPage(nextLastPage);
 
       if (safePage !== currentPage) {
+        // Only update current page if this is still the latest request
         setCurrentPage(safePage);
         updateQueryParams({ page: String(safePage) }, 'replace');
       }
     } catch (err) {
-      console.error('Error fetching data:', err);
-      setToast({ message: 'Failed to load products', type: 'error' });
-      setProducts([]);
-      setTotalProducts(0);
-      setServerLastPage(1);
-      setCatalogMetaById({});
+      // Ensure we only set error state for the latest request
+      if (currentFetchId === fetchIdRef.current) {
+        console.error('Error fetching data:', err);
+        setToast({ message: 'Failed to load products', type: 'error' });
+        setProducts([]);
+        setTotalProducts(0);
+        setServerLastPage(1);
+        setCatalogMetaById({});
+      }
     } finally {
-      setIsLoading(false);
+      // Ensure loading state is only cleared for the latest request
+      if (currentFetchId === fetchIdRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [currentPage, debouncedSearchQuery, selectedCategory, selectedVendor, updateQueryParams]);
+  }, [currentPage, debouncedSearchQuery, selectedCategory, selectedVendor, debouncedMinPrice, debouncedMaxPrice, sortBy, stockStatus, updateQueryParams]);
 
   useEffect(() => {
     fetchFilterData();
@@ -342,34 +467,88 @@ const goToPage = useCallback(
   // Enhanced image URL processing
   const getImageUrl = (imagePath: string | null | undefined): string | null => {
     if (!imagePath) return null;
-    
+
     // If it's already a full URL, return as-is
     if (imagePath.startsWith('http')) return imagePath;
-    
+
     // If it's a storage path, construct the full URL
     const baseUrl = process.env.NEXT_PUBLIC_API_URL?.replace('/api', '') || '';
     return `${baseUrl}/storage/${imagePath}`;
   };
 
-  // Group products with better image handling
+  // Group products into ProductGroup[] cards.
+  // When the backend returns the grouped shape (group_by_sku=true), each product
+  // already carries `has_variants` / `variants[]` — we map directly without re-grouping.
+  // When the response is flat (fallback / advanced-search), we run the original client-side
+  // grouping so no card is lost.
   const productGroups = useMemo((): ProductGroup[] => {
+    if (products.length === 0) return [];
+
+    // Detect grouped response: any product has the `has_variants` field
+    const isGrouped = products.some(p => typeof (p as any).has_variants === 'boolean');
+
+    if (isGrouped) {
+      return products.map((product) => {
+        const primaryImg = product.images?.find(img => img.is_primary && img.is_active)
+          ?? product.images?.find(img => img.is_active)
+          ?? product.images?.[0];
+        const primaryImageUrl = primaryImg ? getImageUrl(primaryImg.image_path) : null;
+
+        const serverVariants: any[] = (product as any).variants ?? [];
+
+        const allVariants = [
+          {
+            id: product.id,
+            name: product.name,
+            sku: product.sku,
+            color: getColorAndSize(product).color,
+            size: getColorAndSize(product).size,
+            image: primaryImageUrl,
+          },
+          ...serverVariants.map((v: any) => {
+            const vImg = v.images?.[0];
+            const vImgUrl = vImg
+              ? (vImg.url?.startsWith('http') ? vImg.url : getImageUrl(vImg.image_path ?? vImg.url))
+              : null;
+            return {
+              id: v.id,
+              name: v.name,
+              sku: v.sku,
+              color: undefined as string | undefined,
+              size: undefined as string | undefined,
+              image: vImgUrl,
+            };
+          }),
+        ];
+
+        return {
+          sku: product.sku,
+          baseName: (product as any).base_name || getBaseName(product),
+          totalVariants: allVariants.length,
+          variants: allVariants,
+          primaryImage: primaryImageUrl,
+          categoryPath: getCategoryPath(product.category_id),
+          category_id: product.category_id,
+          hasVariations: allVariants.length > 1,
+          vendorId: product.vendor_id,
+          vendorName: vendorsById[product.vendor_id] ?? null,
+        };
+      });
+    }
+
+    // ── Flat-response fallback (original client-side grouping) ──────────────
     const groups = new Map<string, ProductGroup>();
 
     products.forEach((product) => {
       const sku = product.sku;
       const { color, size } = getColorAndSize(product);
       const baseName = getBaseName(product);
-      
-      // Find primary image or use first active image
-      const primaryImage = product.images?.find(img => img.is_primary && img.is_active) || 
-                          product.images?.find(img => img.is_active) ||
-                          product.images?.[0];
-      
+
+      const primaryImage = product.images?.find(img => img.is_primary && img.is_active)
+        ?? product.images?.find(img => img.is_active)
+        ?? product.images?.[0];
       const imageUrl = primaryImage ? getImageUrl(primaryImage.image_path) : null;
 
-      // Determine grouping key
-      // ✅ Group by SKU so "Air Jordan - Black - 39" and "Air Jordan - Red - 40"
-      // show as ONE product with variations.
       const groupKey = (sku && String(sku).trim()) ? String(sku).trim() : `product-${product.id}`;
 
       if (!groups.has(groupKey)) {
@@ -388,33 +567,18 @@ const goToPage = useCallback(
       }
 
       const group = groups.get(groupKey)!;
-      
-      // Get variant-specific image
-      const variantPrimaryImage = product.images?.find(img => img.is_primary && img.is_active) ||
-                                  product.images?.find(img => img.is_active) ||
-                                  product.images?.[0];
+      const variantPrimaryImage = product.images?.find(img => img.is_primary && img.is_active)
+        ?? product.images?.find(img => img.is_active)
+        ?? product.images?.[0];
       const variantImageUrl = variantPrimaryImage ? getImageUrl(variantPrimaryImage.image_path) : null;
 
-      group.variants.push({
-        id: product.id,
-        name: product.name,
-        sku: product.sku,
-        color,
-        size,
-        image: variantImageUrl,
-      });
+      group.variants.push({ id: product.id, name: product.name, sku: product.sku, color, size, image: variantImageUrl });
     });
 
-    // Calculate variants and mark groups with variations
     groups.forEach(group => {
-      // Base name should be derived from the whole group, not only the first product.
       group.baseName = getGroupBaseName(group.variants, group.baseName);
-
-      // Any group with more than 1 item should be treated as having variations
       group.totalVariants = group.variants.length;
       group.hasVariations = group.variants.length > 1;
-
-      // If the group's primary image is missing, pick first available variant image
       if (!group.primaryImage) {
         group.primaryImage = group.variants.find(v => v.image)?.image || null;
       }
@@ -423,86 +587,11 @@ const goToPage = useCallback(
     return Array.from(groups.values());
   }, [products, categories, vendorsById]);
 
-  // Search/category/vendor filters are handled server-side for fast paginated loading.
+  // Search/category/vendor/price filters are all handled server-side now (Proposals 1 & 2).
   const baseFilteredGroups = useMemo(() => productGroups, [productGroups]);
 
-  const priceFilterActive = Boolean(minPrice || maxPrice);
-
-  // If price filter is active, fetch catalog meta for all candidate items so filtering is accurate
-  useEffect(() => {
-    if (!priceFilterActive) return;
-
-    const ids = baseFilteredGroups
-      .map((g) => g?.variants?.[0]?.id)
-      .filter((id): id is number => typeof id === 'number');
-
-    const missing = ids.filter((id) => !catalogMetaById[id]);
-    if (missing.length === 0) return;
-
-    let cancelled = false;
-
-    const run = async () => {
-      const chunkSize = 4;
-
-      for (let i = 0; i < missing.length; i += chunkSize) {
-        if (cancelled) return;
-        const chunk = missing.slice(i, i + chunkSize);
-
-        const results = await Promise.all(
-          chunk.map(async (id) => {
-            try {
-              const detail: any = await catalogService.getProduct(id);
-              return {
-                id,
-                selling_price: typeof detail?.selling_price === 'number' ? detail.selling_price : null,
-                in_stock: Boolean(detail?.in_stock),
-                stock_quantity: typeof detail?.stock_quantity === 'number' ? detail.stock_quantity : 0,
-              };
-            } catch (e) {
-              return null;
-            }
-          })
-        );
-
-        if (cancelled) return;
-
-        setCatalogMetaById((prev) => {
-          const next = { ...prev };
-          results.forEach((r) => {
-            if (r) next[r.id] = r;
-          });
-          return next;
-        });
-      }
-    };
-
-    run();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [priceFilterActive, baseFilteredGroups, catalogMetaById]);
-
-  // Apply price filter using cached catalog meta
-  const filteredGroups = useMemo(() => {
-    if (!priceFilterActive) return baseFilteredGroups;
-
-    const min = minPrice ? Number(minPrice) : null;
-    const max = maxPrice ? Number(maxPrice) : null;
-
-    return baseFilteredGroups.filter((group) => {
-      const id = group?.variants?.[0]?.id;
-      if (typeof id !== 'number') return false;
-
-      const meta = catalogMetaById[id];
-      if (!meta || typeof meta.selling_price !== 'number') return false;
-
-      const p = meta.selling_price;
-      if (min !== null && Number.isFinite(min) && p < min) return false;
-      if (max !== null && Number.isFinite(max) && p > max) return false;
-      return true;
-    });
-  }, [baseFilteredGroups, priceFilterActive, minPrice, maxPrice, catalogMetaById]);
+  // Price filter is now applied server-side. filteredGroups = all groups on the current page.
+  const filteredGroups = baseFilteredGroups;
 
   const totalPages = Math.max(1, serverLastPage);
   const paginatedGroups = filteredGroups;
@@ -581,7 +670,7 @@ const goToPage = useCallback(
       await productService.delete(id);
       setProducts((prev) => prev.filter((p) => p.id !== id));
       setToast({ message: 'Product deleted successfully', type: 'success' });
-      
+
       // Refresh data to update counts
       await fetchData(currentPage);
     } catch (err) {
@@ -601,11 +690,11 @@ const goToPage = useCallback(
     sessionStorage.removeItem('baseSku');
     sessionStorage.removeItem('baseName');
     sessionStorage.removeItem('categoryId');
-    
+
     // Store edit data in sessionStorage
     sessionStorage.setItem('editProductId', id.toString());
     sessionStorage.setItem('productMode', 'edit');
-    
+
     router.push('/product/add');
   };
 
@@ -626,7 +715,7 @@ const goToPage = useCallback(
     sessionStorage.removeItem('baseSku');
     sessionStorage.removeItem('baseName');
     sessionStorage.removeItem('categoryId');
-    
+
     router.push('/product/add');
   };
 
@@ -641,13 +730,13 @@ const goToPage = useCallback(
     sessionStorage.removeItem('baseSku');
     sessionStorage.removeItem('baseName');
     sessionStorage.removeItem('categoryId');
-    
+
     // Store variation data in sessionStorage
     sessionStorage.setItem('productMode', 'addVariation');
     sessionStorage.setItem('baseSku', group.sku);
     sessionStorage.setItem('baseName', group.baseName);
     sessionStorage.setItem('categoryId', group.category_id.toString());
-    
+
     router.push('/product/add');
   };
 
@@ -676,24 +765,36 @@ const goToPage = useCallback(
 
   const clearFilters = () => {
     setSearchQuery('');
+    setDebouncedSearchQuery('');
     setSelectedCategory('');
     setSelectedVendor('');
     setMinPrice('');
     setMaxPrice('');
+    setSortBy('newest');
+    setStockStatus('all');
     setCurrentPage(1);
-    updateQueryParams({ q: null, category: null, vendor: null, minPrice: null, maxPrice: null, page: '1' });
+    updateQueryParams({
+      q: null,
+      category: null,
+      vendor: null,
+      minPrice: null,
+      maxPrice: null,
+      sortBy: null,
+      stockStatus: null,
+      page: '1',
+    });
   };
 
-  const hasActiveFilters = Boolean(searchQuery || selectedCategory || selectedVendor || minPrice || maxPrice);
+  const hasActiveFilters = Boolean(searchQuery || selectedCategory || selectedVendor || minPrice || maxPrice || stockStatus !== 'all');
 
   return (
     <div className={darkMode ? 'dark' : ''}>
       <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
         <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
         <div className="flex-1 flex flex-col overflow-hidden">
-          <Header 
-            darkMode={darkMode} 
-            setDarkMode={setDarkMode} 
+          <Header
+            darkMode={darkMode}
+            setDarkMode={setDarkMode}
             toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
           />
 
@@ -707,8 +808,8 @@ const goToPage = useCallback(
                       {selectMode ? 'Select a Product' : 'Products'}
                     </h1>
                     <p className="text-gray-600 dark:text-gray-400">
-                      {selectMode 
-                        ? 'Choose a product variant to add to your operation' 
+                      {selectMode
+                        ? 'Choose a product variant to add to your operation'
                         : `Manage your store's product catalog`}
                     </p>
                   </div>
@@ -728,22 +829,20 @@ const goToPage = useCallback(
                       <div className="flex items-center gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
                         <button
                           onClick={() => setViewMode('list')}
-                          className={`p-2 rounded transition-colors ${
-                            viewMode === 'list'
-                              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                          }`}
+                          className={`p-2 rounded transition-colors ${viewMode === 'list'
+                            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                            }`}
                           title="List view"
                         >
                           <List className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => setViewMode('grid')}
-                          className={`p-2 rounded transition-colors ${
-                            viewMode === 'grid'
-                              ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                              : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-                          }`}
+                          className={`p-2 rounded transition-colors ${viewMode === 'grid'
+                            ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                            }`}
                           title="Grid view"
                         >
                           <Grid className="w-4 h-4" />
@@ -752,7 +851,7 @@ const goToPage = useCallback(
                     )}
 
                     {/* Add Product Button */}
-                    {!selectMode && canCreateProducts && (
+                    {isMounted && !selectMode && canCreateProducts && (
                       <button
                         onClick={handleAdd}
                         className="flex items-center gap-2 px-5 py-2.5 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors font-medium shadow-sm"
@@ -805,20 +904,36 @@ const goToPage = useCallback(
                     />
                   </div>
 
+                  {/* Sort Dropdown */}
+                  <select
+                    value={sortBy}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSortBy(val);
+                      setCurrentPage(1);
+                      updateQueryParams({ sortBy: val, page: '1' });
+                    }}
+                    className="px-4 py-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500 transition-colors shadow-sm cursor-pointer"
+                  >
+                    <option value="newest">Newest</option>
+                    <option value="oldest">Oldest</option>
+                    <option value="price_asc">Price: Low to High</option>
+                    <option value="price_desc">Price: High to Low</option>
+                  </select>
+
                   {/* Filter Toggle Button */}
                   <button
                     onClick={() => setShowFilters(!showFilters)}
-                    className={`flex items-center gap-2 px-4 py-3 border rounded-lg transition-colors shadow-sm ${
-                      showFilters || hasActiveFilters
-                        ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-gray-900 dark:border-white'
-                        : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
+                    className={`flex items-center gap-2 px-4 py-3 border rounded-lg transition-colors shadow-sm ${showFilters || hasActiveFilters
+                      ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 border-gray-900 dark:border-white'
+                      : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'
+                      }`}
                   >
                     <Filter className="w-5 h-5" />
                     <span className="font-medium">Filters</span>
                     {hasActiveFilters && (
                       <span className="px-2 py-0.5 text-xs bg-white dark:bg-gray-900 text-gray-900 dark:text-white rounded-full">
-                        {(searchQuery ? 1 : 0) + (selectedCategory ? 1 : 0) + (selectedVendor ? 1 : 0) + (minPrice || maxPrice ? 1 : 0)}
+                        {(searchQuery ? 1 : 0) + (selectedCategory ? 1 : 0) + (selectedVendor ? 1 : 0) + (minPrice || maxPrice ? 1 : 0) + (stockStatus !== 'all' ? 1 : 0) + (sortBy !== 'newest' ? 1 : 0)}
                       </span>
                     )}
                   </button>
@@ -852,7 +967,7 @@ const goToPage = useCallback(
                             setCurrentPage(1);
                             updateQueryParams({ category: val || null, page: '1' });
                           }}
-                          className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500"
+                          className="w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500 transition-colors"
                         >
                           <option value="">All Categories</option>
                           {flatCategories.map((cat) => (
@@ -876,7 +991,7 @@ const goToPage = useCallback(
                             setCurrentPage(1);
                             updateQueryParams({ vendor: val || null, page: '1' });
                           }}
-                          className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500"
+                          className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500 transition-colors"
                         >
                           <option value="">All Vendors</option>
                           {vendorsList.map((v) => (
@@ -884,6 +999,30 @@ const goToPage = useCallback(
                               {v.name}
                             </option>
                           ))}
+                        </select>
+                      </div>
+
+                      {/* Stock Status Filter */}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                          Stock Status
+                        </label>
+                        <select
+                          value={stockStatus}
+                          onChange={(e) => {
+                            const val = e.target.value as 'all' | 'in_stock' | 'not_in_stock';
+                            setStockStatus(val);
+                            setCurrentPage(1);
+                            updateQueryParams({
+                              in_stock: val === 'in_stock' ? 'true' : val === 'not_in_stock' ? 'false' : null,
+                              page: '1'
+                            });
+                          }}
+                          className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500 transition-colors cursor-pointer"
+                        >
+                          <option value="all">All Statuses</option>
+                          <option value="in_stock">In Stock</option>
+                          <option value="not_in_stock">Out of Stock</option>
                         </select>
                       </div>
 
@@ -902,9 +1041,8 @@ const goToPage = useCallback(
                               const val = e.target.value;
                               setMinPrice(val);
                               setCurrentPage(1);
-                              updateQueryParams({ minPrice: val || null, page: '1' });
                             }}
-                            className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500"
+                            className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500 transition-colors"
                           />
                           <input
                             type="number"
@@ -915,9 +1053,8 @@ const goToPage = useCallback(
                               const val = e.target.value;
                               setMaxPrice(val);
                               setCurrentPage(1);
-                              updateQueryParams({ maxPrice: val || null, page: '1' });
                             }}
-                            className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500"
+                            className="w-full px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 dark:focus:ring-gray-500 transition-colors"
                           />
                         </div>
                         {(minPrice || maxPrice) && (
@@ -948,8 +1085,8 @@ const goToPage = useCallback(
                     {hasActiveFilters ? 'No products found' : 'No products yet'}
                   </h3>
                   <p className="text-gray-500 dark:text-gray-400 mb-6">
-                    {hasActiveFilters 
-                      ? 'Try adjusting your filters or search terms' 
+                    {hasActiveFilters
+                      ? 'Try adjusting your filters or search terms'
                       : 'Get started by adding your first product'}
                   </p>
                   {hasActiveFilters ? (
@@ -995,7 +1132,7 @@ const goToPage = useCallback(
               {totalPages > 1 && (
                 <div className="flex items-center justify-between mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
                   <p className="text-sm text-gray-600 dark:text-gray-400">
-                    Showing <span className="font-medium text-gray-900 dark:text-white">{totalProducts === 0 ? 0 : ((currentPage - 1) * SERVER_PAGE_SIZE) + 1}</span> to <span className="font-medium text-gray-900 dark:text-white">{Math.min((currentPage - 1) * SERVER_PAGE_SIZE + paginatedGroups.length, totalProducts)}</span> of <span className="font-medium text-gray-900 dark:text-white">{totalProducts}</span> products
+                    Showing <span className="font-medium text-gray-900 dark:text-white">{totalProducts === 0 ? 0 : ((currentPage - 1) * SERVER_PAGE_SIZE) + 1}</span> to <span className="font-medium text-gray-900 dark:text-white">{Math.min(currentPage * SERVER_PAGE_SIZE, totalProducts)}</span> of <span className="font-medium text-gray-900 dark:text-white">{totalProducts}</span> product groups
                   </p>
                   <div className="flex gap-2">
                     <button
@@ -1020,11 +1157,10 @@ const goToPage = useCallback(
                         <button
                           key={page}
                           onClick={() => goToPage(page)}
-                          className={`h-10 w-10 flex items-center justify-center rounded-lg transition-colors font-medium shadow-sm ${
-                            currentPage === page
-                              ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900'
-                              : 'border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700'
-                          }`}
+                          className={`h-10 w-10 flex items-center justify-center rounded-lg transition-colors font-medium shadow-sm ${currentPage === page
+                            ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900'
+                            : 'border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700'
+                            }`}
                         >
                           {page}
                         </button>

@@ -1,6 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useTheme } from "@/contexts/ThemeContext";
+import { useAuth } from "@/contexts/AuthContext";
 import {
   Package,
   Scan,
@@ -18,7 +20,9 @@ import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import orderService from '@/services/orderService';
 import barcodeService from '@/services/barcodeService';
+import productService from '@/services/productService';
 import Toast from '@/components/Toast';
+import ImageLightboxModal from '@/components/ImageLightboxModal';
 
 interface ScannedItemTracking {
   required: number;
@@ -48,6 +52,21 @@ const parsePrice = (value: any): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
+const getApiBaseUrl = () => {
+  const raw = process.env.NEXT_PUBLIC_API_URL || '';
+  return raw.replace(/\/api\/?$/, '').replace(/\/$/, '');
+};
+
+const toPublicImageUrl = (imagePath?: string | null) => {
+  if (!imagePath) return null;
+  const p = String(imagePath);
+  if (!p) return null;
+  if (p.startsWith('http')) return p;
+  if (p.startsWith('/storage/')) return `${getApiBaseUrl()}${p}`;
+  if (p.startsWith('storage/')) return `${getApiBaseUrl()}/${p}`;
+  return `${getApiBaseUrl()}/storage/${p.replace(/^\//, '')}`;
+};
+
 const formatBDT = (value: any, decimals: 0 | 2 = 0) => {
   const amount = parsePrice(value);
 
@@ -67,8 +86,11 @@ const formatBDT = (value: any, decimals: 0 | 2 = 0) => {
   }
 };
 
+const normalize = (v: any) => String(v ?? '').trim().toLowerCase();
+
 export default function WarehouseFulfillmentPage() {
-  const [darkMode, setDarkMode] = useState(false);
+  const { darkMode, setDarkMode } = useTheme();
+  const { isRole } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const [pendingOrders, setPendingOrders] = useState<any[]>([]);
@@ -76,6 +98,25 @@ export default function WarehouseFulfillmentPage() {
   const [orderDetails, setOrderDetails] = useState<any>(null);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
+
+  // 📦 Card-level meta (list API often doesn't include full items)
+  const [orderCardMeta, setOrderCardMeta] = useState<
+    Record<
+      number,
+      {
+        totalQty: number;
+        lines: string[];
+      }
+    >
+  >({});
+
+  // 🖼️ Product thumbnails (shown in packing UI)
+  const [productThumbsById, setProductThumbsById] = useState<Record<number, string>>({});
+
+  // 🔍 Image popup modal
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [imageModalSrc, setImageModalSrc] = useState<string | null>(null);
+  const [imageModalTitle, setImageModalTitle] = useState<string>('');
 
   const [scannedItems, setScannedItems] = useState<Record<number, ScannedItemTracking>>({});
   const [currentBarcode, setCurrentBarcode] = useState('');
@@ -113,25 +154,175 @@ export default function WarehouseFulfillmentPage() {
     }
   }, [isScanning]);
 
+  const getTotalQty = (items: any[] | undefined | null): number => {
+    if (!Array.isArray(items)) return 0;
+    return items.reduce((sum, it) => sum + Number(it?.quantity ?? it?.qty ?? 0), 0);
+  };
+
+  const getFallbackQtyFromOrderList = (order: any): number => {
+    // Prefer backend-provided counts if present
+    const candidates = [
+      order?.total_items,
+      order?.items_count,
+      order?.total_quantity,
+      order?.total_qty,
+      order?.fulfillment_progress?.total_items,
+      order?.fulfillment_progress?.total_quantity,
+    ];
+    for (const c of candidates) {
+      const n = Number(c);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    // Worst-case: items array (often missing in list response)
+    return getTotalQty(order?.items) || (Array.isArray(order?.items) ? order.items.length : 0);
+  };
+
+  const buildPrimaryLines = (items: any[] | undefined | null): string[] => {
+    if (!Array.isArray(items) || items.length === 0) return [];
+    // Sort by quantity desc so the "main" products appear first
+    const sorted = [...items].sort((a, b) => Number(b?.quantity ?? 0) - Number(a?.quantity ?? 0));
+    return sorted.slice(0, 3).map((it) => {
+      const name = it?.product_name || it?.name || `Product #${it?.product_id ?? ''}`;
+      const qty = Number(it?.quantity ?? it?.qty ?? 0);
+      return qty > 0 ? `${name} ×${qty}` : String(name);
+    });
+  };
+
+  const loadOrderCardMeta = async (orders: any[]) => {
+    const ids = (orders || []).map((o) => Number(o?.id)).filter((n) => Number.isFinite(n) && n > 0);
+    const unique = Array.from(new Set(ids));
+    const missing = unique.filter((id) => !orderCardMeta[id]);
+    if (missing.length === 0) return;
+
+    // Concurrency-limited detail fetch so UI doesn't hang
+    const limit = 6;
+    let idx = 0;
+    const worker = async () => {
+      while (idx < missing.length) {
+        const current = missing[idx++];
+        try {
+          const full: any = await orderService.getById(current);
+          const items = full?.items || [];
+          const totalQty = getTotalQty(items) || (Array.isArray(items) ? items.length : 0);
+          const lines = buildPrimaryLines(items);
+
+          setOrderCardMeta((prev) => ({
+            ...prev,
+            [current]: { totalQty, lines },
+          }));
+        } catch {
+          // If details fetch fails, at least store fallback qty so we don't keep retrying
+          const fallbackOrder = orders.find((o) => Number(o?.id) === current);
+          setOrderCardMeta((prev) => ({
+            ...prev,
+            [current]: {
+              totalQty: getFallbackQtyFromOrderList(fallbackOrder),
+              lines: [],
+            },
+          }));
+        }
+      }
+    };
+
+    await Promise.all(Array.from({ length: Math.min(limit, missing.length) }, () => worker()));
+  };
+
+  const ensureProductThumbs = async (productIds: Array<number | null | undefined>) => {
+    const ids = Array.from(new Set(productIds.filter((x): x is number => typeof x === 'number' && x > 0)));
+    if (ids.length === 0) return;
+    const missing = ids.filter((id) => !productThumbsById[id]);
+    if (missing.length === 0) return;
+
+    const fetched: Record<number, string> = {};
+    await Promise.all(
+      missing.map(async (id) => {
+        try {
+          const prod: any = await productService.getById(id);
+          const imgs: any[] = prod?.images || [];
+          const primary =
+            imgs.find((x) => x?.is_primary && x?.is_active) || imgs.find((x) => x?.is_primary) || imgs[0];
+          const path = primary?.image_url || primary?.image_path || primary?.url;
+          const url = toPublicImageUrl(path);
+          if (url) fetched[id] = url;
+        } catch {
+          // ignore
+        }
+      })
+    );
+
+    if (Object.keys(fetched).length > 0) {
+      setProductThumbsById((prev) => ({ ...prev, ...fetched }));
+    }
+  };
+
+  const getItemThumbSrc = (productId?: any) => {
+    const id = Number(productId ?? 0) || 0;
+    if (!id) return '/placeholder-product.png';
+    return productThumbsById[id] || '/placeholder-product.png';
+  };
+
+  const openImageModal = (src: string, title?: string) => {
+    setImageModalSrc(src);
+    setImageModalTitle(title || '');
+    setImageModalOpen(true);
+  };
+
+  const closeImageModal = () => {
+    setImageModalOpen(false);
+    setImageModalSrc(null);
+    setImageModalTitle('');
+  };
+
+  useEffect(() => {
+    if (!orderDetails?.items) return;
+    ensureProductThumbs(
+      orderDetails.items
+        .map((it: any) => Number(it?.product_id ?? it?.product?.id ?? 0) || 0)
+        .filter((id: number) => id > 0)
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [orderDetails?.id]);
+
   const fetchPendingOrders = async () => {
     setIsLoadingOrders(true);
     try {
-      // Fetch both social_commerce and ecommerce orders
-      const [socialCommerceResponse, ecommerceResponse] = await Promise.all([
-        orderService.getPendingFulfillment({ per_page: 100, order_type: 'social_commerce' }),
-        orderService.getPendingFulfillment({ per_page: 100, order_type: 'ecommerce' }),
-      ]);
+      let allOrders: any[] = [];
 
-      const allOrders = [...(socialCommerceResponse.data || []), ...(ecommerceResponse.data || [])];
+      if (isRole('pos-salesman')) {
+        // POS Salesman sees local/walking/video orders
+        const response = await orderService.getPendingFulfillment({ 
+          per_page: 100, 
+          order_types: ['pos', 'video-shopping', 'walking-customer'] 
+        });
+        allOrders = response.data || [];
+      } else {
+        // Admins/Moderators see standard social/ecommerce delivery orders
+        const [socialCommerceResponse, ecommerceResponse] = await Promise.all([
+          orderService.getPendingFulfillment({ per_page: 100, order_type: 'social_commerce' }),
+          orderService.getPendingFulfillment({ per_page: 100, order_type: 'ecommerce' }),
+        ]);
+        allOrders = [...(socialCommerceResponse.data || []), ...(ecommerceResponse.data || [])];
+      }
 
       // Sort by date, newest first
       allOrders.sort((a, b) => new Date(b.order_date).getTime() - new Date(a.order_date).getTime());
 
-      setPendingOrders(allOrders);
+      // Extra client-side safety: if an order is already confirmed/completed/delivered
+      // it should not stay in the warehouse packing queue even if the API returns it.
+      const filtered = allOrders.filter((o: any) => {
+        const st = normalize(o.status);
+        if (['confirmed', 'completed', 'delivered', 'cancelled', 'canceled', 'refunded'].includes(st)) return false;
+        const fs = normalize(o.fulfillment_status);
+        if (fs && fs !== 'pending_fulfillment') return false;
+        return true;
+      });
+
+      setPendingOrders(filtered);
+      // Load item count + primary product lines for cards (list endpoint often omits items)
+      // Run in background (no need to block UI render)
+      loadOrderCardMeta(filtered);
       console.log('📦 Loaded pending orders:', {
-        social_commerce: socialCommerceResponse.data?.length || 0,
-        ecommerce: ecommerceResponse.data?.length || 0,
-        total: allOrders.length,
+        total: filtered.length,
       });
     } catch (error: any) {
       console.error('Error fetching orders:', error);
@@ -201,6 +392,7 @@ export default function WarehouseFulfillmentPage() {
 
   const handleBarcodeInput = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && currentBarcode.trim()) {
+      e.preventDefault();
       handleBarcodeScan(currentBarcode.trim());
       setCurrentBarcode('');
     }
@@ -262,55 +454,55 @@ export default function WarehouseFulfillmentPage() {
 
       // Find matching order item
       // Normalize ids (handles product_id vs product.id, string vs number)
-const getProductId = (item: any) =>
-  Number(item?.product_id ?? item?.productId ?? item?.product?.id ?? 0) || 0;
+      const getProductId = (item: any) =>
+        Number(item?.product_id ?? item?.productId ?? item?.product?.id ?? 0) || 0;
 
-const getBatchId = (item: any) =>
-  Number(item?.batch_id ?? item?.batchId ?? item?.batch?.id ?? 0) || 0;
+      const getBatchId = (item: any) =>
+        Number(item?.batch_id ?? item?.batchId ?? item?.batch?.id ?? 0) || 0;
 
-const scannedProductId = Number(scannedProduct?.id ?? 0) || 0;
-const scannedBatchId = Number(scannedBatch?.id ?? 0) || 0;
+      const scannedProductId = Number(scannedProduct?.id ?? 0) || 0;
+      const scannedBatchId = Number(scannedBatch?.id ?? 0) || 0;
 
-// Find candidates by product first
-const candidates = (orderDetails.items || []).filter((item: any) => {
-  return getProductId(item) === scannedProductId;
-});
+      // Find candidates by product first
+      const candidates = (orderDetails.items || []).filter((item: any) => {
+        return getProductId(item) === scannedProductId;
+      });
 
-if (candidates.length === 0) {
-  displayToast(`❌ "${scannedProduct.name}" not in this order`, 'error');
-  addToScanHistory(barcode, 'error', `${scannedProduct.name} - Not in order`);
-  playErrorSound();
-  return;
-}
+      if (candidates.length === 0) {
+        displayToast(`❌ "${scannedProduct.name}" not in this order`, 'error');
+        addToScanHistory(barcode, 'error', `${scannedProduct.name} - Not in order`);
+        playErrorSound();
+        return;
+      }
 
-// If order item has batch assigned, enforce it. If not assigned, allow any batch.
-const candidateWithBatchRules = candidates.filter((item: any) => {
-  const orderItemBatchId = getBatchId(item);
+      // If order item has batch assigned, enforce it. If not assigned, allow any batch.
+      const candidateWithBatchRules = candidates.filter((item: any) => {
+        const orderItemBatchId = getBatchId(item);
 
-  // If order item has NO batch, accept any scanned batch
-  if (!orderItemBatchId) return true;
+        // If order item has NO batch, accept any scanned batch
+        if (!orderItemBatchId) return true;
 
-  // If scanned batch missing, reject (order expects a batch)
-  if (!scannedBatchId) return false;
+        // If scanned batch missing, reject (order expects a batch)
+        if (!scannedBatchId) return false;
 
-  // Otherwise enforce match
-  return orderItemBatchId === scannedBatchId;
-});
+        // Otherwise enforce match
+        return orderItemBatchId === scannedBatchId;
+      });
 
-// Choose an item that still needs scanning (important when same product appears multiple times)
-const matchingItem = candidateWithBatchRules.find((item: any) => {
-  const track = scannedItems[item.id];
-  const required = Number(item.quantity || 0);
-  const already = track?.scanned.length || 0;
-  return already < required;
-});
+      // Choose an item that still needs scanning (important when same product appears multiple times)
+      const matchingItem = candidateWithBatchRules.find((item: any) => {
+        const track = scannedItems[item.id];
+        const required = Number(item.quantity || 0);
+        const already = track?.scanned.length || 0;
+        return already < required;
+      });
 
-if (!matchingItem) {
-  displayToast(`⚠️ "${scannedProduct.name}" is already fully scanned (or batch mismatch)`, 'warning');
-  addToScanHistory(barcode, 'warning', `${scannedProduct.name} - Already complete / batch mismatch`);
-  playErrorSound();
-  return;
-}
+      if (!matchingItem) {
+        displayToast(`⚠️ "${scannedProduct.name}" is already fully scanned (or batch mismatch)`, 'warning');
+        addToScanHistory(barcode, 'warning', `${scannedProduct.name} - Already complete / batch mismatch`);
+        playErrorSound();
+        return;
+      }
 
 
       // Check if item already fully scanned
@@ -389,33 +581,26 @@ if (!matchingItem) {
       console.log('✅ Order fulfilled:', fulfillResult);
       displayToast('✅ Order fulfilled successfully!', 'success');
 
-      // Wait 1 second then auto-complete the order
-      setTimeout(async () => {
-        try {
-          console.log('🚀 Completing order...');
-          await orderService.complete(orderDetails.id);
-          console.log('✅ Order completed and inventory reduced');
-          displayToast('✅ Order completed! Inventory updated.', 'success');
+      // Immediately remove from the pending list so it doesn't linger in the packing queue UI.
+      setPendingOrders((prev) => prev.filter((o) => o.id !== orderDetails.id));
 
-          // Reset and go back to order list after 2 seconds
-          setTimeout(() => {
-            setSelectedOrderId(null);
-            setOrderDetails(null);
-            setScannedItems({});
-            setScanHistory([]);
-            fetchPendingOrders();
-          }, 2000);
-        } catch (completeError: any) {
-          console.error('❌ Complete error:', completeError);
-          displayToast('⚠️ Fulfilled but completion failed: ' + completeError.message, 'error');
-
-          // Still go back after showing error
-          setTimeout(() => {
-            setSelectedOrderId(null);
-            fetchPendingOrders();
-          }, 3000);
-        }
-      }, 1000);
+      // Auto-complete the order right after fulfillment to reduce inventory.
+      try {
+        console.log('🚀 Completing order...');
+        await orderService.complete(orderDetails.id);
+        console.log('✅ Order completed and inventory reduced');
+        displayToast('✅ Order completed! Inventory updated.', 'success');
+      } catch (completeError: any) {
+        console.error('❌ Complete error:', completeError);
+        displayToast('⚠️ Fulfilled but completion failed: ' + completeError.message, 'error');
+      } finally {
+        // Always reset the UI and refresh the pending queue.
+        setSelectedOrderId(null);
+        setOrderDetails(null);
+        setScannedItems({});
+        setScanHistory([]);
+        fetchPendingOrders();
+      }
     } catch (error: any) {
       console.error('❌ Fulfill error:', error);
       displayToast('❌ Fulfillment failed: ' + error.message, 'error');
@@ -547,8 +732,18 @@ if (!matchingItem) {
                               {getOrderTypeBadge(order.order_type)}
                             </div>
                             <p className="text-sm text-gray-600 dark:text-gray-400">
-                              {order.customer?.name} • {order.items?.length || 0} item(s)
+                              {(() => {
+                                const meta = orderCardMeta[Number(order.id)];
+                                const count = meta?.totalQty ?? getFallbackQtyFromOrderList(order);
+                                return `${order.customer?.name || 'Customer'} • ${count} item(s)`;
+                              })()}
                             </p>
+
+                            {orderCardMeta[Number(order.id)]?.lines?.length > 0 && (
+                              <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                {orderCardMeta[Number(order.id)].lines.join(' • ')}
+                              </p>
+                            )}
                             <p className="text-xs text-gray-500 mt-1">
                               {new Date(order.order_date).toLocaleDateString()} - {order.store?.name}
                             </p>
@@ -574,6 +769,14 @@ if (!matchingItem) {
         </div>
 
         {showToast && <Toast message={toastMessage} type={toastType} onClose={() => setShowToast(false)} />}
+
+        <ImageLightboxModal
+          open={imageModalOpen}
+          src={imageModalSrc}
+          title="Product image"
+          subtitle={imageModalTitle}
+          onClose={closeImageModal}
+        />
       </div>
     );
   }
@@ -620,9 +823,8 @@ if (!matchingItem) {
                 </div>
                 <button
                   onClick={() => setIsScanning(!isScanning)}
-                  className={`px-6 py-3 rounded-lg font-medium transition-all flex items-center gap-2 ${
-                    isScanning ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'
-                  }`}
+                  className={`px-6 py-3 rounded-lg font-medium transition-all flex items-center gap-2 ${isScanning ? 'bg-red-500 hover:bg-red-600 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'
+                    }`}
                 >
                   <Scan className="h-5 w-5" />
                   {isScanning ? 'Stop Scanning' : 'Start Scanning'}
@@ -677,62 +879,86 @@ if (!matchingItem) {
                         return (
                           <div
                             key={item.id}
-                            className={`p-4 rounded-lg border-2 transition-all ${
-                              isComplete
-                                ? 'bg-green-50 dark:bg-green-900/20 border-green-500'
-                                : scannedCount > 0
+                            className={`p-4 rounded-lg border-2 transition-all ${isComplete
+                              ? 'bg-green-50 dark:bg-green-900/20 border-green-500'
+                              : scannedCount > 0
                                 ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-500'
                                 : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700'
-                            }`}
+                              }`}
                           >
                             <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <h3 className="font-medium text-gray-900 dark:text-white">{item.product_name}</h3>
-                                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">SKU: {item.product_sku}</p>
-                                {item.batch_number && <p className="text-xs text-gray-500 dark:text-gray-500">Batch: {item.batch_number}</p>}
+                              <div className="flex items-start gap-3 flex-1">
+                                <button
+                                  type="button"
+                                  onClick={() => openImageModal(getItemThumbSrc(item.product_id), item.product_name)}
+                                  className="group relative h-12 w-12 overflow-hidden rounded-md border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  title="View image"
+                                >
+                                  <img
+                                    src={getItemThumbSrc(item.product_id)}
+                                    alt={item.product_name}
+                                    className="h-12 w-12 object-cover transition-transform duration-200 group-hover:scale-[1.05]"
+                                    onError={(e) => {
+                                      e.currentTarget.src = '/placeholder-product.png';
+                                    }}
+                                  />
+                                  <span className="pointer-events-none absolute inset-0 ring-0 group-hover:ring-2 group-hover:ring-blue-400/60" />
+                                </button>
+                                <div className="flex-1">
+                                  <h3 className="font-medium text-gray-900 dark:text-white">{item.product_name}</h3>
+                                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">SKU: {item.product_sku}</p>
+                                  {(item.batch_number || item.batch_id || item.batchId || item?.batch?.id) ? (
+                                    <p className="text-xs text-gray-500 dark:text-gray-500">
+                                      Batch: {item.batch_number || item?.batch?.batch_number || item.batch_id || item.batchId || item?.batch?.id}
+                                    </p>
+                                  ) : (
+                                    <p className="text-xs text-gray-500 dark:text-gray-500">
+                                      Batch: <span className="font-medium">Any</span> (assign on scan)
+                                    </p>
+                                  )}
 
-                                {/* ✅ Fixed / Added pricing UI */}
-                                <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                                  <div className="text-gray-600 dark:text-gray-400">
-                                    Unit:{' '}
-                                    <span className="font-semibold text-gray-900 dark:text-white">
-                                      {formatBDT(unit, 0)}
-                                    </span>
+                                  {/* ✅ Fixed / Added pricing UI */}
+                                  <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                                    <div className="text-gray-600 dark:text-gray-400">
+                                      Unit:{' '}
+                                      <span className="font-semibold text-gray-900 dark:text-white">
+                                        {formatBDT(unit, 0)}
+                                      </span>
+                                    </div>
+                                    <div className="text-gray-600 dark:text-gray-400">
+                                      Discount:{' '}
+                                      <span className="font-semibold text-gray-900 dark:text-white">
+                                        {formatBDT(discount, 0)}
+                                      </span>
+                                    </div>
+                                    <div className="text-gray-600 dark:text-gray-400 sm:text-right">
+                                      Line:{' '}
+                                      <span className="font-semibold text-gray-900 dark:text-white">
+                                        {formatBDT(lineTotal, 0)}
+                                      </span>
+                                    </div>
                                   </div>
-                                  <div className="text-gray-600 dark:text-gray-400">
-                                    Discount:{' '}
-                                    <span className="font-semibold text-gray-900 dark:text-white">
-                                      {formatBDT(discount, 0)}
-                                    </span>
-                                  </div>
-                                  <div className="text-gray-600 dark:text-gray-400 sm:text-right">
-                                    Line:{' '}
-                                    <span className="font-semibold text-gray-900 dark:text-white">
-                                      {formatBDT(lineTotal, 0)}
-                                    </span>
-                                  </div>
-                                </div>
 
-                                <div className="mt-2 flex items-center gap-2">
-                                  <div
-                                    className={`text-sm font-semibold ${
-                                      isComplete
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <div
+                                      className={`text-sm font-semibold ${isComplete
                                         ? 'text-green-600 dark:text-green-400'
                                         : scannedCount > 0
-                                        ? 'text-blue-600 dark:text-blue-400'
-                                        : 'text-gray-600 dark:text-gray-400'
-                                    }`}
-                                  >
-                                    {scannedCount} / {scanned?.required || 0} scanned
-                                  </div>
-                                  {scannedCount > 0 && !isComplete && (
-                                    <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                                      <div
-                                        className="h-2 bg-blue-500 transition-all"
-                                        style={{ width: `${(scannedCount / (scanned?.required || 1)) * 100}%` }}
-                                      />
+                                          ? 'text-blue-600 dark:text-blue-400'
+                                          : 'text-gray-600 dark:text-gray-400'
+                                        }`}
+                                    >
+                                      {scannedCount} / {scanned?.required || 0} scanned
                                     </div>
-                                  )}
+                                    {scannedCount > 0 && !isComplete && (
+                                      <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                        <div
+                                          className="h-2 bg-blue-500 transition-all"
+                                          style={{ width: `${(scannedCount / (scanned?.required || 1)) * 100}%` }}
+                                        />
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                               <div className="ml-4">
@@ -756,9 +982,8 @@ if (!matchingItem) {
                   <button
                     onClick={handleFulfillOrder}
                     disabled={isProcessing || progress.percentage !== 100}
-                    className={`w-full mt-6 px-6 py-4 rounded-lg font-semibold text-white transition-all flex items-center justify-center gap-2 ${
-                      progress.percentage === 100 && !isProcessing ? 'bg-green-600 hover:bg-green-700 shadow-lg' : 'bg-gray-400 cursor-not-allowed'
-                    }`}
+                    className={`w-full mt-6 px-6 py-4 rounded-lg font-semibold text-white transition-all flex items-center justify-center gap-2 ${progress.percentage === 100 && !isProcessing ? 'bg-green-600 hover:bg-green-700 shadow-lg' : 'bg-gray-400 cursor-not-allowed'
+                      }`}
                   >
                     {isProcessing ? (
                       <>
@@ -786,19 +1011,21 @@ if (!matchingItem) {
                   {/* Barcode Input */}
                   <div className="p-6 rounded-lg mb-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
                     <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">Scan or Enter Barcode</label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                      Tip: If an item shows <span className="font-medium">Batch: Any</span>, you can scan <span className="font-medium">any barcode</span> for that product. The batch will be assigned automatically from the scanned barcode.
+                    </p>
                     <input
                       ref={barcodeInputRef}
                       type="text"
                       value={currentBarcode}
                       onChange={(e) => setCurrentBarcode(e.target.value)}
-                      onKeyPress={handleBarcodeInput}
+                      onKeyDown={handleBarcodeInput}
                       disabled={!isScanning}
                       placeholder={isScanning ? 'Scan barcode or type manually...' : 'Start scanning first'}
-                      className={`w-full px-4 py-3 rounded-lg border-2 text-lg font-mono transition-all ${
-                        isScanning
-                          ? 'bg-white dark:bg-gray-700 border-blue-500 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500'
-                          : 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-500 cursor-not-allowed'
-                      } focus:outline-none`}
+                      className={`w-full px-4 py-3 rounded-lg border-2 text-lg font-mono transition-all ${isScanning
+                        ? 'bg-white dark:bg-gray-700 border-blue-500 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500'
+                        : 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-500 cursor-not-allowed'
+                        } focus:outline-none`}
                     />
                     <div className="flex items-center justify-between mt-2">
                       <p className="text-xs text-gray-600 dark:text-gray-400">
@@ -867,13 +1094,12 @@ if (!matchingItem) {
                         scanHistory.map((scan, index) => (
                           <div
                             key={index}
-                            className={`p-3 rounded-lg border transition-all ${
-                              scan.status === 'success'
-                                ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
-                                : scan.status === 'warning'
+                            className={`p-3 rounded-lg border transition-all ${scan.status === 'success'
+                              ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
+                              : scan.status === 'warning'
                                 ? 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800'
                                 : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
-                            }`}
+                              }`}
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div className="flex-1 min-w-0">
@@ -886,13 +1112,12 @@ if (!matchingItem) {
                                     <XCircle className="h-4 w-4 text-red-600 dark:text-red-400 flex-shrink-0" />
                                   )}
                                   <span
-                                    className={`text-xs font-mono font-semibold truncate ${
-                                      scan.status === 'success'
-                                        ? 'text-green-700 dark:text-green-400'
-                                        : scan.status === 'warning'
+                                    className={`text-xs font-mono font-semibold truncate ${scan.status === 'success'
+                                      ? 'text-green-700 dark:text-green-400'
+                                      : scan.status === 'warning'
                                         ? 'text-yellow-700 dark:text-yellow-400'
                                         : 'text-red-700 dark:text-red-400'
-                                    }`}
+                                      }`}
                                   >
                                     {scan.barcode}
                                   </span>
@@ -940,6 +1165,14 @@ if (!matchingItem) {
 
       {/* Toast Notification */}
       {showToast && <Toast message={toastMessage} type={toastType} onClose={() => setShowToast(false)} />}
+
+      <ImageLightboxModal
+        open={imageModalOpen}
+        src={imageModalSrc}
+        title="Product image"
+        subtitle={imageModalTitle}
+        onClose={closeImageModal}
+      />
 
       <style jsx>{`
         .custom-scrollbar::-webkit-scrollbar {

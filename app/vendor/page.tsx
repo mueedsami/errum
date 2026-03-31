@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useTheme } from "@/contexts/ThemeContext";
 import {
   X,
   Plus,
@@ -14,6 +15,7 @@ import {
   Pencil,
   Trash2,
 } from 'lucide-react';
+import AccessControl from '@/components/AccessControl';
 import { computeMenuPosition } from '@/lib/menuPosition';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
@@ -23,6 +25,7 @@ import { vendorPaymentService, CreatePaymentRequest, PaymentMethod } from '@/ser
 import storeService, { Store } from '@/services/storeService';
 import productService, { Product } from '@/services/productService';
 import categoryService, { Category, CategoryTree } from '@/services/categoryService';
+import { useAuth } from '@/contexts/AuthContext';
 import CategoryTreeSelector from '@/components/product/CategoryTreeSelector';
 
 /**
@@ -95,9 +98,8 @@ const Modal = ({
 
 const Alert = ({ type, message }: { type: 'success' | 'error'; message: string }) => (
   <div
-    className={`fixed top-4 right-4 z-[9999] flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg ${
-      type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
-    }`}
+    className={`fixed top-4 right-4 z-[9999] flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg ${type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+      }`}
   >
     <AlertCircle className="w-5 h-5" />
     <span>{message}</span>
@@ -105,8 +107,9 @@ const Alert = ({ type, message }: { type: 'success' | 'error'; message: string }
 );
 
 export default function VendorPaymentPage() {
+  const { isRole } = useAuth();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
+  const { darkMode, setDarkMode } = useTheme();
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -808,10 +811,19 @@ export default function VendorPaymentPage() {
     }
 
     // basic validation to avoid NaN
-    const bad = validItems.find((it) => !it.quantity_ordered || !it.unit_cost);
+    const bad = validItems.find((it) => !it.quantity_ordered || (!isRole(['online-moderator']) && !it.unit_cost));
     if (bad) {
-      showAlert('error', 'Please fill Quantity & Unit Cost for selected items');
+      showAlert('error', 'Please fill Quantity & Unit Cost for all items');
       return;
+    }
+
+    // Secondary validation: if moderator, they MUST fill Unit Sell Price if Cost is hidden
+    if (isRole(['online-moderator'])) {
+      const missingSell = validItems.find((it) => !it.unit_sell_price);
+      if (missingSell) {
+        showAlert('error', 'Please fill Quantity & Selling Price for all items');
+        return;
+      }
     }
 
     try {
@@ -829,7 +841,7 @@ export default function VendorPaymentPage() {
         items: validItems.map((item) => ({
           product_id: parseInt(item.product_id, 10),
           quantity_ordered: parseInt(item.quantity_ordered, 10),
-          unit_cost: parseFloat(item.unit_cost),
+          unit_cost: parseFloat(item.unit_cost || '0'),
           unit_sell_price: item.unit_sell_price ? parseFloat(item.unit_sell_price) : undefined,
           tax_amount: item.tax_amount ? parseFloat(item.tax_amount) : undefined,
           discount_amount: item.discount_amount ? parseFloat(item.discount_amount) : undefined,
@@ -894,11 +906,11 @@ export default function VendorPaymentPage() {
 
       const pos: OutstandingPurchaseOrder[] = Array.isArray((outstanding as any)?.purchase_orders)
         ? (outstanding as any).purchase_orders
-            .filter((po: any) => typeof po?.id === 'number')
-            .map((po: any) => ({
-              ...po,
-              status: po?.status,
-            }))
+          .filter((po: any) => typeof po?.id === 'number')
+          .map((po: any) => ({
+            ...po,
+            status: po?.status,
+          }))
         : [];
 
       setPurchaseOrders(pos);
@@ -1100,29 +1112,31 @@ export default function VendorPaymentPage() {
           <div className="flex items-center justify-between mb-6">
             <h1 className="text-2xl font-semibold text-gray-800 dark:text-gray-100">Vendor Payment Management</h1>
             <div className="flex gap-3">
-              <button
-                onClick={() => {
-                  setVendorModalMode('add');
-                  setEditingVendorId(null);
-                  setVendorForm({
-                    name: '',
-                    email: '',
-                    phone: '',
-                    address: '',
-                    contact_person: '',
-                    website: '',
-                    type: 'manufacturer',
-                    credit_limit: '',
-                    payment_terms: '',
-                    notes: '',
-                  });
-                  setShowAddVendor(true);
-                }}
-                className="flex items-center gap-2 bg-gray-900 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-              >
-                <Plus className="w-4 h-4" />
-                {vendorModalMode === 'add' ? 'Add Vendor' : 'Update Vendor'}
-              </button>
+              <AccessControl roles={['super-admin', 'admin']}>
+                <button
+                  onClick={() => {
+                    setVendorModalMode('add');
+                    setEditingVendorId(null);
+                    setVendorForm({
+                      name: '',
+                      email: '',
+                      phone: '',
+                      address: '',
+                      contact_person: '',
+                      website: '',
+                      type: 'manufacturer',
+                      credit_limit: '',
+                      payment_terms: '',
+                      notes: '',
+                    });
+                    setShowAddVendor(true);
+                  }}
+                  className="flex items-center gap-2 bg-gray-900 hover:bg-gray-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                  {vendorModalMode === 'add' ? 'Add Vendor' : 'Update Vendor'}
+                </button>
+              </AccessControl>
 
               <button
                 onClick={() => setShowAddPurchase(true)}
@@ -1158,18 +1172,18 @@ export default function VendorPaymentPage() {
 
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm text-left text-gray-700 dark:text-gray-300">
-                <thead className="bg-gray-100 dark:bg-gray-700">
-                  <tr>
-                    <th className="px-6 py-3">Vendor</th>
-                    <th className="px-6 py-3">Type</th>
-                    <th className="px-6 py-3">Contact</th>
-                    <th className="px-6 py-3">Credit Limit</th>
-                    <th className="px-6 py-3">Status</th>
-                    <th className="px-6 py-3 text-center">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredVendors.map((vendor) => (
+                  <thead className="bg-gray-100 dark:bg-gray-700">
+                    <tr>
+                      <th className="px-6 py-3">Vendor</th>
+                      <th className="px-6 py-3">Type</th>
+                      <th className="px-6 py-3">Contact</th>
+                      <th className="px-6 py-3">Credit Limit</th>
+                      <th className="px-6 py-3">Status</th>
+                      <th className="px-6 py-3 text-center">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredVendors.map((vendor) => (
                       <tr
                         key={vendor.id}
                         className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/30"
@@ -1189,23 +1203,24 @@ export default function VendorPaymentPage() {
                         <td className="px-6 py-3">৳{formatCurrency((vendor as any).credit_limit)}</td>
                         <td className="px-6 py-3">
                           <span
-                            className={`text-xs px-2 py-1 rounded ${
-                              (vendor as any).is_active
+                            className={`text-xs px-2 py-1 rounded ${(vendor as any).is_active
                                 ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
                                 : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
-                            }`}
+                              }`}
                           >
                             {(vendor as any).is_active ? 'Active' : 'Inactive'}
                           </span>
                         </td>
                         <td className="px-6 py-3">
                           <div className="flex items-center justify-center gap-2">
-                            <button
-                              onClick={() => openPaymentModal(vendor)}
-                              className="flex items-center gap-1 bg-gray-900 hover:bg-gray-700 text-white text-xs px-3 py-2 rounded-lg transition-colors"
-                            >
-                              ৳ Make Payment
-                            </button>
+                            <AccessControl roles={['super-admin', 'admin']}>
+                              <button
+                                onClick={() => openPaymentModal(vendor)}
+                                className="flex items-center gap-1 bg-gray-900 hover:bg-gray-700 text-white text-xs px-3 py-2 rounded-lg transition-colors"
+                              >
+                                ৳ Make Payment
+                              </button>
+                            </AccessControl>
 
                             <div className="relative">
                               <button
@@ -1275,9 +1290,9 @@ export default function VendorPaymentPage() {
                           </div>
                         </td>
                       </tr>
-                  ))}
-                </tbody>
-              </table>
+                    ))}
+                  </tbody>
+                </table>
               </div>
 
               {filteredVendors.length === 0 && !loading && (
@@ -1679,17 +1694,19 @@ export default function VendorPaymentPage() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Unit Cost (৳)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={item.unit_cost}
-                      onChange={(e) => updateProductItem(index, 'unit_cost', e.target.value)}
-                      className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                      placeholder="0.00"
-                    />
-                  </div>
+                  <AccessControl roles={['super-admin', 'admin']}>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Unit Cost (৳)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={item.unit_cost}
+                        onChange={(e) => updateProductItem(index, 'unit_cost', e.target.value)}
+                        className="w-full px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </AccessControl>
 
                   <div>
                     <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Sell Price (৳)</label>
@@ -1827,17 +1844,19 @@ export default function VendorPaymentPage() {
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Unit Cost for all (optional)</label>
-              <input
-                type="number"
-                step="0.01"
-                value={variantBulkCost}
-                onChange={(e) => setVariantBulkCost(e.target.value)}
-                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                placeholder="e.g., 1200"
-              />
-            </div>
+            <AccessControl roles={['super-admin', 'admin']}>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Unit Cost for all (optional)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={variantBulkCost}
+                  onChange={(e) => setVariantBulkCost(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  placeholder="e.g., 1200"
+                />
+              </div>
+            </AccessControl>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Sell Price for all (optional)</label>
@@ -1931,20 +1950,22 @@ export default function VendorPaymentPage() {
                           className="w-28 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                         />
                       </td>
-                      <td className="px-4 py-3">
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={variantInputs[v.id]?.unit_cost ?? ''}
-                          onChange={(e) =>
-                            setVariantInputs((prev) => ({
-                              ...prev,
-                              [v.id]: { ...(prev[v.id] || { quantity: '0', unit_cost: '', unit_sell_price: '' }), unit_cost: e.target.value },
-                            }))
-                          }
-                          className="w-36 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                        />
-                      </td>
+                      <AccessControl roles={['super-admin', 'admin']}>
+                        <td className="px-4 py-3">
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={variantInputs[v.id]?.unit_cost ?? ''}
+                            onChange={(e) =>
+                              setVariantInputs((prev) => ({
+                                ...prev,
+                                [v.id]: { ...(prev[v.id] || { quantity: '0', unit_cost: '', unit_sell_price: '' }), unit_cost: e.target.value },
+                              }))
+                            }
+                            className="w-36 px-3 py-2 border rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                          />
+                        </td>
+                      </AccessControl>
                       <td className="px-4 py-3">
                         <input
                           type="number"

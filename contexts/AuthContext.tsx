@@ -4,10 +4,14 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { useRouter, usePathname } from 'next/navigation';
 import authService, { LoginCredentials, Employee } from '@/services/authService';
 import roleService from '@/services/roleService';
+import { RoleSlug } from '@/types/roles';
 
 interface AuthContextType {
   user: Employee | null;
+  role: RoleSlug | null;
   permissions: string[];
+  isGlobal: boolean;
+  isScoped: boolean;
   /** The employee's assigned store (single store in backend Employee model) */
   storeId?: number;
   /** If user is restricted to only their store, this equals storeId; otherwise undefined */
@@ -219,8 +223,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  const roleSlug = user?.role?.slug || readCachedRoleAndPermissions().roleSlug;
-  const isSuperAdmin = !!roleSlug && SUPER_ADMIN_SLUGS.includes(roleSlug);
+  const role = user?.role?.slug as RoleSlug || (readCachedRoleAndPermissions().roleSlug as RoleSlug);
+  const isGlobal = ['super-admin', 'admin'].includes(role);
+  const isScoped = !isGlobal;
+  const isSuperAdmin = !!role && SUPER_ADMIN_SLUGS.includes(role);
 
   const hasPermission = (permission: string) => {
     if (isSuperAdmin) return true;
@@ -238,24 +244,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
   };
 
   const storeId = user?.store_id ? Number(user.store_id) : undefined;
-  /**
-   * Multi-store selection is an ADMIN capability.
-   *
-   * IMPORTANT: Do NOT use `stores.view` to decide multi-store access.
-   * Many store/branch roles legitimately need to view their own store, but must
-   * not be able to switch to other stores in operational pages (POS/Orders/etc).
-   *
-   * Heuristic:
-   * - Super Admin: can select any store
-   * - Roles that can manage stores (create/edit/delete): can select any store
-   * - Everyone else: scoped to their assigned store_id
-   */
   const canSelectStore = isSuperAdmin || hasAnyPermission(['stores.create', 'stores.edit', 'stores.delete']);
   const scopedStoreId = canSelectStore ? undefined : storeId;
 
   const value: AuthContextType = {
     user,
+    role,
     permissions,
+    isGlobal,
+    isScoped,
     storeId,
     scopedStoreId,
     canSelectStore,
@@ -279,5 +276,23 @@ export function useAuth() {
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');
   }
-  return context;
+
+  const isRole = (slugs: RoleSlug | RoleSlug[]): boolean => {
+    const userRole = context?.role;
+    if (!userRole) return false;
+    return Array.isArray(slugs) ? slugs.includes(userRole) : userRole === slugs;
+  };
+
+  return {
+    ...context,
+    isRole,
+    // Named helpers
+    canAccessPOS:              isRole(['super-admin', 'admin', 'branch-manager', 'pos-salesman']),
+    canAccessSocialCommerce:   isRole(['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman']),
+    canAccessInventory:        isRole(['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman']),
+    canAccessOrders:           isRole(['super-admin', 'admin', 'branch-manager', 'online-moderator']),
+    canAccessPurchaseOrders:   isRole(['super-admin', 'admin', 'branch-manager', 'online-moderator']),
+    canAccessPackagePage:      isRole(['super-admin', 'admin', 'branch-manager', 'pos-salesman']),
+    canAccessStoreAssignment:  isRole(['super-admin', 'admin', 'branch-manager', 'online-moderator']),
+  };
 }

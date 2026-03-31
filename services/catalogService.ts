@@ -1,6 +1,7 @@
 import api from '@/lib/axios';
 import axios from 'axios';
 import { getBaseProductName, getColorLabel, getSizeLabel } from '@/lib/productNameUtils';
+import inventoryService from './inventoryService';
 
 /**
  * -----------------------------
@@ -46,6 +47,7 @@ export interface Product {
   dimensions?: string;
   in_stock: boolean;
   stock_quantity: number;
+  available_inventory?: number | null;
   category: ProductCategory | string;
   images: ProductImage[];
   tags?: string[];
@@ -54,6 +56,7 @@ export interface Product {
     average: number;
     count: number;
   };
+  batches?: any[];
   created_at: string;
   updated_at: string;
 }
@@ -115,6 +118,18 @@ export interface CatalogProductsResponse {
 export interface ProductDetailResponse {
   product: Product;
   related_products: SimpleProduct[];
+}
+
+export interface BranchStock {
+  store_id: number;
+  store_name: string;
+  store_address: string;
+  total_quantity: number;
+}
+
+export interface BranchStockResponse {
+  success: boolean;
+  data: BranchStock[];
 }
 
 export interface CategoriesResponse {
@@ -182,6 +197,7 @@ export interface SearchProductsParams {
   sort?: string;
   per_page?: number;
   page?: number;
+  group_by_sku?: boolean;
 }
 
 export interface Category {
@@ -501,7 +517,8 @@ const normalizeProduct = (
 
   const sellingPrice = toNumber(raw?.selling_price ?? raw?.price ?? raw?.sale_price, 0);
   const costPrice = toNumber(raw?.cost_price ?? raw?.regular_price ?? sellingPrice, sellingPrice);
-  const stockQty = toNumber(raw?.stock_quantity ?? raw?.quantity ?? raw?.available_quantity, 0);
+  const stockQty = toNumber(raw?.stock_quantity ?? raw?.quantity ?? raw?.available_quantity ?? raw?.global_available ?? raw?.total_quantity, 0);
+  const availableInventory = raw?.available_inventory != null ? toNumber(raw.available_inventory, 0) : stockQty;
 
   const explicitInStock = raw?.in_stock;
   const inStock = typeof explicitInStock === 'boolean' ? explicitInStock : stockQty > 0;
@@ -553,6 +570,7 @@ const normalizeProduct = (
     dimensions: raw?.dimensions || undefined,
     in_stock: inStock,
     stock_quantity: stockQty,
+    available_inventory: availableInventory,
     category: category || '',
     images,
     tags: Array.isArray(raw?.tags) ? raw.tags : undefined,
@@ -563,6 +581,7 @@ const normalizeProduct = (
         count: toNumber(raw.ratings.count, 0),
       }
       : undefined,
+    batches: Array.isArray(raw?.batches) ? raw.batches : undefined,
     created_at: normalizeString(raw?.created_at || ''),
     updated_at: normalizeString(raw?.updated_at || raw?.created_at || ''),
   };
@@ -661,7 +680,7 @@ const normalizeGroupedProduct = (rawGroup: any): CatalogGroupedProduct => {
   );
   const description = normalizeString(rawGroup?.description || '');
 
-  const rawMain = rawGroup?.main_variant || rawGroup?.mainVariant || rawGroup?.main || rawGroup?.product || {};
+  const rawMain = rawGroup?.main_variant || rawGroup?.mainVariant || rawGroup?.main || rawGroup?.product || rawGroup;
 
   const mainVariant = normalizeProduct(rawMain, {
     base_name: baseName,
@@ -724,8 +743,8 @@ const normalizeGroupedProduct = (rawGroup: any): CatalogGroupedProduct => {
 const isPaginatorShape = (obj: any): boolean => {
   return !!obj &&
     typeof obj === 'object' &&
-    Array.isArray(obj.data) &&
-    (obj.current_page !== undefined || obj.per_page !== undefined || obj.total !== undefined);
+    (Array.isArray(obj.data) || Array.isArray(obj.items)) &&
+    (obj.current_page !== undefined || obj.per_page !== undefined || obj.total !== undefined || obj.pagination !== undefined);
 };
 
 const extractPaginator = (raw: any): any => {
@@ -740,17 +759,20 @@ const extractPaginator = (raw: any): any => {
 };
 
 const normalizePagination = (source: any, itemCount: number): PaginationMeta => {
-  const currentPage = toNumber(source?.current_page ?? source?.page, 1) || 1;
-  const perPage = toNumber(source?.per_page, itemCount || 20) || (itemCount || 20);
-  const total = toNumber(source?.total, itemCount);
-  const lastPage = toNumber(source?.last_page, Math.max(1, Math.ceil((total || itemCount || 1) / Math.max(perPage, 1))));
+  // Support nested pagination object if passed the parent
+  const p = source?.pagination || source;
+  
+  const currentPage = toNumber(p?.current_page ?? p?.page, 1) || 1;
+  const perPage = toNumber(p?.per_page, itemCount || 20) || (itemCount || 20);
+  const total = toNumber(p?.total, itemCount);
+  const lastPage = toNumber(p?.last_page, Math.max(1, Math.ceil((total || itemCount || 1) / Math.max(perPage, 1))));
 
   return {
     current_page: currentPage,
     per_page: perPage,
     total,
     last_page: Math.max(1, lastPage),
-    has_more_pages: Boolean(source?.has_more_pages ?? (currentPage < Math.max(1, lastPage))),
+    has_more_pages: Boolean(p?.has_more_pages ?? (currentPage < Math.max(1, lastPage))),
   };
 };
 
@@ -773,7 +795,7 @@ const parseProductsPayload = (payload: any): CatalogProductsResponse => {
   // 2) Feb 2026 grouped paginator shape
   const paginator = extractPaginator(payload);
   if (paginator) {
-    const rows = Array.isArray(paginator.data) ? paginator.data : [];
+    const rows = (Array.isArray(paginator.items) ? paginator.items : (Array.isArray(paginator.data) ? paginator.data : []));
 
     const looksGrouped = rows.some((row: any) => row && (row.main_variant || row.mainVariant || row.base_name));
 
@@ -785,17 +807,25 @@ const parseProductsPayload = (payload: any): CatalogProductsResponse => {
         products,
         grouped_products: groupedProducts,
         pagination: normalizePagination(paginator, groupedProducts.length),
-        meta: payload?.meta,
+        meta: payload?.meta || { 
+          query: payload?.query, 
+          total_results: payload?.total_results ?? payload?.total 
+        },
       };
     }
 
     // Flat paginated rows
-    const products = rows.map((row: any) => normalizeProduct(row));
-    return {
+    const products = (Array.isArray(paginator.items) ? paginator.items : (Array.isArray(paginator.data) ? paginator.data : []))
+      .map((row: any) => normalizeProduct(row));
+
+      return {
       products,
       grouped_products: buildGroupedProductsFromFlat(products),
       pagination: normalizePagination(paginator, products.length),
-      meta: payload?.meta,
+      meta: payload?.meta || { 
+        query: payload?.query, 
+        total_results: payload?.total_results ?? payload?.total 
+      },
     };
   }
 
@@ -897,6 +927,11 @@ const catalogService = {
       const requestParams: Record<string, any> = { ...(params || {}) };
       delete requestParams._suppressErrorLog;
 
+      // Backend specifically expects 'search' for keyword filtering in /catalog/products
+      if (requestParams.q && !requestParams.search) {
+        requestParams.search = requestParams.q;
+      }
+
       // Backwards/forwards compatible category filters:
       // Some backends expect `category` (slug/name) while others use `category_id`.
       if (!requestParams.category && !requestParams.category_slug && requestParams.category_id) {
@@ -981,7 +1016,7 @@ const catalogService = {
 
         const related = Array.isArray(payload.related_products)
           ? payload.related_products.map((p: any) =>
-              normalizeProduct(p, { base_name: baseName, description, category }) as SimpleProduct
+              normalizeProduct(p) as SimpleProduct
             )
           : [];
 
@@ -1077,6 +1112,7 @@ const catalogService = {
       sort_by: params.sort as any,
       per_page: params.per_page,
       page: params.page,
+      group_by_sku: params.group_by_sku,
     };
 
     try {
@@ -1114,6 +1150,33 @@ const catalogService = {
         console.error('Error searching products:', fallbackError || error);
         throw new Error('Failed to search products');
       }
+    }
+  },
+
+  async advancedSearch(params: any): Promise<SearchProductsResponse> {
+    try {
+      const response = await api.post('/products/advanced-search', params);
+      const payload = response?.data;
+      
+      const productsData = payload.data?.items ?? payload.data?.data ?? payload.products ?? [];
+      const products = Array.isArray(productsData) 
+        ? productsData.map((p: any) => normalizeProduct(p))
+        : [];
+        
+      const pagination = normalizePagination(payload.data, products.length);
+
+      return {
+        products,
+        grouped_products: buildGroupedProductsFromFlat(products),
+        pagination,
+        meta: {
+          query: params.query,
+          total_results: payload.total_results || pagination.total,
+        },
+      };
+    } catch (error) {
+      console.error('Advanced search failed:', error);
+      throw new Error('Failed to perform advanced search');
     }
   },
 
@@ -1190,6 +1253,28 @@ const catalogService = {
     } catch (error) {
       console.error('Error adding to wishlist:', error);
       throw new Error('Failed to add product to wishlist');
+    }
+  },
+
+  async getBranchStock(productId: number): Promise<BranchStock[]> {
+    try {
+      const response = await inventoryService.getGlobalInventory({ product_id: productId });
+      if (response.success && response.data.length > 0) {
+        // Take the first product match (since we filtered by product_id)
+        const productInventory = response.data[0];
+        
+        // Map to BranchStock[] format
+        return productInventory.stores.map(s => ({
+          store_id: s.store_id,
+          store_name: s.store_name,
+          store_address: s.store_address || '',
+          total_quantity: s.quantity
+        }));
+      }
+      return [];
+    } catch (error) {
+      console.error('Error fetching branch stock:', error);
+      return [];
     }
   },
 };

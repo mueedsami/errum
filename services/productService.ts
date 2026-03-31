@@ -24,6 +24,9 @@ export interface Product {
     id: number;
     name: string;
   };
+  selling_price?: number;
+  base_price?: number; // alias for selling_price
+  global_available?: number; // total available from reserved_products
   created_at: string;
   updated_at: string;
 }
@@ -127,6 +130,9 @@ function transformProduct(product: any): Product {
     variants: product.variants,
     category: product.category,
     vendor: product.vendor,
+    selling_price: product.selling_price || product.base_price,
+    base_price: product.base_price || product.selling_price,
+    global_available: product.global_available,
     created_at: product.created_at,
     updated_at: product.updated_at,
   };
@@ -165,6 +171,15 @@ export const productService = {
     category_id?: number;
     vendor_id?: number;
     search?: string;
+    sort_by?: string;
+    sort_direction?: 'asc' | 'desc';
+    /** Proposal 1: return SKU-grouped response instead of flat variant rows */
+    group_by_sku?: boolean;
+    /** Proposal 2: server-side price filter (BDT) */
+    min_price?: number;
+    max_price?: number;
+    stock_status?: 'all' | 'in_stock' | 'not_in_stock';
+    in_stock?: string;
     is_archived?: boolean;
   }): Promise<{ data: Product[]; total: number; current_page: number; last_page: number }> {
     try {
@@ -201,14 +216,15 @@ export const productService = {
 
       const products = rawList.map(transformProduct);
 
-      // Pagination (new shape)
+      // Pagination (new shape — used by Proposal 1 grouped endpoint)
       const pagination = dataRoot.pagination;
       if (pagination) {
         return {
           data: products,
           total: pagination.total ?? products.length,
           current_page: pagination.current_page ?? 1,
-          last_page: pagination.total_pages ?? 1,
+          // Some backends use `last_page`, others use `total_pages` — support both
+          last_page: pagination.last_page ?? pagination.total_pages ?? 1,
         };
       }
 
@@ -222,6 +238,50 @@ export const productService = {
     } catch (error: any) {
       console.error('Get products error:', error);
       return { data: [], total: 0, current_page: 1, last_page: 1 };
+    }
+  },
+
+  /**
+   * Proposal 5 — Wire the advanced search controller.
+   * Uses ProductSearchController (fuzzy, Bangla, phonetic) when a query is present.
+   * Falls back gracefully: if the endpoint is unavailable, the caller should use getAll().
+   */
+  async advancedSearch(params: {
+    query: string;
+    category_id?: number;
+    vendor_id?: number;
+    per_page?: number;
+    page?: number;
+    enable_fuzzy?: boolean;
+    stock_status?: 'all' | 'in_stock' | 'not_in_stock';
+    in_stock?: string;
+  }): Promise<{ data: Product[]; total: number; current_page: number; last_page: number }> {
+    try {
+      const response = await axiosInstance.post('/products/advanced-search', params);
+      const result = response.data;
+      if (!result?.success) return { data: [], total: 0, current_page: 1, last_page: 1 };
+
+      const dataRoot = result.data ?? {};
+      const rawList: any[] = Array.isArray(dataRoot.items)
+        ? dataRoot.items
+        : Array.isArray(dataRoot.products)
+          ? dataRoot.products
+          : Array.isArray(dataRoot.data)
+            ? dataRoot.data
+            : [];
+
+      const products = rawList.map(transformProduct);
+      const pagination = dataRoot.pagination ?? dataRoot;
+      return {
+        data: products,
+        total: pagination.total ?? products.length,
+        current_page: pagination.current_page ?? 1,
+        last_page: pagination.last_page ?? pagination.total_pages ?? 1,
+      };
+    } catch (error: any) {
+      console.error('Advanced search error:', error);
+      // Surface as a typed error so caller can fall back to getAll
+      throw error;
     }
   },
 
@@ -535,7 +595,7 @@ export const productService = {
     try {
       const response = await axiosInstance.get('/products/search-by-field', { params });
       const result = response.data;
-      
+
       if (result.success) {
         const products = (result.data.data || result.data || []).map(transformProduct);
         return {
@@ -550,6 +610,46 @@ export const productService = {
       return { data: [], total: 0 };
     }
   },
+
+  /**
+   * Public: Find stock details by barcode
+   * API: GET /api/catalog/find-stock/{barcode}
+   */
+  async findStockByBarcode(barcode: string): Promise<StockDetail> {
+    try {
+      const response = await axiosInstance.get(`/catalog/find-stock/${barcode}`);
+      const result = response.data;
+      if (!result.success || !result.data) {
+        throw new Error(result.message || 'Failed to fetch stock details');
+      }
+      return result.data as StockDetail;
+    } catch (error: any) {
+      console.error('Find stock by barcode error:', error);
+      throw new Error(error.response?.data?.message || 'Barcode not found or error fetching data');
+    }
+  },
 };
+
+export interface StockDetail {
+  product_id: number;
+  name: string;
+  sku: string;
+  description?: string;
+  category?: string;
+  images: any[];
+  inventory: {
+    physical_stock: number;
+    reserved_stock: number;
+    available_stock: number;
+  };
+  branch_stock: {
+    store_id: number;
+    store_name: string;
+    store_address?: string;
+    quantity: number;
+  }[];
+  variants: any[];
+  scanned_barcode: string;
+}
 
 export default productService;

@@ -21,7 +21,7 @@ export function openReceiptModal(order: any, opts?: { title?: string; template?:
   dispatch({
     orders: [order],
     startIndex: 0,
-    title: opts?.title || 'Receipt',
+    title: opts?.title || 'Parcel Sticker',
     template: opts?.template || 'receipt',
   });
 }
@@ -33,7 +33,7 @@ export function openBulkReceiptModal(
   dispatch({
     orders: orders || [],
     startIndex: 0,
-    title: opts?.title || 'Bulk Receipts',
+    title: opts?.title || 'Bulk Parcel Stickers',
     template: opts?.template || 'receipt',
   });
 }

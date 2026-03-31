@@ -1,4 +1,6 @@
 import axios from 'axios';
+import { ROLES_SKIPPING_STORE_SCOPE } from './accessMap';
+import { RoleSlug } from '@/types/roles';
 
 // NOTE:
 // In local dev, NEXT_PUBLIC_API_URL is sometimes missing.
@@ -29,6 +31,8 @@ const PUBLIC_ROUTES = [
   '/guest-checkout',
   '/guest-orders/by-phone',
   '/payment-method',
+  // Public order tracking and details
+  '/customer/orders/',
 ];
 
 // Helper function to check if route is public
@@ -53,96 +57,85 @@ axiosInstance.interceptors.request.use(
       return config;
     }
 
+    const url = String(config.url || '');
+
     // Get token from localStorage for protected routes
     if (typeof window !== 'undefined') {
       // Determine which token to use based on route
-      if (isCustomerRoute(config.url)) {
+      if (isCustomerRoute(url)) {
         // E-commerce customer routes - use customer token
         const token = localStorage.getItem('auth_token');
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
-          console.log('🔒 Customer route, adding customer auth:', config.url);
+          console.log('🔒 Customer route, adding customer auth:', url);
         }
       } else {
         // Admin/Store routes - use admin token
         const token = localStorage.getItem('authToken');
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
-          console.log('🔒 Admin route, adding admin auth:', config.url);
+          console.log('🔒 Admin route, adding admin auth:', url);
         }
       }
 
       // -----------------------------
-      // Store-scoped access
+      // Store-scoped access (Scoping Phase 1 Rollout)
       // -----------------------------
-      // Branch roles should only operate within their assigned store_id.
-      // Admin/Super Admin can see all stores.
-      // We enforce this by automatically injecting `store_id` into requests
-      // for store-scoped resources when the user is scoped.
       try {
-        const url = String(config.url || '');
         const method = String(config.method || 'get').toLowerCase();
+
+        // 1) Respect manual bypass flag
+        if (config.skipStoreScope) {
+          return config;
+        }
 
         // Only apply to admin/store routes (NOT customer routes) and non-public routes.
         if (!isCustomerRoute(url) && !isPublicRoute(url)) {
           const roleSlug = localStorage.getItem('userRoleSlug') || '';
-
-          // Super admin + admin are global (can see all stores)
-          const GLOBAL_ROLE_SLUGS = ['super-admin', 'super_admin', 'superadmin', 'admin', 'administrator'];
-          const isGlobalRole = GLOBAL_ROLE_SLUGS.includes(roleSlug);
-
-          // If role slug missing, fall back to permissions heuristic.
-          let perms: string[] = [];
-          try {
-            const raw = localStorage.getItem('userPermissions');
-            perms = raw ? JSON.parse(raw) : [];
-            if (!Array.isArray(perms)) perms = [];
-          } catch {
-            perms = [];
-          }
-
-          const hasAny = (p: string[]) => p.some((x) => perms.includes(x));
-          const canSelectStore = isGlobalRole || hasAny(['stores.create', 'stores.edit', 'stores.delete']);
           const storeIdRaw = localStorage.getItem('storeId');
           const storeId = storeIdRaw ? Number(storeIdRaw) : undefined;
-          const scopedStoreId = (!canSelectStore && storeId && Number.isFinite(storeId)) ? storeId : undefined;
 
-          // Only inject into these store-scoped resources.
-          const STORE_SCOPED_PREFIXES = [
-            '/orders',
-            '/purchase-orders',
-            '/transactions',
-            '/accounts',
-            '/expenses',
-            '/business-history',
-          ];
+          // Canonical Global Roles (Super Admin + Admin + Online Moderator)
+          const isGlobalRole = ROLES_SKIPPING_STORE_SCOPE.includes(roleSlug as RoleSlug);
 
-          const isStoreScopedEndpoint = STORE_SCOPED_PREFIXES.some((p) => url.startsWith(p));
-
-          if (scopedStoreId && isStoreScopedEndpoint) {
+          // Scoping logic: 
+          // If NOT a global role AND a storeId exists, inject it into all requests.
+          if (!isGlobalRole && storeId && Number.isFinite(storeId)) {
             // GET/DELETE: inject via query params
             if (method === 'get' || method === 'delete') {
-              config.params = { ...(config.params || {}), store_id: scopedStoreId };
+              config.params = { ...(config.params || {}), store_id: storeId };
             }
 
-            // POST/PATCH/PUT: inject into body (also keep params for safety)
-            if (method === 'post' || method === 'put' || method === 'patch') {
-              const data: any = config.data && typeof config.data === 'string'
-                ? (() => {
-                    try { return JSON.parse(config.data as any); } catch { return {}; }
-                  })()
-                : (config.data || {});
-
-              // Never allow branch users to override store_id to another store.
-              data.store_id = scopedStoreId;
-
-              config.data = typeof config.data === 'string' ? JSON.stringify(data) : data;
-              config.params = { ...(config.params || {}), store_id: scopedStoreId };
+            // POST/PATCH/PUT: inject into body
+            if (['post', 'put', 'patch'].includes(method)) {
+              let data: any = config.data || {};
+              
+              if (data instanceof FormData) {
+                // If store_id not already present, append it.
+                if (!data.has('store_id')) {
+                  data.append('store_id', String(storeId));
+                }
+              } else if (typeof data === 'string') {
+                try {
+                  data = JSON.parse(data);
+                  data.store_id = storeId;
+                  config.data = JSON.stringify(data);
+                } catch {
+                  // Fallback for non-JSON strings
+                }
+              } else {
+                // Plane object
+                data.store_id = storeId;
+                config.data = data;
+              }
+              
+              // Also keep in params for safety (some backend controllers read from request query even on POST)
+              config.params = { ...(config.params || {}), store_id: storeId };
             }
           }
         }
-      } catch {
-        // no-op
+      } catch (e) {
+        console.error('Interceptor scoping error:', e);
       }
     }
     return config;

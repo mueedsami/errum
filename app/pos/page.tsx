@@ -16,6 +16,7 @@ import {
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from "@/contexts/ThemeContext";
 
 // Services
 import orderService from '@/services/orderService';
@@ -38,6 +39,7 @@ import CustomerFormModal from '@/components/pos/CustomerFormModal';
 
 import { useCustomerLookup } from '@/lib/hooks/useCustomerLookup';
 import { checkQZStatus, printReceipt } from '@/lib/qz-tray';
+import DailyCashReportModal from '@/components/pos/DailyCashReportModal';
 
 interface Store {
   id: number;
@@ -81,7 +83,7 @@ export interface ExtendedCartItem extends CartItem {
 export default function POSPage() {
   const { user, scopedStoreId, canSelectStore } = useAuth();
   // UI State
-  const [darkMode, setDarkMode] = useState(false);
+  const { darkMode, setDarkMode } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -258,6 +260,9 @@ export default function POSPage() {
     costPrice?: number;
     originalPrice?: number;
   } | null>(null);
+
+  // ✅ Reports
+  const [showDailyReportModal, setShowDailyReportModal] = useState(false);
 
   // ============ TOAST HELPER ============
   const showToast = (message: string, type: 'success' | 'error') => {
@@ -1449,15 +1454,26 @@ export default function POSPage() {
                   Point of Sale
                 </h1>
 
-                {/* ✅ Defect Item Indicator */}
-                {defectItem && (
-                  <div className="flex items-center gap-2 px-4 py-2 bg-orange-100 dark:bg-orange-900/30 border border-orange-300 dark:border-orange-700 rounded-lg">
-                    <AlertCircle className="w-5 h-5 text-orange-600 dark:text-orange-400" />
-                    <span className="text-sm font-medium text-orange-900 dark:text-orange-300">
-                      Defective Item Ready: {defectItem.productName}
-                    </span>
-                  </div>
-                )}
+                <div className="flex items-center gap-3">
+                  {/* ✅ Defect Item Indicator */}
+                  {defectItem && (
+                    <div className="flex items-center gap-2 px-4 py-2 bg-orange-100 dark:bg-orange-900/30 border border-orange-300 dark:border-orange-700 rounded-lg">
+                      <AlertCircle className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+                      <span className="text-sm font-medium text-orange-900 dark:text-orange-300">
+                        Defective Item Ready: {defectItem.productName}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* ✅ Daily Cash Report Button */}
+                  <button
+                    onClick={() => setShowDailyReportModal(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all text-sm font-medium shadow-sm hover:shadow-md h-10"
+                  >
+                    <Download className="w-4 h-4" />
+                    Daily Cash Report
+                  </button>
+                </div>
               </div>
 
               {/* Input Mode Selector */}
@@ -2217,6 +2233,13 @@ export default function POSPage() {
           }}
         />
       )}
+      <DailyCashReportModal
+        isOpen={showDailyReportModal}
+        onClose={() => setShowDailyReportModal(false)}
+        storeId={selectedOutlet}
+        storeName={outlets.find(o => String(o.id) === selectedOutlet)?.name || ''}
+        darkMode={darkMode}
+      />
     </div>
   );
 }

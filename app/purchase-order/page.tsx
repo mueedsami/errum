@@ -1,18 +1,21 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { useTheme } from "@/contexts/ThemeContext";
 import { X, Plus, Eye, Check, Package, FileText, Loader2, AlertCircle, ChevronDown, ChevronUp, Edit2 } from 'lucide-react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
 import GroupedAllBarcodesPrinter, { BatchBarcodeSource } from '@/components/GroupedAllBarcodesPrinter';
-import purchaseOrderService, { 
-  PurchaseOrder, 
+import purchaseOrderService, {
+  PurchaseOrder,
   ReceiveItemData,
-  PurchaseOrderFilters 
+  PurchaseOrderFilters
 } from '@/services/purchase-order.service';
 import { vendorService, Vendor } from '@/services/vendorService';
 import { productService, Product } from '@/services/productService';
 import categoryService, { CategoryTree } from '@/services/categoryService';
+import AccessControl from '@/components/AccessControl';
+import { useAuth } from '@/contexts/AuthContext';
 
 // --- Image helpers (same approach as Orders page) ---
 const getApiBaseUrl = () => {
@@ -121,9 +124,8 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }: {
 };
 
 const Alert = ({ type, message }: { type: 'success' | 'error'; message: string }) => (
-  <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg ${
-    type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
-  }`}>
+  <div className={`fixed top-4 right-4 z-50 flex items-center gap-2 px-4 py-3 rounded-lg shadow-lg ${type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+    }`}>
     <AlertCircle className="w-5 h-5" />
     <span>{message}</span>
   </div>
@@ -165,7 +167,8 @@ const PaymentStatusBadge = ({ status }: { status: string }) => {
 
 export default function PurchaseOrdersPage() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [darkMode, setDarkMode] = useState(false);
+  const { darkMode, setDarkMode } = useTheme();
+  const { isRole } = useAuth();
   const [loading, setLoading] = useState(false);
   const [alert, setAlert] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -357,13 +360,14 @@ export default function PurchaseOrdersPage() {
 
     const run = async () => {
       try {
-        const params: Parameters<typeof productService.getAll>[0] = {
+        const params: any = {
           per_page: 50,
           page: 1,
           is_archived: false,
         };
         if (selectedCategoryId) params.category_id = selectedCategoryId;
         if (editProductSearch.trim()) params.search = editProductSearch.trim();
+        if (params.search) params.per_page = 20; // smaller batch for search
 
         const res = await productService.getAll(params);
         if (!cancelled) {
@@ -394,12 +398,12 @@ export default function PurchaseOrdersPage() {
   };
 
   const updateFilters = (
-  partial: Partial<PurchaseOrderFilters>,
-  opts?: { resetPage?: boolean }
-) => {
-  const resetPage = opts?.resetPage ?? true;
+    partial: Partial<PurchaseOrderFilters>,
+    opts?: { resetPage?: boolean }
+  ) => {
+    const resetPage = opts?.resetPage ?? true;
 
-  setFilters((prev) => ({
+    setFilters((prev) => ({
       ...prev,
       ...partial,
       // reset to page 1 by default when changing filters,
@@ -479,7 +483,7 @@ export default function PurchaseOrdersPage() {
 
       setSelectedPO(fullPO);
       setShowViewModal(true);
-    }  catch (error: any) {
+    } catch (error: any) {
       showAlert('error', 'Failed to load purchase order details');
     } finally {
       setLoading(false);
@@ -503,96 +507,96 @@ export default function PurchaseOrdersPage() {
   };
 
   const openReceiveModal = async (po: PurchaseOrder) => {
-  try {
-    setLoading(true);
-    const res = await purchaseOrderService.getById(po.id);
+    try {
+      setLoading(true);
+      const res = await purchaseOrderService.getById(po.id);
 
-    const fullPO: PurchaseOrder = (res as any)?.data?.data ?? (res as any)?.data ?? po;
-    setSelectedPO(fullPO);
+      const fullPO: PurchaseOrder = (res as any)?.data?.data ?? (res as any)?.data ?? po;
+      setSelectedPO(fullPO);
 
-    const items = (fullPO.items ?? []).map((item: any) => {
-      const ordered = Number(item.quantity_ordered ?? 0);
-      const received = Number(item.quantity_received ?? 0);
-      const remaining = Math.max(0, ordered - received);
+      const items = (fullPO.items ?? []).map((item: any) => {
+        const ordered = Number(item.quantity_ordered ?? 0);
+        const received = Number(item.quantity_received ?? 0);
+        const remaining = Math.max(0, ordered - received);
 
-      return {
-        item_id: item.id || 0,
-        quantity_received: String(remaining),
-        batch_number: '',
-        manufactured_date: '',
-        expiry_date: '',
-      };
-    });
+        return {
+          item_id: item.id || 0,
+          quantity_received: String(remaining),
+          batch_number: '',
+          manufactured_date: '',
+          expiry_date: '',
+        };
+      });
 
-    setReceiveForm({ items });
-    setShowReceiveModal(true);
-  } catch (error: any) {
-    showAlert('error', 'Failed to load purchase order details');
-  } finally {
-    setLoading(false);
-  }
-};
+      setReceiveForm({ items });
+      setShowReceiveModal(true);
+    } catch (error: any) {
+      showAlert('error', 'Failed to load purchase order details');
+    } finally {
+      setLoading(false);
+    }
+  };
 
 
   const openEditModal = async (po: PurchaseOrder) => {
-  try {
-    setLoading(true);
+    try {
+      setLoading(true);
 
-    const res = await purchaseOrderService.getById(po.id);
-    const fullPO: PurchaseOrder = (res as any)?.data?.data ?? (res as any)?.data ?? po;
+      const res = await purchaseOrderService.getById(po.id);
+      const fullPO: PurchaseOrder = (res as any)?.data?.data ?? (res as any)?.data ?? po;
 
-    const items = (fullPO.items ?? []).map((it: any) => ({
-      id: it.id,
-      product_label: it.product?.name
-        ? `${it.product.name}${it.product.sku ? ` (${it.product.sku})` : ''}`
-        : `Item #${it.id}`,
-      quantity_ordered: String(it.quantity_ordered ?? 0),
-      unit_cost: String(it.unit_cost ?? 0),
-      unit_sell_price: String(it.unit_sell_price ?? 0),
-    }));
+      const items = (fullPO.items ?? []).map((it: any) => ({
+        id: it.id,
+        product_label: it.product?.name
+          ? `${it.product.name}${it.product.sku ? ` (${it.product.sku})` : ''}`
+          : `Item #${it.id}`,
+        quantity_ordered: String(it.quantity_ordered ?? 0),
+        unit_cost: String(it.unit_cost ?? 0),
+        unit_sell_price: String(it.unit_sell_price ?? 0),
+      }));
 
-    const originalItems: Record<number, { quantity_ordered: number; unit_cost: number; unit_sell_price: number }> = {};
-    (fullPO.items ?? []).forEach((it: any) => {
-      originalItems[it.id] = {
-        quantity_ordered: Number(it.quantity_ordered ?? 0),
-        unit_cost: Number(it.unit_cost ?? 0),
-        unit_sell_price: Number(it.unit_sell_price ?? 0),
-      };
-    });
+      const originalItems: Record<number, { quantity_ordered: number; unit_cost: number; unit_sell_price: number }> = {};
+      (fullPO.items ?? []).forEach((it: any) => {
+        originalItems[it.id] = {
+          quantity_ordered: Number(it.quantity_ordered ?? 0),
+          unit_cost: Number(it.unit_cost ?? 0),
+          unit_sell_price: Number(it.unit_sell_price ?? 0),
+        };
+      });
 
-    setEditPO(fullPO);
-    setEditForm({
-      tax_amount: String((fullPO as any).tax_amount ?? 0),
-      discount_amount: String((fullPO as any).discount_amount ?? 0),
-      shipping_cost: String((fullPO as any).shipping_cost ?? 0),
-      notes: String((fullPO as any).notes ?? ''),
-      items,
-      new_items: [],
-    });
+      setEditPO(fullPO);
+      setEditForm({
+        tax_amount: String((fullPO as any).tax_amount ?? 0),
+        discount_amount: String((fullPO as any).discount_amount ?? 0),
+        shipping_cost: String((fullPO as any).shipping_cost ?? 0),
+        notes: String((fullPO as any).notes ?? ''),
+        items,
+        new_items: [],
+      });
 
-    setEditOriginal({
-      tax_amount: Number((fullPO as any).tax_amount ?? 0),
-      discount_amount: Number((fullPO as any).discount_amount ?? 0),
-      shipping_cost: Number((fullPO as any).shipping_cost ?? 0),
-      notes: String((fullPO as any).notes ?? ''),
-      items: originalItems,
-    });
+      setEditOriginal({
+        tax_amount: Number((fullPO as any).tax_amount ?? 0),
+        discount_amount: Number((fullPO as any).discount_amount ?? 0),
+        shipping_cost: Number((fullPO as any).shipping_cost ?? 0),
+        notes: String((fullPO as any).notes ?? ''),
+        items: originalItems,
+      });
 
-    setEditProductSearch('');
-    setEditProductResults([]);
-    setExpandedSkuGroups(new Set());
-    setSelectedCategoryId(null);
-    setProductPage(1);
-    setProductTotalPages(1);
+      setEditProductSearch('');
+      setEditProductResults([]);
+      setExpandedSkuGroups(new Set());
+      setSelectedCategoryId(null);
+      setProductPage(1);
+      setProductTotalPages(1);
 
-    setShowEditModal(true);
-  } catch (error) {
-    console.error('Error loading PO for edit:', error);
-    showAlert('error', 'Failed to load purchase order for editing');
-  } finally {
-    setLoading(false);
-  }
-};
+      setShowEditModal(true);
+    } catch (error) {
+      console.error('Error loading PO for edit:', error);
+      showAlert('error', 'Failed to load purchase order for editing');
+    } finally {
+      setLoading(false);
+    }
+  };
 
 
   const handleSaveEditPO = async () => {
@@ -668,7 +672,7 @@ export default function PurchaseOrdersPage() {
     const nextPage = productPage + 1;
     setProductLoadingMore(true);
     try {
-      const params: Parameters<typeof productService.getAll>[0] = {
+      const params: any = {
         per_page: 50,
         page: nextPage,
         is_archived: false,
@@ -741,7 +745,7 @@ export default function PurchaseOrdersPage() {
     if (!selectedPO) return;
 
     // Validate that at least one item has quantity
-    const hasItems = receiveForm.items.some(item => 
+    const hasItems = receiveForm.items.some(item =>
       item.quantity_received && parseFloat(item.quantity_received) > 0
     );
 
@@ -841,8 +845,8 @@ export default function PurchaseOrdersPage() {
                   className="w-full max-h-[70vh] object-contain rounded-lg bg-white dark:bg-black"
                   onError={(e) => {
                     if (!e.currentTarget.src.includes('/placeholder-product.png')) {
-                        e.currentTarget.src = '/placeholder-product.png';
-                      }
+                      e.currentTarget.src = '/placeholder-product.png';
+                    }
                   }}
                 />
               </div>
@@ -1005,14 +1009,16 @@ export default function PurchaseOrdersPage() {
 
 
                         {po.status === 'draft' && (
-                          <button
-                            onClick={() => handleApprovePO(po.id)}
-                            className="flex items-center gap-1 px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
-                            title="Approve"
-                          >
-                            <Check className="w-4 h-4" />
-                            Approve
-                          </button>
+                          <AccessControl roles={['super-admin', 'admin']}>
+                            <button
+                              onClick={() => handleApprovePO(po.id)}
+                              className="flex items-center gap-1 px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                              title="Approve"
+                            >
+                              <Check className="w-4 h-4" />
+                              Approve
+                            </button>
+                          </AccessControl>
                         )}
 
                         {(po.status === 'approved' || po.status === 'partially_received') && (
@@ -1042,24 +1048,26 @@ export default function PurchaseOrdersPage() {
 
                   {/* PO Summary */}
                   <div className="p-4 bg-gray-50 dark:bg-gray-700/30 grid grid-cols-4 gap-4">
-                    <div>
-                      <p className="text-xs text-gray-600 dark:text-gray-400">Total Amount</p>
-                      <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
-                        ৳{formatCurrency(po.total_amount)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-600 dark:text-gray-400">Paid Amount</p>
-                      <p className="text-lg font-semibold text-green-600 dark:text-green-400">
-                        ৳{formatCurrency(po.paid_amount)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-600 dark:text-gray-400">Outstanding</p>
-                      <p className="text-lg font-semibold text-yellow-600 dark:text-yellow-400">
-                        ৳{formatCurrency(po.outstanding_amount)}
-                      </p>
-                    </div>
+                    <AccessControl roles={['super-admin', 'admin']}>
+                      <div>
+                        <p className="text-xs text-gray-600 dark:text-gray-400">Total Amount</p>
+                        <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                          ৳{formatCurrency(po.total_amount)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-600 dark:text-gray-400">Paid Amount</p>
+                        <p className="text-lg font-semibold text-green-600 dark:text-green-400">
+                          ৳{formatCurrency(po.paid_amount)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-600 dark:text-gray-400">Outstanding</p>
+                        <p className="text-lg font-semibold text-yellow-600 dark:text-yellow-400">
+                          ৳{formatCurrency(po.outstanding_amount)}
+                        </p>
+                      </div>
+                    </AccessControl>
                     <div>
                       <p className="text-xs text-gray-600 dark:text-gray-400">Expected Delivery</p>
                       <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
@@ -1082,7 +1090,9 @@ export default function PurchaseOrdersPage() {
                               <th className="px-4 py-2 text-left text-gray-900 dark:text-gray-100">Product</th>
                               <th className="px-4 py-2 text-right text-gray-900 dark:text-gray-100">Qty Ordered</th>
                               <th className="px-4 py-2 text-right text-gray-900 dark:text-gray-100">Qty Received</th>
-                              <th className="px-4 py-2 text-right text-gray-900 dark:text-gray-100">Unit Cost</th>
+                              <AccessControl roles={['super-admin', 'admin']}>
+                                <th className="px-4 py-2 text-right text-gray-900 dark:text-gray-100">Unit Cost</th>
+                              </AccessControl>
                               <th className="px-4 py-2 text-right text-gray-900 dark:text-gray-100">Total</th>
                             </tr>
                           </thead>
@@ -1106,8 +1116,8 @@ export default function PurchaseOrdersPage() {
                                           className="w-full h-full object-cover"
                                           onError={(e) => {
                                             if (!e.currentTarget.src.includes('/placeholder-product.png')) {
-                        e.currentTarget.src = '/placeholder-product.png';
-                      }
+                                              e.currentTarget.src = '/placeholder-product.png';
+                                            }
                                           }}
                                         />
                                       </button>
@@ -1126,9 +1136,11 @@ export default function PurchaseOrdersPage() {
                                 <td className="px-4 py-2 text-right text-gray-900 dark:text-gray-100">
                                   {item.quantity_received || 0}
                                 </td>
-                                <td className="px-4 py-2 text-right text-gray-900 dark:text-gray-100">
-                                  ৳{formatCurrency(item.unit_cost)}
-                                </td>
+                                <AccessControl roles={['super-admin', 'admin']}>
+                                  <td className="px-4 py-2 text-right text-gray-900 dark:text-gray-100">
+                                    ৳{formatCurrency(item.unit_cost)}
+                                  </td>
+                                </AccessControl>
                                 <td className="px-4 py-2 text-right font-medium text-gray-900 dark:text-gray-100">
                                   ৳{formatCurrency((item.quantity_ordered || 0) * (item.unit_cost || 0))}
                                 </td>
@@ -1291,8 +1303,8 @@ export default function PurchaseOrdersPage() {
                               className="w-full h-full object-cover"
                               onError={(e) => {
                                 if (!e.currentTarget.src.includes('/placeholder-product.png')) {
-                        e.currentTarget.src = '/placeholder-product.png';
-                      }
+                                  e.currentTarget.src = '/placeholder-product.png';
+                                }
                               }}
                             />
                           </button>
@@ -1300,15 +1312,24 @@ export default function PurchaseOrdersPage() {
 
                         <div className="min-w-0">
                           <p className="font-medium text-gray-900 dark:text-gray-100 truncate">{item.product_name}</p>
-                          <p className="text-sm text-gray-600 dark:text-gray-400">
-                            Qty: {item.quantity_ordered} × ৳{formatCurrency(item.unit_cost)}
-                          </p>
+                          <AccessControl roles={['super-admin', 'admin']}>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              Qty: {item.quantity_ordered} × ৳{formatCurrency(item.unit_cost)}
+                            </p>
+                          </AccessControl>
+                          <AccessControl roles={['online-moderator']}>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                              Qty: {item.quantity_ordered} × ৳{formatCurrency(item.unit_sell_price)} (Selling Price)
+                            </p>
+                          </AccessControl>
                         </div>
                       </div>
                       <div className="text-right flex-shrink-0">
-                        <p className="font-semibold text-gray-900 dark:text-gray-100">
-                          ৳{formatCurrency((item.quantity_ordered || 0) * (item.unit_cost || 0))}
-                        </p>
+                        <AccessControl roles={['super-admin', 'admin']}>
+                          <p className="font-semibold text-gray-900 dark:text-gray-100">
+                            ৳{formatCurrency((item.quantity_ordered || 0) * (item.unit_cost || 0))}
+                          </p>
+                        </AccessControl>
                       </div>
                     </div>
                   );
@@ -1316,45 +1337,47 @@ export default function PurchaseOrdersPage() {
               </div>
             </div>
 
-            <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-              <div className="space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
-                  <span className="font-medium text-gray-900 dark:text-gray-100">
-                    ৳{formatCurrency(selectedPO.subtotal_amount)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">Tax</span>
-                  <span className="font-medium text-gray-900 dark:text-gray-100">
-                    ৳{formatCurrency(selectedPO.tax_amount)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">Discount</span>
-                  <span className="font-medium text-red-600 dark:text-red-400">
-                    -৳{formatCurrency(selectedPO.discount_amount)}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600 dark:text-gray-400">Shipping</span>
-                  <span className="font-medium text-gray-900 dark:text-gray-100">
-                    ৳{formatCurrency(selectedPO.shipping_cost)}
-                  </span>
-                </div>
-                <div className="flex justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
-                  <span className="font-semibold text-gray-900 dark:text-gray-100">Total</span>
-                  <span className="font-bold text-lg text-gray-900 dark:text-gray-100">
-                    ৳{formatCurrency(selectedPO.total_amount)}
-                  </span>
+            <AccessControl roles={['super-admin', 'admin']}>
+              <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
+                    <span className="font-medium text-gray-900 dark:text-gray-100">
+                      ৳{formatCurrency(selectedPO.subtotal_amount)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-400">Tax</span>
+                    <span className="font-medium text-gray-900 dark:text-gray-100">
+                      ৳{formatCurrency(selectedPO.tax_amount)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-400">Discount</span>
+                    <span className="font-medium text-red-600 dark:text-red-400">
+                      -৳{formatCurrency(selectedPO.discount_amount)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-400">Shipping</span>
+                    <span className="font-medium text-gray-900 dark:text-gray-100">
+                      ৳{formatCurrency(selectedPO.shipping_cost)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
+                    <span className="text-lg font-bold text-gray-800 dark:text-gray-200">Total</span>
+                    <span className="text-lg font-bold text-purple-600 dark:text-purple-400">
+                      ৳{formatCurrency(selectedPO.total_amount)}
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
+            </AccessControl>
           </div>
         )}
       </Modal>
 
-      
+
       {/* Edit Modal */}
       {showEditModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -1376,38 +1399,40 @@ export default function PurchaseOrdersPage() {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tax Amount</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editForm.tax_amount}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, tax_amount: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                  />
+              <AccessControl roles={['super-admin', 'admin']}>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tax Amount</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editForm.tax_amount}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, tax_amount: e.target.value }))}
+                      className="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Discount Amount</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editForm.discount_amount}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, discount_amount: e.target.value }))}
+                      className="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Shipping Cost</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={editForm.shipping_cost}
+                      onChange={(e) => setEditForm((prev) => ({ ...prev, shipping_cost: e.target.value }))}
+                      className="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Discount Amount</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editForm.discount_amount}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, discount_amount: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Shipping Cost</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editForm.shipping_cost}
-                    onChange={(e) => setEditForm((prev) => ({ ...prev, shipping_cost: e.target.value }))}
-                    className="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                  />
-                </div>
-              </div>
+              </AccessControl>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes</label>
@@ -1490,7 +1515,7 @@ export default function PurchaseOrdersPage() {
                                     <button type="button" onClick={() => groupImg && setImagePreview({ url: groupImg, name: group.baseName })}
                                       className="w-9 h-9 flex-shrink-0 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700">
                                       {groupImg
-                                        ? <img src={groupImg} alt={group.baseName} className="w-full h-full object-cover" onError={(e) => { if (!e.currentTarget.src.includes('/placeholder-product.png')) e.currentTarget.src='/placeholder-product.png'; }} />
+                                        ? <img src={groupImg} alt={group.baseName} className="w-full h-full object-cover" onError={(e) => { if (!e.currentTarget.src.includes('/placeholder-product.png')) e.currentTarget.src = '/placeholder-product.png'; }} />
                                         : <Package className="w-4 h-4 text-gray-400 m-auto mt-2.5" />}
                                     </button>
                                     {/* info */}
@@ -1537,7 +1562,7 @@ export default function PurchaseOrdersPage() {
                                           <div key={p.id} className="flex items-center gap-3 pl-12 pr-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700/30">
                                             <button type="button" onClick={() => img && setImagePreview({ url: img, name: p.name })}
                                               className="w-7 h-7 flex-shrink-0 rounded overflow-hidden border border-gray-200 dark:border-gray-600 bg-gray-100 dark:bg-gray-700">
-                                              {img ? <img src={img} alt={suffix} className="w-full h-full object-cover" onError={(e) => { if (!e.currentTarget.src.includes('/placeholder-product.png')) e.currentTarget.src='/placeholder-product.png'; }} /> : <Package className="w-3.5 h-3.5 text-gray-400 m-auto mt-1.5" />}
+                                              {img ? <img src={img} alt={suffix} className="w-full h-full object-cover" onError={(e) => { if (!e.currentTarget.src.includes('/placeholder-product.png')) e.currentTarget.src = '/placeholder-product.png'; }} /> : <Package className="w-3.5 h-3.5 text-gray-400 m-auto mt-1.5" />}
                                             </button>
                                             <span className="flex-1 text-sm text-blue-700 dark:text-blue-300 font-medium truncate">{suffix}</span>
                                             <button type="button" onClick={() => appendProductToEdit(p)} disabled={added}
@@ -1586,7 +1611,9 @@ export default function PurchaseOrdersPage() {
                       <tr>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Product</th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Qty Ordered</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Unit Cost</th>
+                        <AccessControl roles={['super-admin', 'admin']}>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Unit Cost</th>
+                        </AccessControl>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Unit Sell</th>
                         <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Actions</th>
                       </tr>
@@ -1594,7 +1621,20 @@ export default function PurchaseOrdersPage() {
                     <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
                       {editForm.items.map((it, idx) => (
                         <tr key={it.id} className="bg-white dark:bg-gray-800">
-                          <td className="px-4 py-2 text-sm text-gray-900 dark:text-white">{it.product_label}</td>
+                          <td className="px-4 py-2 text-sm text-gray-900 dark:text-white">
+                            <div className="flex items-center gap-3">
+                              {pickPOItemImage(it) && (
+                                <button
+                                  type="button"
+                                  onClick={() => setImagePreview({ url: pickPOItemImage(it)!, name: it.product_label || 'Product' })}
+                                  className="w-10 h-10 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex-shrink-0 hover:opacity-80 transition-opacity"
+                                >
+                                  <img src={pickPOItemImage(it)!} alt={it.product_label} className="w-full h-full object-cover" />
+                                </button>
+                              )}
+                              <span className="truncate">{it.product_label}</span>
+                            </div>
+                          </td>
                           <td className="px-4 py-2">
                             <input
                               type="number"
@@ -1609,21 +1649,23 @@ export default function PurchaseOrdersPage() {
                               className="w-28 px-2 py-1 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                             />
                           </td>
-                          <td className="px-4 py-2">
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={it.unit_cost}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setEditForm((prev) => ({
-                                  ...prev,
-                                  items: prev.items.map((x, i) => (i === idx ? { ...x, unit_cost: v } : x)),
-                                }));
-                              }}
-                              className="w-32 px-2 py-1 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                            />
-                          </td>
+                          <AccessControl roles={['super-admin', 'admin']}>
+                            <td className="px-4 py-2">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={it.unit_cost}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setEditForm((prev) => ({
+                                    ...prev,
+                                    items: prev.items.map((x, i) => (i === idx ? { ...x, unit_cost: v } : x)),
+                                  }));
+                                }}
+                                className="w-32 px-2 py-1 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                              />
+                            </td>
+                          </AccessControl>
                           <td className="px-4 py-2">
                             <input
                               type="number"
@@ -1648,7 +1690,16 @@ export default function PurchaseOrdersPage() {
                           <td className="px-4 py-2 text-sm text-gray-900 dark:text-white">
                             <div className="flex items-center gap-2">
                               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-600 text-white">NEW</span>
-                              <span>{it.product_label}</span>
+                              {pickPOItemImage(it) && (
+                                <button
+                                  type="button"
+                                  onClick={() => setImagePreview({ url: pickPOItemImage(it)!, name: it.product_label || 'Product' })}
+                                  className="w-10 h-10 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 flex-shrink-0 hover:opacity-80 transition-opacity"
+                                >
+                                  <img src={pickPOItemImage(it)!} alt={it.product_label} className="w-full h-full object-cover" />
+                                </button>
+                              )}
+                              <span className="truncate">{it.product_label}</span>
                             </div>
                           </td>
                           <td className="px-4 py-2">
@@ -1665,21 +1716,23 @@ export default function PurchaseOrdersPage() {
                               className="w-28 px-2 py-1 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                             />
                           </td>
-                          <td className="px-4 py-2">
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={it.unit_cost}
-                              onChange={(e) => {
-                                const v = e.target.value;
-                                setEditForm((prev) => ({
-                                  ...prev,
-                                  new_items: prev.new_items.map((x, i) => (i === idx ? { ...x, unit_cost: v } : x)),
-                                }));
-                              }}
-                              className="w-32 px-2 py-1 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                            />
-                          </td>
+                          <AccessControl roles={['super-admin', 'admin']}>
+                            <td className="px-4 py-2">
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={it.unit_cost}
+                                onChange={(e) => {
+                                  const v = e.target.value;
+                                  setEditForm((prev) => ({
+                                    ...prev,
+                                    new_items: prev.new_items.map((x, i) => (i === idx ? { ...x, unit_cost: v } : x)),
+                                  }));
+                                }}
+                                className="w-32 px-2 py-1 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                              />
+                            </td>
+                          </AccessControl>
                           <td className="px-4 py-2">
                             <input
                               type="number"
@@ -1731,7 +1784,7 @@ export default function PurchaseOrdersPage() {
         </div>
       )}
 
-{/* Receive Modal */}
+      {/* Receive Modal */}
       <Modal
         isOpen={showReceiveModal}
         onClose={() => setShowReceiveModal(false)}
@@ -1763,7 +1816,7 @@ export default function PurchaseOrdersPage() {
                       </span>
                     </h4>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                      Ordered: {poItem.quantity_ordered} • 
+                      Ordered: {poItem.quantity_ordered} •
                       Already Received: {poItem.quantity_received || 0}
                     </p>
 

@@ -32,6 +32,11 @@ export type ReceiptOrder = {
   customerName?: string;
   customerPhone?: string;
   customerAddressLines?: string[];
+  orderType?: string;
+  orderTypeLabel?: string;
+  paymentMethod?: string;
+  paymentStatus?: string;
+  intendedCourier?: string;
   items: ReceiptItem[];
   totals: ReceiptTotals;
   notes?: string;
@@ -135,6 +140,18 @@ export function normalizeOrderForReceipt(order: any): ReceiptOrder {
 
   const customerAddressLines = uniqNonEmpty(addrLines);
 
+  const orderType = safeString(order?.order_type || order?.orderType);
+  const orderTypeLabel = safeString(order?.order_type_label || order?.orderTypeLabel);
+  const paymentStatus = safeString(order?.payment_status || order?.paymentStatus);
+  const intendedCourier = safeString(order?.intended_courier || order?.intendedCourier);
+
+  const paymentMethod =
+    safeString(order?.payment_method) ||
+    safeString(order?.paymentMethod) ||
+    (Array.isArray(order?.payments)
+      ? uniqNonEmpty((order.payments as any[]).map((p) => safeString(p?.payment_method || p?.method || p?.name)))[0] || ''
+      : '');
+
   // Items
   const items: ReceiptItem[] = [];
 
@@ -236,6 +253,11 @@ export function normalizeOrderForReceipt(order: any): ReceiptOrder {
     customerName,
     customerPhone,
     customerAddressLines,
+    orderType,
+    orderTypeLabel,
+    paymentMethod,
+    paymentStatus,
+    intendedCourier,
     items,
     totals: {
       subtotal,

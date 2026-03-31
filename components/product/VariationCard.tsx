@@ -4,7 +4,7 @@ import { Trash2, Plus, X } from 'lucide-react';
 const SIZE_OPTIONS = [
   // Apparel (letter sizes)
   'XXS','XS','S','M','L','XL','XXL','XXXL','XXXXL','XXXXL',
-  '22','24','26','28','30','32','34','36','38','40','42',
+  '22','24','26','28','30','32','34','36','38',
 
   // Numeric sizes (dress/footwear etc.)
   '36 ','37','38','39 (US 6.5)','40 (US 7)','41 (US 8)','42 (US 8.5)','43 (US 9.5)','44 (US 10)','45 (US 11)','46 (US 12)',
@@ -30,6 +30,9 @@ interface VariationCardProps {
   onSizeUpdate: (sizeIndex: number, value: string) => void;
   onSizeRemove: (sizeIndex: number) => void;
 
+  // When true, shows color as required (enforced by parent when >1 variation)
+  colorRequired?: boolean;
+
   // Optional: override size dropdown options (e.g., sneakers-only or dresses-only)
   sizeOptions?: string[];
 
@@ -48,6 +51,7 @@ export default function VariationCard({
   onSizeAdd,
   onSizeUpdate,
   onSizeRemove,
+  colorRequired = false,
   sizeOptions,
   sizePresetButtons,
   onApplySizePreset
@@ -78,7 +82,12 @@ export default function VariationCard({
         {/* Color Name */}
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Color Name <span className="text-gray-500 font-normal">(Optional)</span>
+            Color Name{' '}
+            {colorRequired ? (
+              <span className="text-red-500">*</span>
+            ) : (
+              <span className="text-gray-500 font-normal">(Optional)</span>
+            )}
           </label>
           <input
             type="text"

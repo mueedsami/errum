@@ -10,7 +10,7 @@ export interface Address {
   address_line_2?: string;
   city: string;
   state: string;
-  postal_code: string;
+  postal_code?: string;
   country: string;
   landmark?: string;
   delivery_instructions?: string;
@@ -23,12 +23,24 @@ export interface OrderItem {
   product_id: number;
   product_name: string;
   quantity: number;
-  price: number;
-  total: number;
+  price?: number;
+  unit_price?: number;
+  total?: number;
+  total_amount?: number;
   product_image?: string;
+  image_url?: string;
   sku?: string;
+  product_sku?: string;
   color?: string;
   size?: string;
+  variant_options?: any;
+  product?: {
+    images?: Array<{
+      image_url?: string;
+      url?: string;
+      is_primary?: boolean | number;
+    }>;
+  };
 }
 
 export interface OrderSummary {

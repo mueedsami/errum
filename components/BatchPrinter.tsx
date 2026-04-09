@@ -35,31 +35,60 @@ interface BatchPrinterProps {
 let qzConnectionPromise: Promise<void> | null = null;
 let qzConnected = false;
 
+const QZ_SCRIPT_WAIT_MS = 8000;
+const PRINTER_DISCOVERY_RETRIES = 5;
+const PRINTER_DISCOVERY_DELAY_MS = 350;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForQZ(timeoutMs = QZ_SCRIPT_WAIT_MS) {
+  const start = Date.now();
+
+  while (Date.now() - start < timeoutMs) {
+    if (typeof window !== "undefined" && (window as any).qz) {
+      return (window as any).qz;
+    }
+    await sleep(150);
+  }
+
+  throw new Error("QZ Tray library not loaded");
+}
+
+async function isQZActive(qz: any) {
+  try {
+    return !!(await qz?.websocket?.isActive?.());
+  } catch {
+    return false;
+  }
+}
+
 async function ensureQZConnection() {
-  const qz = (window as any).qz;
-  if (!qz) {
-    throw new Error("QZ Tray not available");
+  const qz = await waitForQZ();
+
+  if (qzConnected && (await isQZActive(qz))) {
+    return qz;
   }
 
-  // If already connected, return immediately
-  if (qzConnected && (await qz.websocket.isActive())) {
-    return;
-  }
-
-  // If connection is in progress, wait for it
   if (qzConnectionPromise) {
-    return qzConnectionPromise;
+    await qzConnectionPromise;
+    return qz;
   }
 
-  // Start new connection
   qzConnectionPromise = (async () => {
     try {
-      if (!(await qz.websocket.isActive())) {
+      if (!(await isQZActive(qz))) {
         await qz.websocket.connect();
-        qzConnected = true;
-        console.log("✅ QZ Tray connected");
+        await sleep(250);
       }
+      qzConnected = await isQZActive(qz);
+      if (!qzConnected) {
+        throw new Error("Unable to establish connection with QZ Tray");
+      }
+      console.log("✅ QZ Tray connected");
     } catch (error) {
+      qzConnected = false;
       console.error("❌ QZ Tray connection failed:", error);
       throw error;
     } finally {
@@ -67,32 +96,53 @@ async function ensureQZConnection() {
     }
   })();
 
-  return qzConnectionPromise;
+  await qzConnectionPromise;
+  return qz;
 }
 
+function normalizePrinterCandidate(value: any): string | null {
+  if (!value) return null;
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value?.name === "string" && value.name.trim()) return value.name.trim();
+  return null;
+}
 
-async function resolvePrinterName(): Promise<string | null> {
-  const qz = (window as any).qz;
+async function resolvePrinterName(qzArg?: any): Promise<string | null> {
+  const qz = qzArg || (typeof window !== "undefined" ? (window as any).qz : null);
   if (!qz) return null;
 
-  try {
-    const def = await qz.printers.getDefault();
-    if (def && String(def).trim()) return String(def);
-  } catch (_e) {}
+  for (let attempt = 0; attempt < PRINTER_DISCOVERY_RETRIES; attempt++) {
+    try {
+      const def = normalizePrinterCandidate(await qz.printers.getDefault?.());
+      if (def) return def;
+    } catch (_e) {}
 
-  try {
-    const found = await qz.printers.find();
-    if (Array.isArray(found) && found.length > 0 && found[0]) return String(found[0]);
-    if (typeof found === "string" && found.trim()) return found;
-  } catch (_e) {}
+    try {
+      const found = await qz.printers.find?.();
+      if (Array.isArray(found)) {
+        const printer = found.map(normalizePrinterCandidate).find(Boolean);
+        if (printer) return printer;
+      } else {
+        const printer = normalizePrinterCandidate(found);
+        if (printer) return printer;
+      }
+    } catch (_e) {}
 
-  try {
-    const details = await qz.printers.details?.();
-    if (Array.isArray(details) && details.length > 0) {
-      const name = details[0]?.name || details[0];
-      if (name) return String(name);
+    try {
+      const details = await qz.printers.details?.();
+      if (Array.isArray(details)) {
+        const printer = details.map(normalizePrinterCandidate).find(Boolean);
+        if (printer) return printer;
+      } else {
+        const printer = normalizePrinterCandidate(details);
+        if (printer) return printer;
+      }
+    } catch (_e) {}
+
+    if (attempt < PRINTER_DISCOVERY_RETRIES - 1) {
+      await sleep(PRINTER_DISCOVERY_DELAY_MS);
     }
-  } catch (_e) {}
+  }
 
   return null;
 }
@@ -316,6 +366,7 @@ async function renderLabelBase64(opts: {
 export default function BatchPrinter({ batch, product, barcodes: externalBarcodes }: BatchPrinterProps) {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isQzLoaded, setIsQzLoaded] = useState(false);
+  const [isConnectingPrinter, setIsConnectingPrinter] = useState(false);
   const [barcodes, setBarcodes] = useState<string[]>(externalBarcodes || []);
   const [isLoadingBarcodes, setIsLoadingBarcodes] = useState(false);
   const [barcodeError, setBarcodeError] = useState<string | null>(null);
@@ -361,11 +412,8 @@ export default function BatchPrinter({ batch, product, barcodes: externalBarcode
 
   const loadDefaultPrinter = async (): Promise<string | null> => {
     try {
-      const qz = (window as any).qz;
-      if (!qz) return null;
-
-      await ensureQZConnection();
-      const printer = await resolvePrinterName();
+      const qz = await ensureQZConnection();
+      const printer = await resolvePrinterName(qz);
 
       if (printer) {
         console.log("✅ Printer loaded:", printer);
@@ -426,8 +474,10 @@ export default function BatchPrinter({ batch, product, barcodes: externalBarcode
   const handleOpenModal = async () => {
     setIsModalOpen(true);
 
-    if (!defaultPrinter && isQzLoaded) {
+    if (!defaultPrinter) {
+      setIsConnectingPrinter(true);
       await loadDefaultPrinter();
+      setIsConnectingPrinter(false);
     }
 
     if (!externalBarcodes || externalBarcodes.length === 0) {
@@ -436,10 +486,12 @@ export default function BatchPrinter({ batch, product, barcodes: externalBarcode
   };
 
   const handleQZPrint = async (selected: string[], quantities: Record<string, number>) => {
-    const qz = (window as any).qz;
+    let qz: any;
 
-    if (!qz) {
-      alert("QZ Tray library not loaded. Please refresh the page or install QZ Tray.");
+    try {
+      qz = await ensureQZConnection();
+    } catch (error: any) {
+      alert(error?.message || "QZ Tray is not running. Please start QZ Tray and try again.");
       return;
     }
 
@@ -455,8 +507,6 @@ export default function BatchPrinter({ batch, product, barcodes: externalBarcode
     }
 
     try {
-      await ensureQZConnection();
-
       const dpi = SHARED_DEFAULT_DPI;
       const config = qz.configs.create(printerToUse, {
         units: "in",
@@ -513,21 +563,21 @@ export default function BatchPrinter({ batch, product, barcodes: externalBarcode
     }
   };
 
-  const canPrint = isQzLoaded;
-  const buttonText = !isQzLoaded ? "QZ Tray Not Detected" : "Print Barcodes";
+  const canPrint = true;
+  const buttonText = isConnectingPrinter ? "Starting printer..." : "Print Barcodes";
 
-  const buttonTitle = !isQzLoaded
-    ? "QZ Tray not detected. Install QZ Tray to enable printing."
-    : defaultPrinter
-      ? `Print barcodes using ${defaultPrinter}`
-      : "Print barcodes";
+  const buttonTitle = defaultPrinter
+    ? `Print barcodes using ${defaultPrinter}`
+    : isQzLoaded
+      ? "Print barcodes"
+      : "Print barcodes (QZ Tray will be detected automatically)";
 
   return (
     <>
       <button
         onClick={handleOpenModal}
         className="w-full px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg font-medium hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        disabled={!canPrint}
+        disabled={!canPrint || isConnectingPrinter}
         title={buttonTitle}
       >
         {buttonText}

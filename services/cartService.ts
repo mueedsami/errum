@@ -101,6 +101,7 @@ function normalizeCartProduct(product: any): CartProduct {
     images,
     category: product?.category?.name || product?.category || undefined,
     stock_quantity: Number(product?.stock_quantity ?? 0),
+    available_inventory: typeof product?.available_inventory === 'number' ? product.available_inventory : Number(product?.stock_quantity ?? 0),
     in_stock: Boolean(product?.in_stock ?? true),
     sku: product?.sku || undefined,
   };
@@ -157,6 +158,7 @@ export interface CartProduct {
   }>;
   category?: string;
   stock_quantity: number;
+  available_inventory: number;
   in_stock: boolean;
   sku?: string;
 }

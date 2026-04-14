@@ -637,7 +637,7 @@ export default function POSPage() {
       for (const item of cart) {
         // ✅ Skip validation for service items
         if (item.isService) continue;
-        
+
         if (!item.productId) {
           throw new Error(`Missing product_id for ${item.productName}`);
         }
@@ -664,60 +664,60 @@ export default function POSPage() {
         // ✅ Only add customer if data is provided
         ...(customerName || mobileNo
           ? {
-              customer: {
-                name: customerName || 'Walk-in Customer',
-                phone: mobileNo || '01XXXXXXXXX',
-                ...(address ? { address } : {}),
-              },
-            }
+            customer: {
+              name: customerName || 'Walk-in Customer',
+              phone: mobileNo || '01XXXXXXXXX',
+              ...(address ? { address } : {}),
+            },
+          }
           : {}),
 
         // ✅ Map cart items (VAT inclusive — send tax_amount = 0)
         items: itemsWithTax
           .filter(({ item }) => !item.isService) // ✅ Filter out service items
           .map(({ item, taxAmount }) => {
-          const productId = parseInt(String(item.productId));
-          const batchId = parseInt(String(item.batchId));
-          const quantity = parseInt(String(item.qty));
-          const unitPrice = parseFloat(String(item.price));
-          const discountAmount = parseFloat(String(item.discount || 0));
+            const productId = parseInt(String(item.productId));
+            const batchId = parseInt(String(item.batchId));
+            const quantity = parseInt(String(item.qty));
+            const unitPrice = parseFloat(String(item.price));
+            const discountAmount = parseFloat(String(item.discount || 0));
 
-          // Validate after conversion
-          if (isNaN(productId)) {
-            throw new Error(`Invalid product_id for ${item.productName}`);
-          }
-          if (isNaN(batchId)) {
-            throw new Error(`Invalid batch_id for ${item.productName}`);
-          }
-          if (isNaN(quantity) || quantity <= 0) {
-            throw new Error(`Invalid quantity for ${item.productName}`);
-          }
-          if (isNaN(unitPrice) || unitPrice < 0) {
-            throw new Error(`Invalid unit_price for ${item.productName}`);
-          }
+            // Validate after conversion
+            if (isNaN(productId)) {
+              throw new Error(`Invalid product_id for ${item.productName}`);
+            }
+            if (isNaN(batchId)) {
+              throw new Error(`Invalid batch_id for ${item.productName}`);
+            }
+            if (isNaN(quantity) || quantity <= 0) {
+              throw new Error(`Invalid quantity for ${item.productName}`);
+            }
+            if (isNaN(unitPrice) || unitPrice < 0) {
+              throw new Error(`Invalid unit_price for ${item.productName}`);
+            }
 
-          const itemPayload: any = {
-            product_id: productId,
-            batch_id: batchId,
-            quantity: quantity,
-            unit_price: unitPrice,
-            discount_amount: discountAmount,
-            tax_amount: taxAmount, // VAT inclusive — no extra tax
-          };
+            const itemPayload: any = {
+              product_id: productId,
+              batch_id: batchId,
+              quantity: quantity,
+              unit_price: unitPrice,
+              discount_amount: discountAmount,
+              tax_amount: taxAmount, // VAT inclusive — no extra tax
+            };
 
-          // ✅ CRITICAL: Only include barcode for NON-defective items
-          if (!item.isDefective && item.barcode) {
-            itemPayload.barcode = item.barcode;
-          }
+            // ✅ CRITICAL: Only include barcode for NON-defective items
+            if (!item.isDefective && item.barcode) {
+              itemPayload.barcode = item.barcode;
+            }
 
-          console.log(`Item ${item.productName}:`, {
-            ...itemPayload,
-            isDefective: item.isDefective,
-            hasBarcode: !!item.barcode,
-          });
+            console.log(`Item ${item.productName}:`, {
+              ...itemPayload,
+              isDefective: item.isDefective,
+              hasBarcode: !!item.barcode,
+            });
 
-          return itemPayload;
-        }),
+            return itemPayload;
+          }),
 
         // ✅ NEW: Add services as separate array
         services: itemsWithTax
@@ -739,19 +739,19 @@ export default function POSPage() {
         // ✅ FIXED: start_date should be undefined instead of null
         ...(isInstallment
           ? {
-              installment_plan: {
-                total_installments: Math.max(2, Math.min(24, Number(installmentCount) || 2)),
-                installment_amount: installmentAmount,
-                start_date: undefined, // ✅ Changed from null to undefined
-              },
-            }
+            installment_plan: {
+              total_installments: Math.max(2, Math.min(24, Number(installmentCount) || 2)),
+              installment_amount: installmentAmount,
+              start_date: undefined, // ✅ Changed from null to undefined
+            },
+          }
           : {}),
 
         // ✅ Add notes if any
         ...(address || change > 0
           ? {
-              notes: `${address ? `Address: ${address}` : ''}${address && change > 0 ? ', ' : ''}${change > 0 ? `Change Given: ৳${change.toFixed(2)}` : ''}`.trim(),
-            }
+            notes: `${address ? `Address: ${address}` : ''}${address && change > 0 ? ', ' : ''}${change > 0 ? `Change Given: ৳${change.toFixed(2)}` : ''}`.trim(),
+          }
           : {}),
       };
 
@@ -948,10 +948,10 @@ export default function POSPage() {
                 (fullOrder as any).items.some((it: any) =>
                   Boolean(
                     it?.service_id ||
-                      it?.serviceId ||
-                      it?.is_service ||
-                      it?.isService ||
-                      String(it?.item_type || it?.type || '').toLowerCase() === 'service'
+                    it?.serviceId ||
+                    it?.is_service ||
+                    it?.isService ||
+                    String(it?.item_type || it?.type || '').toLowerCase() === 'service'
                   )
                 ));
 
@@ -1032,9 +1032,8 @@ export default function POSPage() {
         const errorMessages = Object.entries(errors)
           .map(([field, messages]: [string, any]) => {
             const fieldName = field.replace(/_/g, ' ').replace(/\./g, ' ');
-            return `${fieldName}: ${
-              Array.isArray(messages) ? messages.join(', ') : messages
-            }`;
+            return `${fieldName}: ${Array.isArray(messages) ? messages.join(', ') : messages
+              }`;
           })
           .join('\n');
 
@@ -1166,7 +1165,7 @@ export default function POSPage() {
       }
 
       let stores: any[] = [];
-      
+
       // ✅ Type guard to safely access data property
       if (Array.isArray(response)) {
         stores = response;
@@ -1207,7 +1206,7 @@ export default function POSPage() {
       let allBatches: Batch[] = [];
 
       // ✅ ROBUST: Try multiple batch fetching methods with fallbacks (like social commerce)
-      
+
       // Method 1: Try getAvailableBatches
       try {
         const batchesData = await batchService.getAvailableBatches(parseInt(selectedOutlet));
@@ -1266,7 +1265,7 @@ export default function POSPage() {
           allBatches = batchResponse.success && batchResponse.data?.data
             ? batchResponse.data.data.filter((batch: Batch) => batch.quantity > 0)
             : [];
-          
+
           console.log('✅ Fetched', allBatches.length, 'batches (method: getBatches)');
         } catch (err) {
           console.error('❌ All batch fetch methods failed:', err);
@@ -1393,6 +1392,13 @@ export default function POSPage() {
     }
   }, [selectedOutlet]); // ✅ Only depend on selectedOutlet
 
+  // ✅ Auto-assign pos-salesman
+  useEffect(() => {
+    if (role === 'pos-salesman' && user?.id) {
+      setSelectedEmployee(String(user.id));
+    }
+  }, [role, user]);
+
   // ============ RENDER ============
 
   return (
@@ -1413,11 +1419,10 @@ export default function POSPage() {
               {toasts.map((toast) => (
                 <div
                   key={toast.id}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg border ${
-                    toast.type === 'success'
+                  className={`flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg border ${toast.type === 'success'
                       ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
                       : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
-                  }`}
+                    }`}
                 >
                   {toast.type === 'success' ? (
                     <CheckCircle2 className="w-5 h-5 text-green-600 dark:text-green-400" />
@@ -1425,11 +1430,10 @@ export default function POSPage() {
                     <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
                   )}
                   <p
-                    className={`text-sm font-medium ${
-                      toast.type === 'success'
+                    className={`text-sm font-medium ${toast.type === 'success'
                         ? 'text-green-900 dark:text-green-300'
                         : 'text-red-900 dark:text-red-300'
-                    }`}
+                      }`}
                   >
                     {toast.message}
                   </p>
@@ -1509,7 +1513,8 @@ export default function POSPage() {
                         setSelectedEmployee(e.target.value);
                       }
                     }}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    disabled={role === 'pos-salesman'}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white disabled:opacity-75 disabled:bg-gray-200 dark:disabled:bg-gray-800"
                   >
                     <option value="">Select Employee</option>
                     {employees.map((emp) => (
@@ -1517,7 +1522,7 @@ export default function POSPage() {
                         {emp.name} - {emp.role}
                       </option>
                     ))}
-                    <option value="add_new">+ Add New Employee</option>
+                    {role !== 'pos-salesman' && <option value="add_new">+ Add New Employee</option>}
                   </select>
                 </div>
 
@@ -1528,7 +1533,7 @@ export default function POSPage() {
                   <select
                     value={selectedOutlet}
                     onChange={(e) => setSelectedOutlet(e.target.value)}
-                      disabled={!canSelectStore || role === 'branch-manager'}
+                    disabled={!canSelectStore || role === 'branch-manager'}
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   >
                     <option value="">Choose an Outlet</option>
@@ -1608,7 +1613,7 @@ export default function POSPage() {
                           >
                             <option value="">Select Product</option>
                             {products
-                               .filter((p) => {
+                              .filter((p) => {
                                 if (!p.batches || p.batches.length === 0) return false;
 
                                 const min =
@@ -1645,8 +1650,9 @@ export default function POSPage() {
                           </label>
                           <input
                             type="number"
-                            value={sellingPrice}
-                            onChange={(e) => setSellingPrice(Number(e.target.value))}
+                            value={sellingPrice === 0 ? '' : sellingPrice}
+                            placeholder="0"
+                            onChange={(e) => setSellingPrice(e.target.value === '' ? 0 : Number(e.target.value))}
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                           />
                         </div>
@@ -1658,8 +1664,9 @@ export default function POSPage() {
                           <input
                             type="number"
                             min="1"
-                            value={quantity}
-                            onChange={(e) => setQuantity(Number(e.target.value))}
+                            value={quantity === 0 ? '' : quantity}
+                            placeholder="0"
+                            onChange={(e) => setQuantity(e.target.value === '' ? 0 : Number(e.target.value))}
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                           />
                         </div>
@@ -1670,9 +1677,10 @@ export default function POSPage() {
                           </label>
                           <input
                             type="number"
-                            value={discountPercent}
+                            value={discountPercent === 0 ? '' : discountPercent}
+                            placeholder="0"
                             onChange={(e) => {
-                              setDiscountPercent(Number(e.target.value));
+                              setDiscountPercent(e.target.value === '' ? 0 : Number(e.target.value));
                               setDiscountAmount(0);
                             }}
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
@@ -1685,9 +1693,10 @@ export default function POSPage() {
                           </label>
                           <input
                             type="number"
-                            value={discountAmount}
+                            value={discountAmount === 0 ? '' : discountAmount}
+                            placeholder="0"
                             onChange={(e) => {
-                              setDiscountAmount(Number(e.target.value));
+                              setDiscountAmount(e.target.value === '' ? 0 : Number(e.target.value));
                               setDiscountPercent(0);
                             }}
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
@@ -1742,89 +1751,89 @@ export default function POSPage() {
                     {(customerLookup.loading ||
                       customerLookup.error ||
                       customerLookup.customer) && (
-                      <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 p-3">
-                        {customerLookup.loading && (
-                          <div className="text-xs text-gray-600 dark:text-gray-300">
-                            Checking customer…
-                          </div>
-                        )}
-
-                        {customerLookup.error && (
-                          <div className="text-xs text-red-600 dark:text-red-400">
-                            {customerLookup.error}
-                          </div>
-                        )}
-
-                        {customerLookup.customer && (
-                          <div className="space-y-1">
-                            <div className="text-sm font-semibold text-gray-900 dark:text-white">
-                              Existing Customer:{' '}
-                              {(customerLookup.customer as any)?.name || '—'}
-                            </div>
-
+                        <div className="mt-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 p-3">
+                          {customerLookup.loading && (
                             <div className="text-xs text-gray-600 dark:text-gray-300">
-                              Phone:{' '}
-                              {(customerLookup.customer as any)?.phone ||
-                                customerLookup.phone}
+                              Checking customer…
                             </div>
+                          )}
 
-                            {Array.isArray((customerLookup.customer as any)?.tags) &&
-                              (customerLookup.customer as any).tags.length > 0 && (
-                                <div className="flex flex-wrap gap-1 pt-1">
-                                  {(customerLookup.customer as any).tags.map((tag: string) => (
-                                    <span
-                                      key={tag}
-                                      className="px-2 py-0.5 rounded-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-[10px] font-medium text-gray-700 dark:text-gray-200"
-                                    >
-                                      {tag}
-                                    </span>
-                                  ))}
+                          {customerLookup.error && (
+                            <div className="text-xs text-red-600 dark:text-red-400">
+                              {customerLookup.error}
+                            </div>
+                          )}
+
+                          {customerLookup.customer && (
+                            <div className="space-y-1">
+                              <div className="text-sm font-semibold text-gray-900 dark:text-white">
+                                Existing Customer:{' '}
+                                {(customerLookup.customer as any)?.name || '—'}
+                              </div>
+
+                              <div className="text-xs text-gray-600 dark:text-gray-300">
+                                Phone:{' '}
+                                {(customerLookup.customer as any)?.phone ||
+                                  customerLookup.phone}
+                              </div>
+
+                              {Array.isArray((customerLookup.customer as any)?.tags) &&
+                                (customerLookup.customer as any).tags.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 pt-1">
+                                    {(customerLookup.customer as any).tags.map((tag: string) => (
+                                      <span
+                                        key={tag}
+                                        className="px-2 py-0.5 rounded-full border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-[10px] font-medium text-gray-700 dark:text-gray-200"
+                                      >
+                                        {tag}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+
+                              {customerLookup.lastOrder && (
+                                <div className="text-xs text-gray-600 dark:text-gray-300 pt-1">
+                                  <div>
+                                    Last purchase:{' '}
+                                    {(customerLookup.lastOrder as any)?.last_order_date ||
+                                      '—'}
+                                  </div>
+                                  <div>
+                                    Total: ৳
+                                    {Number(
+                                      (customerLookup.lastOrder as any)?.last_order_total ??
+                                      0
+                                    ).toFixed(2)}
+                                    {' • '}
+                                    Items:{' '}
+                                    {(customerLookup.lastOrder as any)
+                                      ?.last_order_items_count ?? '—'}
+                                  </div>
                                 </div>
                               )}
 
-                            {customerLookup.lastOrder && (
-                              <div className="text-xs text-gray-600 dark:text-gray-300 pt-1">
-                                <div>
-                                  Last purchase:{' '}
-                                  {(customerLookup.lastOrder as any)?.last_order_date ||
-                                    '—'}
-                                </div>
-                                <div>
-                                  Total: ৳
-                                  {Number(
-                                    (customerLookup.lastOrder as any)?.last_order_total ??
-                                      0
-                                  ).toFixed(2)}
-                                  {' • '}
-                                  Items:{' '}
-                                  {(customerLookup.lastOrder as any)
-                                    ?.last_order_items_count ?? '—'}
-                                </div>
+                              {/* ✅ Actions */}
+                              <div className="pt-2 flex flex-wrap gap-2">
+                                <button
+                                  type="button"
+                                  onClick={openEditCustomer}
+                                  className="px-3 py-2 text-xs rounded-md bg-gray-900 text-white hover:bg-gray-800"
+                                >
+                                  Edit Info
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={openEditCustomer}
+                                  className="px-3 py-2 text-xs rounded-md border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200"
+                                  title="Complete missing fields"
+                                >
+                                  Add Info
+                                </button>
                               </div>
-                            )}
-
-                            {/* ✅ Actions */}
-                            <div className="pt-2 flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                onClick={openEditCustomer}
-                                className="px-3 py-2 text-xs rounded-md bg-gray-900 text-white hover:bg-gray-800"
-                              >
-                                Edit Info
-                              </button>
-                              <button
-                                type="button"
-                                onClick={openEditCustomer}
-                                className="px-3 py-2 text-xs rounded-md border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200"
-                                title="Complete missing fields"
-                              >
-                                Add Info
-                              </button>
                             </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
+                          )}
+                        </div>
+                      )}
 
                     {/* ✅ Register button when no customer found */}
                     {!customerLookup.customer && (
@@ -1844,8 +1853,8 @@ export default function POSPage() {
                   </div>
 
                   {/* ✅ NEW: Service Selector */}
-{/* Service selector hidden in frontend as requested */}
-{/* Cart Table */}
+                  {/* Service selector hidden in frontend as requested */}
+                  {/* Cart Table */}
                   <CartTable
                     items={cart}
                     onRemoveItem={removeFromCart}
@@ -1886,8 +1895,9 @@ export default function POSPage() {
                       </label>
                       <input
                         type="number"
-                        value={transportCost}
-                        onChange={(e) => setTransportCost(Number(e.target.value))}
+                        value={transportCost === 0 ? '' : transportCost}
+                        placeholder="0"
+                        onChange={(e) => setTransportCost(e.target.value === '' ? 0 : Number(e.target.value))}
                         className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
                       />
                     </div>
@@ -1925,8 +1935,9 @@ export default function POSPage() {
                                 type="number"
                                 min={2}
                                 max={24}
-                                value={installmentCount}
-                                onChange={(e) => setInstallmentCount(Number(e.target.value))}
+                                value={installmentCount === 0 ? '' : installmentCount}
+                                placeholder="0"
+                                onChange={(e) => setInstallmentCount(e.target.value === '' ? 0 : Number(e.target.value))}
                                 className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
                               />
                             </div>
@@ -1976,8 +1987,9 @@ export default function POSPage() {
                           </label>
                           <input
                             type="number"
-                            value={cashPaid}
-                            onChange={(e) => setCashPaid(Number(e.target.value))}
+                            value={cashPaid === 0 ? '' : cashPaid}
+                            placeholder="0"
+                            onChange={(e) => setCashPaid(e.target.value === '' ? 0 : Number(e.target.value))}
                             disabled={isProcessing || isInstallment}
                             className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
                           />
@@ -1988,8 +2000,9 @@ export default function POSPage() {
                           </label>
                           <input
                             type="number"
-                            value={cardPaid}
-                            onChange={(e) => setCardPaid(Number(e.target.value))}
+                            value={cardPaid === 0 ? '' : cardPaid}
+                            placeholder="0"
+                            onChange={(e) => setCardPaid(e.target.value === '' ? 0 : Number(e.target.value))}
                             disabled={isProcessing || isInstallment}
                             className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
                           />
@@ -2000,8 +2013,9 @@ export default function POSPage() {
                           </label>
                           <input
                             type="number"
-                            value={bkashPaid}
-                            onChange={(e) => setBkashPaid(Number(e.target.value))}
+                            value={bkashPaid === 0 ? '' : bkashPaid}
+                            placeholder="0"
+                            onChange={(e) => setBkashPaid(e.target.value === '' ? 0 : Number(e.target.value))}
                             disabled={isProcessing || isInstallment}
                             className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
                           />
@@ -2012,8 +2026,9 @@ export default function POSPage() {
                           </label>
                           <input
                             type="number"
-                            value={nagadPaid}
-                            onChange={(e) => setNagadPaid(Number(e.target.value))}
+                            value={nagadPaid === 0 ? '' : nagadPaid}
+                            placeholder="0"
+                            onChange={(e) => setNagadPaid(e.target.value === '' ? 0 : Number(e.target.value))}
                             disabled={isProcessing || isInstallment}
                             className="w-full px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
                           />
@@ -2048,11 +2063,10 @@ export default function POSPage() {
                           Due
                         </span>
                         <span
-                          className={`font-bold ${
-                            due > 0
+                          className={`font-bold ${due > 0
                               ? 'text-red-600 dark:text-red-400'
                               : 'text-green-600 dark:text-green-400'
-                          }`}
+                            }`}
                         >
                           ৳{Math.max(0, due).toFixed(2)}
                         </span>

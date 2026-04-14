@@ -29,12 +29,14 @@ export default function GroupedAllBarcodesPrinter({
   buttonLabel = "Print ALL (unit barcodes)",
   title = "Print all barcodes",
   softLimit = 400,
+  availableOnly = false,
 }: {
   sources: BatchBarcodeSource[];
   buttonLabel?: string;
   title?: string;
   // If barcode count is higher than this, show a confirm to prevent accidental mega-prints.
   softLimit?: number;
+  availableOnly?: boolean;
 }) {
   const [items, setItems] = useState<MultiBarcodePrintItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -55,7 +57,7 @@ export default function GroupedAllBarcodesPrinter({
         try {
           const res = await barcodeTrackingService.getBatchBarcodes(s.batchId);
           const codes = (res.data?.barcodes || [])
-            .filter((b) => b.is_active)
+            .filter((b) => availableOnly ? b.is_available_for_sale : b.is_active)
             .map((b) => b.barcode)
             .filter(Boolean);
 

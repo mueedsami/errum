@@ -15,8 +15,11 @@ export interface Store {
 export interface GlobalInventoryItem {
   product_id: number;
   product_name: string;
+  base_name: string;
   sku: string;
   total_quantity: number;
+  available_quantity?: number;
+  reserved_quantity?: number;
   stores_count: number;
   stores: Store[];
   is_low_stock: boolean;
@@ -27,6 +30,8 @@ export interface ProductAvailability {
   product_name: string;
   sku: string;
   total_quantity: number;
+  available_quantity?: number;
+  reserved_quantity?: number;
   available_in_stores: number;
   stores: Store[];
 }
@@ -67,6 +72,8 @@ export interface ProductValue {
   product_name: string;
   sku: string;
   total_quantity: number;
+  available_quantity?: number;
+  reserved_quantity?: number;
   total_value: number;
   average_unit_cost: number;
 }

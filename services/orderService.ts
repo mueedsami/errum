@@ -157,6 +157,7 @@ export interface OrderFilters {
   sort_order?: 'asc' | 'desc';
   per_page?: number;
   page?: number;
+  skipStoreScope?: boolean;
 }
 
 export interface OrderStatistics {
@@ -206,14 +207,18 @@ const orderService = {
   },
 
   /** Get all orders with filters and pagination */
-  async getAll(params?: OrderFilters): Promise<{
+  async getAll(paramsObj?: OrderFilters): Promise<{
     data: Order[];
     total: number;
     current_page: number;
     last_page: number;
   }> {
     try {
-      const response = await axiosInstance.get('/orders', { params });
+      const { skipStoreScope, ...params } = paramsObj || {};
+      const response = await axiosInstance.get('/orders', { 
+        params,
+        skipStoreScope 
+      } as any);
       const result = response.data;
 
       if (result.success) {
@@ -233,9 +238,11 @@ const orderService = {
   },
 
   /** Get single order by ID */
-  async getById(id: number): Promise<Order> {
+  async getById(id: number, skipStoreScope?: boolean): Promise<Order> {
     try {
-      const response = await axiosInstance.get(`/orders/${id}`);
+      const response = await axiosInstance.get(`/orders/${id}`, { 
+        skipStoreScope 
+      } as any);
       const result = response.data;
       
       if (!result.success) {
@@ -619,6 +626,19 @@ const orderService = {
         valid: false,
         message: error.response?.data?.message || 'Invalid barcode'
       };
+    }
+  },
+
+  /** Bulk export orders as CSV */
+  async bulkExport(order_ids: number[]): Promise<Blob> {
+    try {
+      const response = await axiosInstance.post('/orders/bulk-export', { order_ids }, {
+        responseType: 'blob'
+      });
+      return response.data;
+    } catch (error: any) {
+      console.error('Bulk export error:', error);
+      throw new Error(error.response?.data?.message || 'Failed to export orders');
     }
   }
 };

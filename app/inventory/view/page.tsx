@@ -23,6 +23,8 @@ interface Category {
 interface ProductVariation {
   productId: number;
   quantity: number;
+  availableQuantity: number;
+  reservedQuantity: number;
   stores: StoreBreakdown[];
 }
 
@@ -31,6 +33,8 @@ interface GroupedProduct {
   sku: string; // display SKU (may be 'NO-SKU')
   productName: string;
   totalStock: number;
+  totalAvailable: number;
+  totalReserved: number;
   variations: ProductVariation[];
   expanded: boolean;
   productIds: number[];
@@ -381,8 +385,10 @@ function ViewInventoryPageContent() {
         groups[groupKey] = {
           groupKey,
           sku: displaySku,
-          productName: item.product_name || 'Unnamed Product',
+          productName: item.base_name || item.product_name || 'Unnamed Product',
           totalStock: 0,
+          totalAvailable: 0,
+          totalReserved: 0,
           variations: [],
           expanded: false,
           productIds: [],
@@ -394,7 +400,12 @@ function ViewInventoryPageContent() {
 
       const g = groups[groupKey];
       const qty = Number(item.total_quantity || 0);
+      const avail = Number(item.available_quantity || 0);
+      const res = Number(item.reserved_quantity || 0);
+      
       g.totalStock += qty;
+      g.totalAvailable += avail;
+      g.totalReserved += res;
 
       if (item.product_id && !g.productIds.includes(item.product_id)) {
         g.productIds.push(item.product_id);
@@ -405,10 +416,14 @@ function ViewInventoryPageContent() {
         g.variations.push({
           productId: item.product_id,
           quantity: qty,
+          availableQuantity: avail,
+          reservedQuantity: res,
           stores: Array.isArray(item.stores) ? [...item.stores] : [],
         });
       } else {
         existing.quantity += qty;
+        existing.availableQuantity += avail;
+        existing.reservedQuantity += res;
 
         // merge store breakdowns
         for (const s of item.stores || []) {
@@ -693,8 +708,16 @@ function ViewInventoryPageContent() {
                               <div className="text-right">
                                 <p className="text-sm text-gray-600 dark:text-gray-400">Total Stock</p>
                                 <p className="text-2xl font-semibold text-gray-900 dark:text-white">
-                                  {item.totalStock}
+                                  {item.totalAvailable}
                                 </p>
+                                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 uppercase tracking-wider font-bold">
+                                  {item.totalStock} Physical
+                                </p>
+                                {item.totalReserved > 0 && (
+                                  <p className="text-[10px] text-blue-500 dark:text-blue-400 font-bold">
+                                    {item.totalReserved} Reserved
+                                  </p>
+                                )}
 
                                 {(item.extraDefective > 0 || item.extraUsed > 0) && (
                                   <div className="mt-2 flex flex-col items-end gap-1">
@@ -775,13 +798,18 @@ function ViewInventoryPageContent() {
                                               </span>
                                             ) : null}
                                           </div>
-                                          <p className="text-sm text-gray-600 dark:text-gray-400">
-                                            Total:{' '}
-                                            <span className="font-semibold text-gray-900 dark:text-white">
-                                              {variation.quantity}
-                                            </span>{' '}
-                                            units
-                                          </p>
+                                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                              Available:{' '}
+                                              <span className="font-bold text-blue-600 dark:text-blue-400">
+                                                {variation.availableQuantity}
+                                              </span>{' '}
+                                              / {variation.quantity} Physical
+                                            </p>
+                                            {variation.reservedQuantity > 0 && (
+                                              <p className="text-xs text-amber-600 dark:text-amber-500 font-medium">
+                                                {variation.reservedQuantity} reserved units
+                                              </p>
+                                            )}
                                         </div>
                                       </div>
 

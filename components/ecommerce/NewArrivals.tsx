@@ -7,7 +7,6 @@ import { useCart } from '@/app/e-commerce/CartContext';
 import catalogService, { SimpleProduct } from '@/services/catalogService';
 import { buildCardProductsFromResponse } from '@/lib/ecommerceCardUtils';
 import PremiumProductCard from '@/components/ecommerce/ui/PremiumProductCard';
-import SectionHeader from '@/components/ecommerce/ui/SectionHeader';
 import { fireToast } from '@/lib/globalToast';
 
 interface NewArrivalsProps {
@@ -59,7 +58,7 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8 }) => {
     try {
       const response = await catalogService.getProducts({
         page: 1,
-        per_page: Math.max(limit * 8, 80),
+        per_page: limit,
         category_id: categoryId,
         sort_by: 'newest',
         sort: 'created_at',
@@ -70,23 +69,11 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8 }) => {
 
       const rawCards = buildCardProductsFromResponse(response);
 
-      // Sort by created_at ONLY — not updated_at
+      // We maintain client side sort to ensure flawless display regardless of unstable backend default ordering.
       const sorted = [...rawCards].sort((a, b) => getCreatedMs(b) - getCreatedMs(a));
 
-      // Keep only products created within the last 180 days.
-      // No fallback — if nothing qualifies, the section hides itself.
-      // This prevents old/test products from ever appearing as "new arrivals".
-      const CUTOFF_MS = 180 * 24 * 60 * 60 * 1000;
-      const cutoff    = Date.now() - CUTOFF_MS;
-
-      const recent = sorted.filter(p => {
-        const created = getCreatedMs(p);
-        // If we couldn't extract a created_at date, exclude (safer than showing stale items)
-        if (created === 0) return false;
-        return created >= cutoff;
-      });
-
-      setProducts(recent.slice(0, limit));
+      // Always show the newest top N products available, without strict date cutoffs.
+      setProducts(sorted.slice(0, limit));
     } catch (error) {
       console.error('Error fetching new arrivals:', error);
       setProducts([]);
@@ -116,8 +103,9 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8 }) => {
     }
     try {
       await addToCart(product.id, 1);
-    
-      fireToast(`Added to cart: ${product?.name || 'Item'}`, 'success');} catch (error: any) {
+
+      fireToast(`Added to cart: ${product?.name || 'Item'}`, 'success');
+    } catch (error: any) {
       console.error('Error adding to cart:', error);
       fireToast(error?.message || 'Failed to add to cart', 'error');
     }
@@ -125,23 +113,21 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8 }) => {
 
   if (isLoading) {
     return (
-      <section className="ec-section">
+      <section style={{ background: '#ffffff', padding: '48px 0', borderTop: '1px solid rgba(0,0,0,0.08)' }}>
         <div className="ec-container">
-          <div className="ec-surface p-4 sm:p-6 lg:p-7">
-            <div className="h-3 w-32 rounded rounded" style={{ background: 'rgba(255,255,255,0.08)' }} />
-            <div className="mt-3 h-8 w-48 rounded rounded" style={{ background: 'rgba(255,255,255,0.08)' }} />
-            <div className="mt-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-              {Array.from({ length: limit }).map((_, i) => (
-                <div key={i} className="ec-card overflow-hidden rounded-2xl animate-pulse">
-                  <div className="aspect-[4/5] rounded" style={{ background: 'rgba(255,255,255,0.05)' }} />
-                  <div className="p-4 space-y-2">
-                    <div className="h-3 rounded rounded" style={{ background: 'rgba(255,255,255,0.05)' }} />
-                    <div className="h-4 rounded rounded" style={{ background: 'rgba(255,255,255,0.05)' }} />
-                    <div className="h-4 w-1/2 rounded rounded" style={{ background: 'rgba(255,255,255,0.05)' }} />
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginBottom: '32px' }}>
+            <div style={{ height: '1px', width: '48px', background: '#e0e0e0' }} />
+            <div style={{ height: '24px', width: '180px', background: '#f5f5f5', borderRadius: '4px' }} />
+            <div style={{ height: '1px', width: '48px', background: '#e0e0e0' }} />
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 md:gap-6">
+            {Array.from({ length: limit }).map((_, i) => (
+              <div key={i} className="animate-pulse">
+                <div style={{ aspectRatio: '2/3', background: '#f5f5f5', borderRadius: '4px', marginBottom: '12px' }} />
+                <div style={{ height: '14px', background: '#f5f5f5', borderRadius: '4px', width: '70%', marginBottom: '6px' }} />
+                <div style={{ height: '14px', background: '#f5f5f5', borderRadius: '4px', width: '40%' }} />
+              </div>
+            ))}
           </div>
         </div>
       </section>
@@ -152,31 +138,58 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8 }) => {
   if (products.length === 0) return null;
 
   return (
-    <section className="ec-section">
+    <section style={{ background: '#ffffff', padding: '48px 0', borderTop: '1px solid rgba(0,0,0,0.08)' }}>
       <div className="ec-container">
-        <div className="ec-surface p-4 sm:p-6 lg:p-7 relative overflow-hidden">
-          <div className="pointer-events-none absolute -top-16 -left-16 h-48 w-48 rounded-full opacity-40"
-               style={{ background: 'radial-gradient(circle, rgba(176,124,58,0.10) 0%, transparent 70%)', filter: 'blur(24px)' }} />
-          <SectionHeader
-            eyebrow="Fresh drop"
-            title="New Arrivals"
-            subtitle="Latest additions to the catalogue"
-            actionLabel="View all products"
-            onAction={() => router.push('/e-commerce/products')}
-          />
-
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-            {products.map((product) => (
-              <PremiumProductCard
-                key={product.id}
-                product={product}
-                imageErrored={imageErrors.has(product.id)}
-                onImageError={handleImageError}
-                onOpen={handleProductClick}
-                onAddToCart={handleAddToCart}
-              />
-            ))}
+        {/* Section header */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <div style={{ height: '1px', flex: 1, maxWidth: '40px', background: '#111111' }} />
+            <h2 style={{
+              fontFamily: "'Jost', sans-serif",
+              fontSize: '18px',
+              fontWeight: 800,
+              textTransform: 'uppercase',
+              letterSpacing: '0.15em',
+              color: '#111111',
+              margin: 0,
+            }}>
+              New Arrivals
+            </h2>
+            <div style={{ height: '1px', flex: 1, maxWidth: '40px', background: '#111111' }} />
           </div>
+          <button
+            onClick={() => router.push('/e-commerce/products')}
+            style={{
+              fontFamily: "'Jost', sans-serif",
+              fontSize: '12px',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+              color: '#111111',
+              background: 'none',
+              border: '1.5px solid #111111',
+              borderRadius: '4px',
+              padding: '8px 16px',
+              cursor: 'pointer',
+              textDecoration: 'none',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            View All
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 md:gap-6">
+          {products.map((product) => (
+            <PremiumProductCard
+              key={product.id}
+              product={product}
+              imageErrored={imageErrors.has(product.id)}
+              onImageError={handleImageError}
+              onOpen={handleProductClick}
+              onAddToCart={handleAddToCart}
+            />
+          ))}
         </div>
       </div>
     </section>

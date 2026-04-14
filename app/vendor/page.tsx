@@ -82,7 +82,7 @@ const Modal = ({
   return (
     <div className={`fixed inset-0 ${zIndexClass} flex items-center justify-center bg-black/10 backdrop-blur-md overflow-y-auto`}>
       <div
-        className={`bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full ${sizeClasses[size]} mx-4 max-h-[90vh] overflow-y-auto`}
+        className={`bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-xl shadow-xl w-full ${sizeClasses[size]} mx-4 max-h-[90vh] overflow-y-auto`}
       >
         <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 sticky top-0 bg-white dark:bg-gray-800 z-10">
           <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-100">{title}</h2>
@@ -1534,7 +1534,7 @@ export default function VendorPaymentPage() {
                   type="button"
                   onClick={() => setShowQuickProduct(true)}
                   disabled={!purchaseForm.vendor_id}
-                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg bg-gray-900 hover:bg-gray-700 text-white disabled:opacity-50"
+                  className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-700 dark:hover:bg-gray-100 disabled:opacity-50 transition-colors"
                   title={!purchaseForm.vendor_id ? 'Select a vendor first' : 'Quick-create a new product'}
                 >
                   <Plus className="w-4 h-4" />

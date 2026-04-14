@@ -38,6 +38,7 @@ export const PAGE_ACCESS: Record<string, RoleSlug[]> = {
   '/inventory/batch-price-update': ['super-admin', 'admin', 'branch-manager'],
   '/inventory/outlet-stock': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman', 'employee'],
   '/inventory/reports': ['super-admin', 'admin'],
+  '/inventory/intelligence': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman', 'employee'],
 
   // Sales & Orders
   '/pos': ['super-admin', 'admin', 'branch-manager', 'pos-salesman'],
@@ -64,7 +65,12 @@ export const PAGE_ACCESS: Record<string, RoleSlug[]> = {
   '/accounting': ['super-admin', 'admin'],
   '/employees': ['super-admin', 'admin'],
   '/settings': ['super-admin', 'admin'],
-
+  '/hrm/my': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman', 'employee'],
+  '/hrm/branch': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
+  '/hrm/attendance': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
+  '/hrm/sales-targets': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
+  '/hrm/rewards-fines': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
+  '/cash-sheet': ['super-admin', 'admin'],
 };
 
 /**

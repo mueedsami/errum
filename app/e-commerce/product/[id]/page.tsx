@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   ShoppingCart,
@@ -10,8 +10,7 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
-  ArrowRight,
-  MapPin
+  ArrowRight
 } from 'lucide-react';
 
 import PremiumProductCard from '@/components/ecommerce/ui/PremiumProductCard';
@@ -26,14 +25,16 @@ import catalogService, {
   ProductCategory,
   ProductDetailResponse,
   SimpleProduct,
-  ProductImage,
-  BranchStock
+  ProductImage
 } from '@/services/catalogService';
 import cartService from '@/services/cartService';
 import { wishlistUtils } from '@/lib/wishlistUtils';
+import ProductImageGallery from '@/components/ecommerce/ProductImageGallery';
+import VariantSelector from '@/components/ecommerce/VariantSelector';
+import StickyAddToCart from '@/components/ecommerce/StickyAddToCart';
 
 // Types for product variations
-interface ProductVariant {
+export interface ProductVariant {
   id: number;
   name: string;
   sku: string;
@@ -341,16 +342,67 @@ export default function ProductDetailPage() {
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(null);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [relatedProducts, setRelatedProducts] = useState<SimpleProduct[]>([]);
-  const [branchStocks, setBranchStocks] = useState<BranchStock[]>([]);
-  const [loadingBranchStock, setLoadingBranchStock] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cartSidebarOpen, setCartSidebarOpen] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [isAdding, setIsAdding] = useState(false);
-  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
-  const [cartSidebarOpen, setCartSidebarOpen] = useState(false);
+  const [cartStatus, setCartStatus] = useState<'idle' | 'loading' | 'success'>('idle');
   const [isInWishlist, setIsInWishlist] = useState(false);
+  const [liveViewers, setLiveViewers] = useState(0);
+  const [isStickyVisible, setIsStickyVisible] = useState(false);
+  const [recentlyViewed, setRecentlyViewed] = useState<SimpleProduct[]>([]);
+  const mainCtaRef = useRef<HTMLButtonElement>(null);
+
+  // 3.2 — Live Viewers Calculation
+  useEffect(() => {
+    const updateViewers = () => {
+      if (!productId) return;
+      const bracket = Math.floor(Date.now() / (1000 * 60 * 5));
+      const seed = (parseInt(productId.toString(), 36) + bracket) % 23 + 4;
+      setLiveViewers(seed);
+    };
+
+    updateViewers();
+    const interval = setInterval(updateViewers, 1000 * 60 * 5);
+    return () => clearInterval(interval);
+  }, [productId]);
+
+  // 3.7 — Recently Viewed Logic
+  useEffect(() => {
+    if (product) {
+      const existingRaw = localStorage.getItem('ec_recently_viewed');
+      const existing = existingRaw ? JSON.parse(existingRaw) : [];
+      const productSummary: SimpleProduct = {
+        id: product.id,
+        name: product.name,
+        selling_price: Number(selectedVariant?.selling_price || product.selling_price),
+        in_stock: product.in_stock,
+        stock_quantity: product.stock_quantity,
+        images: product.images,
+        sku: product.sku
+      };
+
+      const filtered = existing.filter((p: any) => p.id !== product.id);
+      const updated = [productSummary, ...filtered].slice(0, 8);
+      localStorage.setItem('ec_recently_viewed', JSON.stringify(updated));
+      setRecentlyViewed(updated.filter(p => p.id !== product.id));
+    }
+  }, [product, selectedVariant]);
+
+  // Sticky Bar Observer
+  useEffect(() => {
+    if (!mainCtaRef.current) return;
+
+    const observer = new IntersectionObserver(([entry]) => {
+      setIsStickyVisible(!entry.isIntersecting);
+    }, { threshold: 0 });
+
+    observer.observe(mainCtaRef.current);
+    return () => observer.disconnect();
+  }, [loading]);
 
   // ✅ Safe price formatter (prevents toLocaleString crash)
   const formatBDT = (value: any) => {
@@ -378,24 +430,25 @@ export default function ProductDetailPage() {
     }
 
     const fetchProductAndVariations = async () => {
+      // Prevent redundant loading if the ID is already handled
+      if (selectedVariant && selectedVariant.id === productId) return;
+
+      // If the ID exists in our variants list, just switch selection and end early
+      const existingMatch = productVariants.find(v => v.id === productId);
+      if (existingMatch) {
+        setSelectedVariant(existingMatch);
+        return;
+      }
+
       try {
         setLoading(true);
         setError(null);
 
-        const response: ProductDetailResponse = await catalogService.getProduct(productId);
+        const response: ProductDetailResponse = await catalogService.getProduct(productId, { include_availability: false });
         const mainProduct = response.product;
 
         setProduct(mainProduct);
-        setRelatedProducts([...(response.related_products || [])].sort((a, b) => getNewestKey(b) - getNewestKey(a)));
-
-        // Fetch branch stock for the current product
-        setLoadingBranchStock(true);
-        catalogService.getBranchStock(productId).then(stocks => {
-          setBranchStocks(stocks);
-          setLoadingBranchStock(false);
-        }).catch(() => {
-          setLoadingBranchStock(false);
-        });
+        setRelatedProducts(response.related_products || []);
 
         const directVariantsRaw = Array.isArray((mainProduct as any).variants)
           ? (mainProduct as any).variants
@@ -611,10 +664,15 @@ export default function ProductDetailPage() {
 
   // Handlers
   const handleVariantChange = (variant: ProductVariant) => {
+    // 3.8 — Prevent scroll-to-top on variant change
+    if (typeof window !== 'undefined') {
+      (window as any).__ERRUM_SKIP_SCROLL__ = true;
+    }
     setSelectedVariant(variant);
     setSelectedImageIndex(0);
     setQuantity(1);
-    router.push(`/e-commerce/product/${variant.id}`);
+    // 3.5 — No page reload
+    window.history.pushState(null, '', `/e-commerce/product/${variant.id}`);
   };
 
   const handleToggleWishlist = () => {
@@ -641,9 +699,10 @@ export default function ProductDetailPage() {
     const currentAvailable = Number(selectedVariant.available_inventory ?? stockQty);
     if (currentAvailable <= 0) return;
 
-    setIsAdding(true);
-
     try {
+      setIsAdding(true);
+      setCartStatus('loading');
+
       await cartService.addToCart({
         product_id: selectedVariant.id,
         quantity: quantity,
@@ -656,10 +715,12 @@ export default function ProductDetailPage() {
 
       await refreshCart();
 
+      setCartStatus('success');
       setTimeout(() => {
         setIsAdding(false);
+        setCartStatus('idle');
         setCartSidebarOpen(true);
-      }, 800);
+      }, 2000);
 
     } catch (error: any) {
       console.error('Error adding to cart:', error);
@@ -670,6 +731,48 @@ export default function ProductDetailPage() {
         ? errorMessage
         : 'Failed to add item to cart. Please try again.';
       alert(displayMessage);
+    }
+  };
+
+  const handleBuyItNow = async () => {
+    if (!selectedVariant || !selectedVariant.in_stock) return;
+
+    const stockQty = Number(selectedVariant.stock_quantity ?? 0);
+    const currentAvailable = Number(selectedVariant.available_inventory ?? stockQty);
+    if (currentAvailable <= 0) return;
+
+    try {
+      setIsAdding(true);
+      const res = await cartService.addToCart({
+        product_id: selectedVariant.id,
+        quantity: quantity,
+        variant_options: {
+          color: selectedVariant.color,
+          size: selectedVariant.size,
+        },
+        notes: undefined
+      });
+
+      const cartItemId = res?.cart_item?.id;
+      if (cartItemId) {
+        localStorage.setItem('checkout-selected-items', JSON.stringify([cartItemId]));
+        router.push('/e-commerce/checkout');
+      } else {
+        // Fallback: try to find the item in the cart
+        const cartData = await cartService.getCart();
+        const addedItem = cartData.cart_items.find(it => it.product_id === selectedVariant.id);
+        if (addedItem) {
+          localStorage.setItem('checkout-selected-items', JSON.stringify([addedItem.id]));
+          router.push('/e-commerce/checkout');
+        } else {
+          router.push('/e-commerce');
+        }
+      }
+    } catch (error: any) {
+      console.error('Error in Buy it Now:', error);
+      alert(error.message || 'Failed to process Buy it Now. Please try again.');
+    } finally {
+      setIsAdding(false);
     }
   };
 
@@ -752,12 +855,12 @@ export default function ProductDetailPage() {
   // ---------------------------
   if (loading) {
     return (
-      <div className="ec-root min-h-screen">
+      <div className="ec-root bg-[var(--bg-root)] min-h-screen">
         <Navigation />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto" style={{ borderColor: 'var(--gold)' }}></div>
-            <p className="mt-4 text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>Loading product...</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 mx-auto border-[var(--cyan)]"></div>
+            <p className="mt-4 text-sm text-[var(--text-muted)]">Loading product...</p>
           </div>
         </div>
       </div>
@@ -766,17 +869,17 @@ export default function ProductDetailPage() {
 
   if (error || !product || !selectedVariant) {
     return (
-      <div className="ec-root min-h-screen">
+      <div className="ec-root bg-[var(--bg-root)] min-h-screen">
         <Navigation />
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24">
           <div className="text-center">
-            <h1 className="text-2xl font-bold mb-3 text-white">
+            <h1 className="text-2xl font-bold mb-3 text-[var(--text-primary)]">
               Product Not Found
             </h1>
-            <p className="mb-6 text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>{error}</p>
+            <p className="mb-6 text-sm text-[var(--text-muted)]">{error}</p>
             <button
               onClick={() => router.back()}
-              className="inline-flex items-center justify-center rounded-xl bg-gray-900 px-5 py-3 text-xs font-semibold text-white hover:bg-black transition"
+              className="inline-flex items-center justify-center rounded-xl bg-[var(--text-primary)] px-5 py-3 text-xs font-semibold text-[var(--bg-root)] hover:opacity-90 transition"
             >
               Go Back
             </button>
@@ -788,7 +891,7 @@ export default function ProductDetailPage() {
   // ---------------------------
   // Derived safe values
   // ---------------------------
-  const baseName = getBaseProductName(product.name);
+  const baseName = (product as any).base_name || getBaseProductName(product.name);
 
   const sellingPrice = Number(selectedVariant.selling_price ?? 0);
   const costPrice = Number((product as any).cost_price ?? 0);
@@ -819,393 +922,254 @@ export default function ProductDetailPage() {
   // Main render
   // ---------------------------
   return (
-    <div className="ec-root min-h-screen">
+    <div className="bg-[var(--bg-root)] min-h-screen text-[var(--text-primary)]">
       <Navigation />
       <CartSidebar isOpen={cartSidebarOpen} onClose={() => setCartSidebarOpen(false)} />
 
       {/* Breadcrumb */}
-      <div style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: 'rgba(255,255,255,0.02)' }}>
-        <div className="ec-container py-3 hidden sm:block">
-          <div className="flex items-center gap-2 text-[11px]" style={{ fontFamily: "'DM Mono', monospace", color: 'rgba(255,255,255,0.3)', letterSpacing: '0.06em' }}>
-            <button onClick={() => router.push('/e-commerce')} className="transition-colors hover:text-white">HOME</button>
-            <span style={{ color: 'rgba(255,255,255,0.15)' }}>/</span>
-            <button onClick={() => router.back()} className="transition-colors hover:text-white">
-              {getCategoryName(product.category)?.toUpperCase() || 'PRODUCTS'}
+      <div className="border-b border-[var(--border-default)]">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-4 hidden sm:block">
+          <div className="flex items-center gap-2 text-[10px] sm:text-[11px] font-medium tracking-[0.1em] text-[var(--text-muted)]"
+            style={{ fontFamily: "'DM Mono', monospace" }}>
+            <button onClick={() => router.push('/e-commerce')} className="hover:text-[var(--text-primary)] transition-colors">HOME</button>
+            <span className="text-[var(--border-strong)]">›</span>
+            <button onClick={() => router.back()} className="hover:text-[var(--text-primary)] transition-colors uppercase">
+              {getCategoryName(product.category) || 'PRODUCTS'}
             </button>
-            <span style={{ color: 'rgba(255,255,255,0.15)' }}>/</span>
-            <span style={{ color: 'rgba(255,255,255,0.6)' }} className="truncate max-w-xs">{baseName.toUpperCase()}</span>
+            <span className="text-[var(--border-strong)]">›</span>
+            <span className="text-[var(--text-secondary)] uppercase truncate max-w-xs">{baseName}</span>
           </div>
         </div>
       </div>
 
       {/* Main product section */}
-      <div className="ec-container py-8 md:py-12">
-        <div className="grid lg:grid-cols-2 gap-8 lg:gap-14 items-start">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-8 sm:pt-28 sm:pb-12 md:pt-16 md:pb-16">
+        <div className="grid lg:grid-cols-[6fr_4fr] gap-10 lg:gap-20 items-start">
 
-          {/* ── Image Gallery ── */}
-          <div className="space-y-3">
-            {/* Main image */}
-            <div
-              className="relative overflow-hidden group"
-              style={{ borderRadius: '20px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.09)', aspectRatio: '1/1' }}
-            >
-              <img
-                src={primaryImage}
-                alt={selectedVariant.name}
-                className="w-full h-full object-contain p-6 md:p-8 transition-transform duration-500 group-hover:scale-[1.03]"
-              />
-
-              {/* Stock badge */}
-              {!selectedVariant.in_stock && (
-                <div className="absolute top-4 left-4 rounded-xl px-3 py-1.5 text-[10px] font-bold tracking-widest" style={{ background: 'rgba(239,68,68,0.9)', color: 'white', fontFamily: "'DM Mono', monospace" }}>
-                  OUT OF STOCK
-                </div>
-              )}
-              {selectedVariant.in_stock && stockQty > 0 && stockQty < 5 && (
-                <div className="absolute top-4 left-4 rounded-xl px-3 py-1.5 text-[10px] font-bold" style={{ background: 'rgba(176,124,58,0.9)', color: 'white', fontFamily: "'DM Mono', monospace" }}>
-                  ONLY {stockQty} LEFT
-                </div>
-              )}
-              {discountPercent > 0 && (
-                <div className="absolute top-4 right-4 rounded-xl px-3 py-1.5 text-[10px] font-bold" style={{ background: 'var(--gold)', color: 'white', fontFamily: "'DM Mono', monospace" }}>
-                  -{discountPercent}%
-                </div>
-              )}
-
-              {/* Nav arrows (Always visible dots on mobile, arrows on hover desktop) */}
-              {safeImages.length > 1 && (
-                <>
-                  <div className="absolute inset-y-0 left-0 right-0 flex items-center justify-between px-4 pointer-events-none">
-                    <button onClick={handlePrevImage}
-                      className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full opacity-0 sm:group-hover:opacity-100 transition-all shadow-lg"
-                      style={{ background: 'rgba(13,13,13,0.7)', border: '1px solid rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
-                      <ChevronLeft size={20} className="text-white" />
-                    </button>
-                    <button onClick={handleNextImage}
-                      className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full opacity-0 sm:group-hover:opacity-100 transition-all shadow-lg"
-                      style={{ background: 'rgba(13,13,13,0.7)', border: '1px solid rgba(255,255,255,0.15)', backdropFilter: 'blur(8px)' }}>
-                      <ChevronRight size={20} className="text-white" />
-                    </button>
-                  </div>
-                  
-                  {/* Dots for mobile */}
-                  <div className="absolute bottom-4 left-0 right-0 flex justify-center gap-1.5 sm:hidden">
-                    {safeImages.map((_, i) => (
-                      <div key={i} className={`h-1.5 rounded-full transition-all ${i === selectedImageIndex ? 'w-4 bg-[var(--gold)]' : 'w-1.5 bg-white/20'}`} />
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Thumbnails */}
-            {safeImages.length > 1 && (
-              <div className="grid grid-cols-5 gap-2">
-                {safeImages.map((img, index) => (
-                  <button
-                    key={img.id}
-                    onClick={() => setSelectedImageIndex(index)}
-                    className="relative overflow-hidden transition-all"
-                    style={{
-                      borderRadius: '12px',
-                      aspectRatio: '1/1',
-                      border: `1px solid ${selectedImageIndex === index ? 'var(--gold)' : 'rgba(255,255,255,0.09)'}`,
-                      background: 'rgba(255,255,255,0.04)',
-                      boxShadow: selectedImageIndex === index ? '0 0 0 1px var(--gold)' : 'none',
-                    }}
-                  >
-                    <img src={img.url} alt={`View ${index + 1}`} className="w-full h-full object-contain p-1.5" />
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* 3.1 — Image Gallery */}
+          <ProductImageGallery
+            images={safeImages}
+            productName={baseName}
+            discountPercent={discountPercent}
+            inStock={selectedVariant.in_stock}
+          />
 
           {/* ── Buy Column ── */}
-          <div className="lg:sticky lg:top-24 space-y-4">
-            {/* Main info card */}
-            <div className="ec-dark-card p-6 sm:p-7">
-              {/* Category label */}
-              <p style={{ fontFamily: "'DM Mono', monospace", fontSize: '10px', letterSpacing: '0.2em', color: 'rgba(255,255,255,0.3)' }}>
-                {getCategoryName(product.category)?.toUpperCase() || 'ERRUM COLLECTION'}
-              </p>
+          <div className="lg:sticky lg:top-24 space-y-8">
+            <div className="space-y-6">
+              {/* Product Info */}
+              <div>
+                <p className="text-[10px] font-bold tracking-[0.2em] uppercase text-[var(--text-muted)] mb-2"
+                  style={{ fontFamily: "'DM Mono', monospace" }}>
+                  {getCategoryName(product.category) || 'ERRUM COLLECTION'}
+                </p>
+                <h1 className="text-3xl sm:text-4xl md:text-5xl font-light text-[var(--text-primary)] tracking-tight"
+                  style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+                  {baseName}
+                </h1>
 
-              {/* Product name */}
-              <h1 className="mt-2 text-white" style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 'clamp(22px, 3vw, 30px)', fontWeight: 600, letterSpacing: '-0.01em', lineHeight: 1.15 }}>
-                {baseName}
-              </h1>
-
-              {/* Price row */}
-              <div className="mt-5 flex flex-wrap items-center gap-3">
-                <span className="text-3xl font-bold" style={{ color: 'var(--gold)', fontFamily: "'Jost', sans-serif" }}>
-                  {formatBDT(sellingPrice)}
-                </span>
-                {costPrice > sellingPrice && sellingPrice > 0 && (
-                  <>
-                    <span className="text-lg line-through" style={{ color: 'rgba(255,255,255,0.25)', fontFamily: "'Jost', sans-serif" }}>
+                <div className="mt-6 flex flex-wrap items-baseline gap-4">
+                  <span className="text-3xl font-bold text-[var(--text-primary)]" style={{ fontFamily: "'Jost', sans-serif" }}>
+                    {formatBDT(sellingPrice)}
+                  </span>
+                  {costPrice > sellingPrice && sellingPrice > 0 && (
+                    <span className="text-xl line-through text-[var(--text-muted)] opacity-60" style={{ fontFamily: "'Jost', sans-serif" }}>
                       {formatBDT(costPrice)}
                     </span>
-                    <span className="rounded-full px-2.5 py-1 text-[10px] font-semibold" style={{ background: 'rgba(176,124,58,0.15)', border: '1px solid rgba(176,124,58,0.25)', color: 'var(--gold-light)', fontFamily: "'DM Mono', monospace" }}>
-                      SAVE {discountPercent}%
+                  )}
+                </div>
+              </div>
+
+              {/* Urgency & Social Proof */}
+              <div className="space-y-4 py-6 border-y border-[var(--border-default)]">
+                {/* Live Activity (3.2) */}
+                <div className="ec-badge-live px-3 py-2 flex items-center gap-2 w-fit">
+                  <span className="flex h-1.5 w-1.5 rounded-full bg-[var(--cyan)] animate-pulse" />
+                  <span>{liveViewers} people viewing this right now</span>
+                </div>
+
+                {/* Stock Progress Bar (3.3) */}
+                <div className="space-y-2">
+                  <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest"
+                    style={{
+                      fontFamily: "'DM Mono', monospace",
+                      color: availableInventory <= 5 ? 'var(--status-danger)' : availableInventory <= 10 ? 'var(--gold-bright)' : 'var(--status-success)'
+                    }}>
+                    <span>
+                      {availableInventory <= 0 ? 'Out of stock' :
+                        availableInventory <= 5 ? `🔥 Almost gone! Only ${availableInventory} left` :
+                          availableInventory <= 10 ? `Selling fast — only ${availableInventory} left` :
+                            'In Stock'}
                     </span>
-                  </>
-                )}
-              </div>
-
-              {/* Stock status */}
-              <div className="mt-3">
-                {selectedVariant.in_stock && stockQty > 0 ? (
-                  availableInventory > 0 ? (
-                    <div className="inline-flex items-center gap-2 rounded-full px-3 py-1.5" style={{ background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)' }}>
-                      <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
-                      <span className="text-[11px] font-medium text-green-400" style={{ fontFamily: "'DM Mono', monospace", letterSpacing: '0.06em' }}>
-                        AVAILABLE FOR ORDER · IN STOCK ({availableInventory})
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="inline-flex items-center gap-2 rounded-full px-3 py-1.5" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
-                      <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
-                      <span className="text-[11px] font-medium text-red-400" style={{ fontFamily: "'DM Mono', monospace", letterSpacing: '0.06em' }}>ALL STOCK RESERVED</span>
-                    </div>
-                  )
-                ) : (
-                  <div className="inline-flex items-center gap-2 rounded-full px-3 py-1.5" style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' }}>
-                    <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
-                    <span className="text-[11px] font-medium text-red-400" style={{ fontFamily: "'DM Mono', monospace", letterSpacing: '0.06em' }}>OUT OF STOCK</span>
                   </div>
-                )}
+                  <div className="h-[6px] w-full bg-[var(--bg-lifted)] rounded-[var(--radius-pill)] overflow-hidden">
+                    <div
+                      className={`h-full transition-[width,background-color] duration-700 ease-out rounded-[var(--radius-pill)] ${
+                        availableInventory <= 5 ? 'bg-[var(--status-danger)] animate-pulse' :
+                        availableInventory <= 10 ? 'bg-[var(--status-warning)]' :
+                        'bg-[var(--status-success)]'
+                      }`}
+                      style={{ width: `${Math.min((availableInventory / 25) * 100, 100)}%` }}
+                    />
+                  </div>
+                </div>
               </div>
 
-              {/* SKU */}
-              {selectedVariant.sku && (
-                <p className="mt-3 text-[11px]" style={{ color: 'rgba(255,255,255,0.3)', fontFamily: "'DM Mono', monospace", letterSpacing: '0.08em' }}>
-                  SKU: {selectedVariant.sku}
-                </p>
-              )}
-
-              {/* Description */}
-              {(product.short_description || product.description) && (
-                <div className="mt-5 pt-5" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
-                  <p className="mb-2 text-[10px] font-semibold tracking-[0.18em] uppercase" style={{ color: 'rgba(255,255,255,0.3)', fontFamily: "'DM Mono', monospace" }}>
-                    Description
-                  </p>
-                  <p className="text-[13px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.55)' }}>
-                    {product.short_description || product.description}
-                  </p>
-                </div>
-              )}
-
-              {/* Variation Options */}
+              {/* 3.5 — Variant Selector */}
               {hasMultipleVariants && (
-                <div className="mt-5 pt-5" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
-                  <p className="mb-3 text-[10px] font-semibold tracking-[0.18em]" style={{ color: 'rgba(255,255,255,0.3)', fontFamily: "'DM Mono', monospace" }}>
-                    VARIATIONS ({productVariants.length})
-                    {selectedVariationLabel && (
-                      <span className="ml-2 normal-case tracking-normal text-[var(--gold-light)]"> · {selectedVariationLabel}</span>
-                    )}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {variationChoices.map(({ variant, label }) => {
-                      const isSelected = selectedVariant.id === variant.id;
-                      const isAvailable = !!variant.in_stock;
-                      return (
-                        <button
-                          key={variant.id}
-                          onClick={() => handleVariantChange(variant)}
-                          disabled={!isAvailable}
-                          className="px-3.5 py-2 rounded-xl text-[12px] font-medium transition-all"
-                          style={{
-                            border: isSelected ? '1px solid var(--gold)' : isAvailable ? '1px solid rgba(255,255,255,0.12)' : '1px solid rgba(255,255,255,0.06)',
-                            background: isSelected ? 'rgba(176,124,58,0.15)' : 'rgba(255,255,255,0.04)',
-                            color: isSelected ? 'var(--gold-light)' : isAvailable ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.2)',
-                            textDecoration: isAvailable ? 'none' : 'line-through',
-                            cursor: isAvailable ? 'pointer' : 'not-allowed',
-                            fontFamily: "'Jost', sans-serif",
-                          }}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                <VariantSelector
+                  variants={productVariants}
+                  selectedVariant={selectedVariant}
+                  onVariantChange={handleVariantChange}
+                  baseName={baseName}
+                />
               )}
 
-              {/* Quantity + CTA */}
-              <div className="mt-6 pt-5" style={{ borderTop: '1px solid rgba(255,255,255,0.07)' }}>
-                <div className="flex items-center justify-between mb-4">
-                  <p className="text-[10px] font-semibold tracking-[0.18em]" style={{ color: 'rgba(255,255,255,0.3)', fontFamily: "'DM Mono', monospace" }}>QUANTITY</p>
-                  <div className="flex items-center rounded-xl overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)' }}>
+              {/* Quantity + CTAs */}
+              <div className="space-y-4 pt-4">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center h-[56px] border border-[var(--border-default)] rounded-2xl overflow-hidden bg-[var(--bg-surface)]">
                     <button onClick={() => handleQuantityChange(-1)} disabled={quantity <= 1}
-                      className="flex h-9 w-9 items-center justify-center transition-colors disabled:opacity-40"
-                      style={{ color: 'rgba(255,255,255,0.7)' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                      <Minus size={14} />
+                      className="px-4 h-full text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-30">
+                      <Minus size={16} />
                     </button>
-                    <span className="min-w-[40px] text-center text-[14px] font-semibold text-white">{quantity}</span>
-                    <button onClick={() => handleQuantityChange(1)} disabled={quantity >= stockQty}
-                      className="flex h-9 w-9 items-center justify-center transition-colors disabled:opacity-40"
-                      style={{ color: 'rgba(255,255,255,0.7)' }}
-                      onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
-                      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                      <Plus size={14} />
+                    <span className="min-w-[40px] text-center font-bold text-[var(--text-primary)]">{quantity}</span>
+                    <button onClick={() => handleQuantityChange(1)} disabled={quantity >= availableInventory}
+                      className="px-4 h-full text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-30">
+                      <Plus size={16} />
                     </button>
                   </div>
-                </div>
 
-                <div className="flex gap-2">
                   <button
+                    ref={mainCtaRef}
                     onClick={handleAddToCart}
                     disabled={!selectedVariant.in_stock || isAdding || availableInventory <= 0}
-                    className="flex-1 ec-btn justify-center"
-                    style={{
-                      background: isAdding ? 'rgba(34,197,94,0.85)' : 'var(--gold)',
-                      color: 'white',
-                      boxShadow: isAdding ? 'none' : availableInventory > 0 ? '0 4px 16px rgba(176,124,58,0.3)' : 'none',
-                      opacity: (!selectedVariant.in_stock || availableInventory <= 0) ? 0.4 : 1,
-                      cursor: (!selectedVariant.in_stock || availableInventory <= 0) ? 'not-allowed' : 'pointer',
-                    }}
+                    className={`flex-1 h-[56px] rounded-2xl font-bold uppercase tracking-widest text-[10px] sm:text-xs flex items-center justify-center gap-3 transition-all active:scale-95 disabled:bg-[var(--bg-surface-2)] disabled:text-[var(--text-muted)] disabled:shadow-none shadow-[var(--shadow-card)] ${
+                      cartStatus === 'success' ? 'bg-[var(--status-success)] text-[var(--text-on-accent)]' : 'ec-btn-primary'
+                    }`}
                   >
-                    <ShoppingCart size={16} />
-                    {isAdding ? 'Added ✓' : availableInventory <= 0 ? 'All stock already reserved' : 'Add to Cart'}
-                  </button>
-                  <button onClick={handleToggleWishlist}
-                    className="flex h-[46px] w-[46px] items-center justify-center rounded-xl transition-all"
-                    style={{
-                      border: `1px solid ${isInWishlist ? 'rgba(239,68,68,0.4)' : 'rgba(255,255,255,0.12)'}`,
-                      background: isInWishlist ? 'rgba(239,68,68,0.1)' : 'rgba(255,255,255,0.04)',
-                      color: isInWishlist ? '#f87171' : 'rgba(255,255,255,0.5)',
-                    }}>
-                    <Heart size={16} className={isInWishlist ? 'fill-current' : ''} />
-                  </button>
-                  <button onClick={handleShare}
-                    className="flex h-[46px] w-[46px] items-center justify-center rounded-xl transition-all"
-                    style={{ border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.5)' }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.25)'; (e.currentTarget as HTMLButtonElement).style.color = 'white'; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.12)'; (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.5)'; }}>
-                    <Share2 size={16} />
+                    {cartStatus === 'idle' && <ShoppingCart size={18} />}
+                    {cartStatus === 'loading' && <div className="h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
+                    {cartStatus === 'success' && <span>✓ Added!</span>}
+                    {cartStatus === 'idle' && (availableInventory <= 0 ? 'SOLD OUT' : 'ADD TO CART')}
                   </button>
                 </div>
-              </div>
-            </div>
 
-            {/* Meta card */}
-            <div className="ec-dark-card px-5 py-4 space-y-2.5">
-              {product.category && (
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.3)', fontFamily: "'DM Mono', monospace", letterSpacing: '0.1em' }}>CATEGORY</span>
-                  <span className="text-[12px] font-medium text-white">{getCategoryName(product.category)}</span>
-                </div>
-              )}
-              <div className="flex items-center justify-between">
-                <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.3)', fontFamily: "'DM Mono', monospace", letterSpacing: '0.1em' }}>AVAILABILITY</span>
-                <span className="text-[12px] font-medium" style={{ color: selectedVariant.in_stock && availableInventory > 0 ? '#4ade80' : '#f87171' }}>
-                  {selectedVariant.in_stock && availableInventory > 0 
-                    ? `available for order: in stock(${availableInventory})` 
-                    : (stockQty > 0 ? 'all stock reserved' : 'Out of Stock')}
-                </span>
+                <button
+                  onClick={handleBuyItNow}
+                  disabled={!selectedVariant.in_stock || isAdding || availableInventory <= 0}
+                  className="w-full h-[56px] bg-transparent text-[var(--text-primary)] border-2 border-[var(--text-primary)] rounded-2xl font-bold uppercase tracking-widest text-xs transition-all hover:bg-[var(--text-primary)] hover:text-[var(--bg-root)] active:scale-95 disabled:opacity-50"
+                >
+                  BUY IT NOW
+                </button>
               </div>
-            </div>
-            {/* Branch Inventory Table */}
-            {!loadingBranchStock && branchStocks.length > 0 && (
-              <div className="ec-dark-card overflow-hidden">
-                <div className="px-5 py-3 border-b border-white/5 bg-white/[0.02] flex items-center gap-2">
-                  <MapPin size={14} className="text-[var(--gold)]" />
-                  <span className="text-[11px] font-semibold tracking-wider text-white/90 uppercase" style={{ fontFamily: "'DM Mono', monospace" }}>
-                    Branch Availability
-                  </span>
-                </div>
-                <div className="overflow-x-auto ec-scrollbar">
-                  <table className="w-full text-left min-w-[300px]">
-                    <thead>
-                      <tr className="border-b border-white/5 text-[10px] uppercase tracking-widest text-white/30" style={{ fontFamily: "'DM Mono', monospace" }}>
-                        <th className="px-5 py-3 font-medium">Branch Location</th>
-                        <th className="px-5 py-3 font-medium text-right">Qty</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/5">
-                      {branchStocks.map((stock) => (
-                        <tr key={stock.store_id} className="group hover:bg-white/[0.01] transition-colors">
-                          <td className="px-5 py-3">
-                            <p className="text-[12px] font-medium text-white/80 group-hover:text-white transition-colors">
-                              {stock.store_name}
-                            </p>
-                            {stock.store_address && (
-                              <p className="text-[10px] text-white/20 line-clamp-1">{stock.store_address}</p>
-                            )}
-                          </td>
-                          <td className="px-5 py-3 text-right">
-                            <span className="text-[12px] font-semibold text-[var(--gold)]">
-                              {stock.total_quantity}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
 
-            {/* Trust strip */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              {[
-                { icon: '🚚', label: 'Free Delivery', sub: 'On ৳1,000+' },
-                { icon: '↩', label: 'Easy Returns', sub: '7-day policy' },
-                { icon: '✓', label: 'Authentic', sub: '100% genuine' },
-              ].map(({ icon, label, sub }) => (
-                <div key={label} className="ec-dark-card p-3 flex sm:flex-col items-center sm:text-center gap-3 sm:gap-1">
-                  <div className="text-xl sm:text-lg">{icon}</div>
-                  <div>
-                    <p className="text-[11px] font-semibold text-white">{label}</p>
-                    <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.35)' }}>{sub}</p>
-                  </div>
-                </div>
-              ))}
+              {/* Payment Options */}
+              <div className="pt-2">
+                <img
+                  src="/payment_option.png"
+                  alt="Payment Options"
+                  className="w-full h-auto object-contain"
+                />
+              </div>
+
+              {/* Accordion Sections */}
+              <div className="pt-8 space-y-px border-t border-[var(--border-default)]">
+                {[
+                  { title: 'Description', content: product.description || product.short_description },
+                  { title: 'Additional Information', content: `SKU: ${selectedVariant.sku}\nCategory: ${getCategoryName(product.category)}` }
+                ].map((section, idx) => (
+                  <details key={idx} className="group py-4 border-b border-[var(--border-default)]">
+                    <summary className="flex items-center justify-between cursor-pointer list-none">
+                      <span className="text-sm font-bold uppercase tracking-widest text-[var(--text-primary)]" style={{ fontFamily: "'Jost', sans-serif" }}>
+                        {section.title}
+                      </span>
+                      <Plus size={18} className="text-[var(--text-muted)] group-open:rotate-45 transition-transform" />
+                    </summary>
+                    <div className="mt-4 text-sm text-[var(--text-secondary)] leading-relaxed whitespace-pre-line">
+                      {section.content}
+                    </div>
+                  </details>
+                ))}
+              </div>
             </div>
           </div>
         </div>
 
         {/* Related Products */}
         {relatedProducts.length > 0 && (
-          <div className="mt-16" style={{ borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '3rem' }}>
-            <p className="ec-eyebrow mb-3">Pairs Well With</p>
-            <div className="flex items-center justify-between mb-8">
-              <h2 className="text-white" style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 'clamp(24px, 3.5vw, 36px)', fontWeight: 500, letterSpacing: '-0.01em' }}>
-                Related Essentials
-              </h2>
-              <button
-                onClick={() => {
-                  const slug = getCategorySlug(product.category);
-                  if (slug) {
-                    router.push(`/e-commerce/${slug}`);
-                  } else {
-                    router.push('/e-commerce/search?category=' + getCategoryId(product.category));
-                  }
-                }}
-                className="flex items-center gap-2 text-[11px] font-semibold transition-colors hover:text-[var(--gold)]"
-                style={{ fontFamily: "'DM Mono', monospace", color: 'rgba(255,255,255,0.4)', letterSpacing: '0.08em' }}
-              >
-                VIEW ALL <ArrowRight size={12} />
-              </button>
-            </div>
+          <div className="mt-16 sm:mt-24 py-16 bg-[var(--bg-surface)] border-y border-[var(--border-default)] -mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+            <div className="max-w-[1400px] mx-auto">
+              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-[var(--text-muted)] mb-2 block">Pairs Well With</span>
+              <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between mb-10 gap-4">
+                <h2 className="text-3xl sm:text-4xl font-light text-[var(--text-primary)] tracking-tight"
+                  style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+                  Related Essentials
+                </h2>
+                <button
+                  onClick={() => {
+                    const slug = getCategorySlug(product.category);
+                    if (slug) {
+                      router.push(`/e-commerce/${slug}`);
+                    } else {
+                      router.push('/e-commerce/search?category=' + getCategoryId(product.category));
+                    }
+                  }}
+                  className="text-xs font-bold uppercase tracking-widest text-[var(--text-primary)] border-b border-[var(--text-primary)] pb-1 hover:opacity-60 transition-all self-start"
+                >
+                  View Full Collection
+                </button>
+              </div>
 
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-              {relatedProducts.slice(0, 4).map(item => (
-                <PremiumProductCard
-                  key={item.id}
-                  product={item}
-                  onOpen={(p) => router.push(`/e-commerce/product/${p.id}`)}
-                  onAddToCart={(p, e) => handleQuickAddToCart(p, e)}
-                />
-              ))}
+              <div className="grid grid-cols-2 gap-6 sm:gap-8 sm:grid-cols-3 lg:grid-cols-4">
+                {relatedProducts.map(item => (
+                  <PremiumProductCard
+                    key={item.id}
+                    product={item}
+                    compact
+                    onOpen={(p) => router.push(`/e-commerce/product/${p.id}`)}
+                    onAddToCart={(p, e) => handleQuickAddToCart(p, e)}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         )}
 
-
+        {/* 3.7 — Recently Viewed Strip */}
+        {recentlyViewed.length > 0 && (
+          <div className="py-16 bg-[var(--bg-surface)] border-b border-[var(--border-default)] -mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+            <div className="max-w-[1400px] mx-auto">
+              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-[var(--text-muted)] mb-2 block" style={{ fontFamily: "'DM Mono', monospace" }}>Your History</span>
+              <h2 className="text-3xl sm:text-4xl font-light text-[var(--text-primary)] tracking-tight mb-10"
+                style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+                Recently Viewed
+              </h2>
+              <div className="flex gap-6 overflow-x-auto pb-4 scrollbar-hide no-scrollbar">
+                {recentlyViewed.map(item => (
+                  <div key={item.id} className="min-w-[180px] sm:min-w-[220px]">
+                    <PremiumProductCard
+                      product={item}
+                      compact
+                      onOpen={(p) => router.push(`/e-commerce/product/${p.id}`)}
+                      onAddToCart={(p, e) => handleQuickAddToCart(p, e)}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
+      <StickyAddToCart
+        isVisible={isStickyVisible}
+        productName={selectedVariant.name}
+        priceText={formatBDT(sellingPrice)}
+        isAdding={isAdding}
+        disabled={!selectedVariant.in_stock || availableInventory <= 0}
+        onAddToCart={handleAddToCart}
+      />
     </div>
   );
 }

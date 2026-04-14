@@ -24,11 +24,15 @@ export default function ScrollToTopOnRouteChange() {
     const currentRoute = `${pathname}?${query}`;
 
     if (previousRouteRef.current !== currentRoute) {
-      forceTop();
-      requestAnimationFrame(() => {
+      if ((window as any).__ERRUM_SKIP_SCROLL__) {
+        (window as any).__ERRUM_SKIP_SCROLL__ = false;
+      } else {
         forceTop();
-        setTimeout(forceTop, 0);
-      });
+        requestAnimationFrame(() => {
+          forceTop();
+          setTimeout(forceTop, 0);
+        });
+      }
     }
 
     previousRouteRef.current = currentRoute;

@@ -1,10 +1,11 @@
 'use client';
 
 import React from 'react';
-import { X, Loader2, ShoppingCart } from 'lucide-react';
+import { X, Loader2, ShoppingCart, ShoppingBag } from 'lucide-react';
 import { useCart } from '../../../app/e-commerce/CartContext';
 import { useRouter } from 'next/navigation';
 import CartItem from './CartItem';
+import checkoutService from '../../../services/checkoutService';
 
 const formatBDT = (value: number) => {
   return `৳${value.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -18,93 +19,173 @@ interface CartSidebarProps {
 export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
   const { cart, getTotalPrice, isLoading } = useCart();
   const router = useRouter();
-  
+
   const subtotal = getTotalPrice();
-  const freeShippingThreshold = 5000;
-  const remaining = Math.max(0, freeShippingThreshold - subtotal);
-  const progress = Math.min(100, (subtotal / freeShippingThreshold) * 100);
+  const deliveryCharge = checkoutService.calculateDeliveryCharge('Dhaka');
+  const total = subtotal + deliveryCharge;
+
+  const isAnyOverStock = cart.some(item => typeof item.maxQuantity === 'number' && item.quantity > item.maxQuantity);
 
   const handleCheckout = () => {
+    if (isAnyOverStock) return;
+    
+    // Set all cart items as selected for checkout
+    if (cart.length > 0) {
+      localStorage.setItem('checkout-selected-items', JSON.stringify(cart.map(i => i.id)));
+    }
+    
     router.push('/e-commerce/checkout');
     onClose();
   };
 
-  const handleViewCart = () => {
-    router.push('/e-commerce/cart');
-    onClose();
-  };
+
 
   return (
     <>
       {/* Backdrop */}
       {isOpen && (
-        <div 
-          className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-md ec-anim-backdrop"
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 100,
+            background: 'rgba(0,0,0,0.35)',
+            backdropFilter: 'blur(2px)',
+          }}
+          className="ec-anim-backdrop"
           onClick={onClose}
         />
       )}
-      
+
       {/* Side Drawer */}
       <div
-        className={`
-          fixed right-0 top-0 bottom-0 z-[101] w-full sm:w-[400px] 
-          bg-[#0d0d0d] shadow-[-20px_0_80px_rgba(0,0,0,0.8)]
-          flex flex-col transition-transform duration-500 cubic-bezier(0.32, 0.72, 0, 1)
-          ${isOpen ? 'translate-x-0' : 'translate-x-full'}
-        `}
         style={{
-          borderLeft: '1px solid rgba(255,255,255,0.05)',
+          position: 'fixed',
+          right: 0,
+          top: 0,
+          bottom: 0,
+          zIndex: 101,
+          width: '100%',
+          maxWidth: '380px',
+          background: '#ffffff',
+          borderLeft: '1px solid rgba(0,0,0,0.10)',
+          display: 'flex',
+          flexDirection: 'column',
+          transform: isOpen ? 'translateX(0)' : 'translateX(100%)',
+          transition: 'transform 0.4s cubic-bezier(0.32, 0.72, 0, 1)',
+          boxShadow: '-8px 0 40px rgba(0,0,0,0.10)',
         }}
       >
         {/* Header */}
-        <div className="flex h-20 items-center justify-between px-6 border-b border-white/5 bg-white/[0.02]">
-          <div className="flex items-center gap-3">
-            <h2 className="text-xl font-bold text-white" style={{ fontFamily: "'Cormorant Garamond', serif" }}>Shopping bag</h2>
-            <span className="text-[11px] font-bold text-[var(--gold)]" style={{ fontFamily: "'DM Mono', monospace" }}>
+        <div style={{
+          display: 'flex',
+          height: '56px',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 20px',
+          borderBottom: '1px solid rgba(0,0,0,0.08)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <ShoppingBag style={{ width: '18px', height: '18px', color: '#111111' }} />
+            <h2 style={{
+              fontFamily: "'Jost', sans-serif",
+              fontSize: '14px',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.12em',
+              color: '#111111',
+              margin: 0,
+            }}>
+              Shopping Cart
+            </h2>
+            <span style={{
+              fontFamily: "'Jost', sans-serif",
+              fontSize: '12px',
+              fontWeight: 700,
+              color: '#999999',
+            }}>
               ({cart.length})
             </span>
           </div>
           <button
             onClick={onClose}
-            className="flex h-10 w-10 items-center justify-center rounded-full text-white/40 hover:text-white bg-white/5 transition-all"
+            style={{
+              display: 'flex',
+              width: '32px',
+              height: '32px',
+              alignItems: 'center',
+              justifyContent: 'center',
+              borderRadius: '50%',
+              border: '1px solid rgba(0,0,0,0.15)',
+              color: '#999999',
+              background: 'none',
+              cursor: 'pointer',
+              transition: 'all 0.15s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#111111'; (e.currentTarget as HTMLElement).style.color = '#111111'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(0,0,0,0.15)'; (e.currentTarget as HTMLElement).style.color = '#999999'; }}
           >
-            <X size={20} />
+            <X style={{ width: '14px', height: '14px' }} />
           </button>
         </div>
 
         {/* Cart Items */}
-        <div className="flex-1 overflow-y-auto ec-scrollbar p-6">
+        <div style={{ flex: 1, overflowY: 'auto', padding: '0 20px' }}>
           {/* Loading State */}
           {isLoading && (
-            <div className="flex flex-col justify-center items-center py-20 space-y-4">
-              <Loader2 className="animate-spin text-[var(--gold)]" size={32} />
-              <p className="text-[11px] font-bold tracking-widest text-white/20 uppercase" style={{ fontFamily: "'DM Mono', monospace" }}>Syncing bag...</p>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 0', gap: '12px' }}>
+              <Loader2 style={{ animation: 'spin 1s linear infinite', color: '#111111', width: '28px', height: '28px' }} />
+              <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.15em', color: '#999999', textTransform: 'uppercase', fontFamily: "'Jost', sans-serif" }}>
+                Syncing bag...
+              </p>
             </div>
           )}
 
           {/* Empty State */}
           {!isLoading && cart.length === 0 && (
-            <div className="text-center py-20 space-y-6">
-              <div className="h-20 w-20 rounded-full bg-white/5 flex items-center justify-center mx-auto opacity-20">
-                <ShoppingCart className="h-8 w-8 text-white" />
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 24px', textAlign: 'center' }}>
+              <div style={{
+                width: '80px',
+                height: '80px',
+                borderRadius: '50%',
+                background: '#f5f5f5',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: '20px',
+              }}>
+                <ShoppingCart style={{ width: '32px', height: '32px', color: '#cccccc' }} />
               </div>
-              <div>
-                <p className="text-white/40 mb-2">Your collection is empty</p>
-                <button
-                  onClick={onClose}
-                  className="text-sm font-semibold text-[var(--gold)] hover:text-[var(--gold-light)] transition-colors"
-                >
-                  DISCOVER NEW ARRIVALS →
-                </button>
-              </div>
+              <h3 style={{ fontFamily: "'Jost', sans-serif", fontSize: '16px', fontWeight: 700, color: '#111111', marginBottom: '8px' }}>Your cart is empty</h3>
+              <p style={{ fontSize: '13px', color: '#999999', marginBottom: '24px', lineHeight: 1.5, fontFamily: "'Jost', sans-serif" }}>
+                Add something to your collection to get started.
+              </p>
+              <button
+                onClick={() => { onClose(); router.push('/e-commerce/categories'); }}
+                style={{
+                  padding: '12px 28px',
+                  background: '#111111',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  fontFamily: "'Jost', sans-serif",
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  cursor: 'pointer',
+                }}
+              >
+                Start Shopping
+              </button>
             </div>
           )}
 
           {/* Cart Items */}
           {!isLoading && cart.length > 0 && (
-            <div className="space-y-6">
-              {cart.map((item, idx) => (
-                <div key={item.id} className="ec-anim-fade-up" style={{ animationDelay: `${idx * 0.05}s` }}>
+            <div style={{ paddingTop: '16px', paddingBottom: '16px', display: 'flex', flexDirection: 'column', gap: '0' }}>
+              {cart.map((item) => (
+                <div key={`${item.id}-${item.sku}`} style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
                   <CartItem item={item} />
                 </div>
               ))}
@@ -114,64 +195,51 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
 
         {/* Footer */}
         {!isLoading && cart.length > 0 && (
-          <div className="border-t border-white/5 p-6 space-y-5 bg-white/[0.02]">
-            {/* Free Shipping Progress */}
-            {remaining > 0 ? (
-              <div className="space-y-2">
-                <div className="flex justify-between items-end">
-                  <p className="text-[11px] font-bold tracking-wide text-white/30 uppercase" style={{ fontFamily: "'DM Mono', monospace" }}>
-                    Free Shipping
-                  </p>
-                  <p className="text-[11px] font-semibold text-white/60">
-                    ৳{remaining.toFixed(2)} AWAY
-                  </p>
-                </div>
-                <div className="w-full rounded-full h-1 bg-white/5 overflow-hidden">
-                  <div 
-                    className="h-full rounded-full transition-all duration-700 bg-[var(--gold)]"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-xl p-3 flex items-center gap-3" style={{ background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.1)' }}>
-                <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                <p className="text-[11px] font-bold text-green-500 uppercase tracking-wider" style={{ fontFamily: "'DM Mono', monospace" }}>
-                  Complimentary Shipping Applied
-                </p>
-              </div>
-            )}
-
+          <div style={{ borderTop: '1px solid rgba(0,0,0,0.08)', padding: '16px 20px', background: '#ffffff' }}>
             {/* Subtotal */}
-            <div className="flex items-center justify-between py-2 border-y border-white/5">
-              <span className="text-sm font-medium text-white/40">Estimated Total:</span>
-              <span className="text-xl font-bold text-white">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+              <span style={{ fontSize: '13px', color: '#555555', fontFamily: "'Jost', sans-serif" }}>Subtotal</span>
+              <span style={{ fontSize: '16px', fontWeight: 700, color: '#111111', fontFamily: "'Jost', sans-serif" }}>
                 {formatBDT(subtotal)}
               </span>
             </div>
+            <p style={{ fontSize: '11px', color: '#999999', marginBottom: '16px', fontFamily: "'Jost', sans-serif" }}>
+              Includes standard delivery
+            </p>
 
             {/* Buttons */}
-            <div className="grid grid-cols-1 gap-3">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               <button
                 onClick={handleCheckout}
-                className="w-full py-4 rounded-2xl font-bold bg-[var(--gold)] text-white shadow-[0_10px_30px_rgba(176,124,58,0.2)] transition-all hover:bg-[#9a6b2e] active:scale-[0.98]"
-                style={{ fontFamily: "'Jost', sans-serif" }}
+                disabled={isAnyOverStock}
+                style={{
+                  width: '100%',
+                  padding: '14px',
+                  background: '#111111',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  fontFamily: "'Jost', sans-serif",
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.10em',
+                  cursor: isAnyOverStock ? 'not-allowed' : 'pointer',
+                  opacity: isAnyOverStock ? 0.5 : 1,
+                  transition: 'opacity 0.15s',
+                }}
+                onMouseEnter={e => !isAnyOverStock && ((e.currentTarget as HTMLElement).style.opacity = '0.85')}
+                onMouseLeave={e => !isAnyOverStock && ((e.currentTarget as HTMLElement).style.opacity = '1')}
               >
-                PROCEED TO CHECKOUT
+                Checkout
               </button>
-              <button
-                onClick={handleViewCart}
-                className="w-full py-3 text-[11px] font-bold tracking-[0.2em] text-white/30 hover:text-white transition-colors uppercase"
-                style={{ fontFamily: "'DM Mono', monospace" }}
-              >
-                VIEW FULL BAG
-              </button>
+
             </div>
           </div>
         )}
       </div>
 
-      {/* 🔥 MOBILE: Slight page shift for better UX */}
+      {/* Mobile scroll lock */}
       <style jsx>{`
         @media (max-width: 640px) {
           body {

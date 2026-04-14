@@ -2,10 +2,10 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { Heart, ArrowRight } from 'lucide-react';
+import { ShoppingBag } from 'lucide-react';
 import { SimpleProduct } from '@/services/catalogService';
-import { getAdditionalVariantCount, getCardPriceText, getCardStockLabel } from '@/lib/ecommerceCardUtils';
-import { wishlistUtils } from '@/lib/wishlistUtils';
+import { getAdditionalVariantCount, getCardStockLabel, getVariantListForCard } from '@/lib/ecommerceCardUtils';
+import { usePromotion } from '@/contexts/PromotionContext';
 
 interface PremiumProductCardProps {
   product: SimpleProduct;
@@ -14,135 +14,195 @@ interface PremiumProductCardProps {
   onOpen: (product: SimpleProduct) => void;
   onAddToCart: (product: SimpleProduct, e: React.MouseEvent) => void | Promise<void>;
   compact?: boolean;
+  animDelay?: number;
 }
 
 const PremiumProductCard: React.FC<PremiumProductCardProps> = ({
-  product, imageErrored = false, onImageError, onOpen, onAddToCart, compact = false,
+  product, imageErrored = false, onImageError, onOpen, onAddToCart, compact = false, animDelay = 0,
 }) => {
-  const [isInWishlist, setIsInWishlist] = React.useState(false);
+  const { getApplicablePromotion } = usePromotion();
+  const [isLoaded, setIsLoaded] = React.useState(false);
+  const [isHovered, setIsHovered] = React.useState(false);
 
-  React.useEffect(() => {
-    const updateWishlistStatus = () => {
-      setIsInWishlist(wishlistUtils.isInWishlist(product.id));
-    };
-    updateWishlistStatus();
-    window.addEventListener('wishlist-updated', updateWishlistStatus);
-    return () => window.removeEventListener('wishlist-updated', updateWishlistStatus);
-  }, [product.id]);
+  // 2.3 — Urgency Signals
+  const stock = Number(product.stock_quantity || 0);
+  const isLowStock = stock > 0 && stock <= 5;
 
-  const handleToggleWishlist = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (isInWishlist) {
-      wishlistUtils.remove(product.id);
-    } else {
-      wishlistUtils.add({
-        id: product.id,
-        name: product.name,
-        image: product.images?.[0]?.url || '/placeholder-product.png',
-        price: Number(product.selling_price ?? 0),
-        sku: product.sku || '',
-      });
-    }
-  };
+  // New arrival check (within 14 days)
+  const isNew = React.useMemo(() => {
+    const createdAt = (product as any).created_at;
+    if (!createdAt) return false;
+    const createdDate = new Date(createdAt);
+    const now = new Date();
+    const diffDays = Math.floor((now.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+    return diffDays >= 0 && diffDays <= 14;
+  }, [product]);
 
-  const primaryImage   = product.images?.[0]?.url || '';
+  const primaryImage = product.images?.[0]?.url || '';
+  const secondaryImage = product.images?.[1]?.url || '';
   const shouldFallback = imageErrored || !primaryImage;
-  const imageUrl       = shouldFallback ? '/images/placeholder-product.jpg' : primaryImage;
-  const extraVariants  = getAdditionalVariantCount(product);
-  const stockLabel     = getCardStockLabel(product);
-  const hasStock       = stockLabel !== 'Out of Stock';
-  const categoryName   = typeof product.category === 'object' && product.category ? product.category.name : '';
+  const imageUrl = shouldFallback ? '/images/placeholder-product.jpg' : primaryImage;
+
+  const stockLabel = getCardStockLabel(product);
+  const hasStock = stockLabel !== 'Out of Stock';
+  const categoryName = typeof product.category === 'object' && product.category ? product.category.name : '';
+
+  // Promotion / SALE badge
+  const categoryId = typeof product.category === 'object' && product.category ? (product.category as { id?: number }).id ?? null : null;
+  const salePromo = getApplicablePromotion(product.id, categoryId);
+  const salePercent = salePromo?.discount_value ?? 0;
+  const originalPrice = Number(product.selling_price ?? 0);
+  const salePrice = salePromo ? Math.max(0, originalPrice - (originalPrice * salePercent) / 100) : null;
+
+  // Price Range Display
+  const variants = React.useMemo(() => getVariantListForCard(product), [product]);
+  const prices = variants.map(v => Number(v.selling_price || 0)).filter(p => p > 0);
+  const minPrice = prices.length > 0 ? Math.min(...prices) : originalPrice;
+  const maxPrice = prices.length > 0 ? Math.max(...prices) : minPrice;
+  const hasPriceRange = minPrice !== maxPrice;
 
   return (
     <article
       onClick={() => onOpen(product)}
-      className="ec-card ec-card-hover group cursor-pointer overflow-hidden"
-      style={{ borderRadius: '16px' }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      style={{
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+        cursor: 'pointer',
+        background: '#ffffff',
+        animationDelay: `${animDelay}ms`,
+        animationFillMode: 'both',
+      }}
+      className="ec-anim-fade-up"
     >
-      {/* Image */}
-      <div className="relative overflow-hidden aspect-[3/4]" style={{ background: 'rgba(255,255,255,0.03)' }}>
+      {/* Image Container */}
+      <div style={{ position: 'relative', aspectRatio: '2/3', background: '#f5f5f5', overflow: 'hidden' }}>
+        {/* Loading shimmer */}
+        {!isLoaded && !imageErrored && (
+          <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, #f5f5f5 25%, #ebebeb 50%, #f5f5f5 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite' }} />
+        )}
+
         <Image
           src={imageUrl}
           alt={product.display_name || product.base_name || product.name}
           fill
-          className="object-cover transition-transform duration-700 group-hover:scale-[1.06]"
+          className={`object-cover object-top transition-all duration-500`}
+          style={{ transform: isHovered && secondaryImage ? 'opacity: 0' : 'opacity: 1' }}
+          onLoad={() => setIsLoaded(true)}
           onError={shouldFallback || !onImageError ? undefined : () => onImageError(product.id)}
         />
 
-        {/* Wishlist toggle - always visible on mobile for quick access */}
-        <div className="absolute right-2.5 top-2.5 z-10 sm:opacity-0 sm:scale-90 sm:group-hover:opacity-100 sm:group-hover:scale-100 transition-all duration-300">
-          <button
-            onClick={handleToggleWishlist}
-            className={`flex h-8 w-8 items-center justify-center rounded-full backdrop-blur-md transition-colors border ${
-              isInWishlist 
-                ? 'bg-[var(--gold)] border-[var(--gold)] text-black' 
-                : 'bg-black/40 border-white/10 text-white/70'
-            }`}
-          >
-            <Heart className={`h-3.5 w-3.5 ${isInWishlist ? 'fill-current' : ''}`} />
-          </button>
-        </div>
-
-        {/* Variant count */}
-        {extraVariants > 0 && (
-          <div className="absolute left-2.5 bottom-2.5 z-10 transition-transform sm:group-hover:-translate-y-12">
-            <span className="rounded-full px-2.5 py-1 text-[9px] font-semibold text-white"
-                  style={{ background: 'rgba(13,13,13,0.65)', border: '1px solid rgba(255,255,255,0.15)', backdropFilter: 'blur(4px)', fontFamily: "'DM Mono', monospace", letterSpacing: '0.06em' }}>
-              {extraVariants + 1} options
-            </span>
-          </div>
+        {/* Secondary image hover swap — if available */}
+        {secondaryImage && isHovered && (
+          <Image
+            src={secondaryImage}
+            alt={`${product.name} - alternate view`}
+            fill
+            className="object-cover object-top"
+            style={{ position: 'absolute', inset: 0 }}
+          />
         )}
 
-        {/* Slide-up action bar (Desktop hover / Mobile tap indicator) */}
-        <div className="absolute inset-x-0 bottom-0 translate-y-full transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] group-hover:translate-y-0 hidden sm:block">
-          <div className="flex items-center gap-1.5 p-2.5">
-            <button
-              onClick={e => {
-                e.stopPropagation();
-                onOpen(product);
-              }}
-              className="flex-1 rounded-xl py-3 text-[11px] font-bold text-white transition-all shadow-xl active:scale-[0.97]"
-              style={{ background: 'var(--gold)', letterSpacing: '0.08em', textTransform: 'uppercase', fontFamily: "'Jost', sans-serif" }}
-            >
-              Choose Options
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Info */}
-      <div className={compact ? 'p-3' : 'p-3.5 sm:p-4'}>
-        <div className="flex justify-between items-start gap-2 mb-1">
-          {categoryName ? (
-            <p className="truncate text-[9px] font-bold tracking-[0.2em] uppercase text-white/20"
-               style={{ fontFamily: "'DM Mono', monospace" }}>
-              {categoryName}
-            </p>
-          ) : <div />}
-          {hasStock && (
-            <span className="flex items-center gap-1 text-[8px] font-bold text-green-500/60 uppercase tracking-widest" style={{ fontFamily: "'DM Mono', monospace" }}>
-              ● <span className="hidden xs:inline">In Stock</span>
+        {/* Badges */}
+        <div style={{ position: 'absolute', top: '8px', left: '8px', display: 'flex', flexDirection: 'column', gap: '4px', zIndex: 10 }}>
+          {isNew && (
+            <span style={{ background: '#111111', color: '#ffffff', fontSize: '10px', fontWeight: 700, padding: '3px 8px', letterSpacing: '0.05em', fontFamily: "'Jost', sans-serif" }}>
+              NEW
+            </span>
+          )}
+          {salePromo && salePercent > 0 && (
+            <span style={{ background: '#e02020', color: '#ffffff', fontSize: '10px', fontWeight: 700, padding: '3px 8px', fontFamily: "'Jost', sans-serif" }}>
+              -{salePercent}%
+            </span>
+          )}
+          {!hasStock && (
+            <span style={{ background: '#f0f0f0', color: '#555555', fontSize: '10px', fontWeight: 700, padding: '3px 8px', fontFamily: "'Jost', sans-serif" }}>
+              SOLD OUT
             </span>
           )}
         </div>
-        
-        <h3 className="line-clamp-2 font-medium leading-snug group-hover:text-[var(--gold-light)] transition-colors"
-            style={{ 
-              fontFamily: "'Jost', sans-serif", 
-              fontSize: compact ? '13px' : '15px', 
-              color: 'rgba(255,255,255,0.9)', 
-              minHeight: compact ? '2.5rem' : '2.75rem' 
-            }}>
+
+        {/* Quick Add button — appears on hover */}
+        {hasStock && (
+          <button
+            onClick={e => { e.stopPropagation(); onOpen(product); }}
+            style={{
+              position: 'absolute',
+              bottom: 0,
+              left: 0,
+              right: 0,
+              background: '#111111',
+              color: '#ffffff',
+              border: 'none',
+              padding: '12px',
+              fontSize: '11px',
+              fontWeight: 700,
+              fontFamily: "'Jost', sans-serif",
+              textTransform: 'uppercase',
+              letterSpacing: '0.10em',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+              transform: isHovered ? 'translateY(0)' : 'translateY(100%)',
+              transition: 'transform 0.25s ease',
+              zIndex: 10,
+            }}
+          >
+            Choose Options
+          </button>
+        )}
+      </div>
+
+      {/* Info */}
+      <div style={{ padding: '10px 0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {categoryName && (
+          <p style={{ fontSize: '10px', color: '#999999', fontFamily: "'Jost', sans-serif", fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
+            {categoryName}
+          </p>
+        )}
+        <h3 style={{
+          fontSize: compact ? '14px' : '16px',
+          fontFamily: "'Jost', sans-serif",
+          color: '#111111',
+          lineHeight: 1.3,
+          fontWeight: 600,
+          margin: 0,
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+          overflow: 'hidden',
+          letterSpacing: '-0.01em',
+        }}>
           {product.display_name || product.base_name || product.name}
         </h3>
-        
-        <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-white/5 pt-2.5">
-          <span className="text-[15px] font-bold text-[var(--gold)]" style={{ fontFamily: "'Jost', sans-serif" }}>
-            {getCardPriceText(product)}
-          </span>
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-white/5 text-white/20 group-hover:bg-[var(--gold)] group-hover:text-white transition-all duration-300">
-            <ArrowRight size={14} />
-          </div>
+
+        {/* Price */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
+          {salePromo && salePrice !== null ? (
+            <>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#e02020', fontFamily: "'Jost', sans-serif" }}>
+                ৳{salePrice.toFixed(0)}
+              </span>
+              <span style={{ fontSize: '12px', color: '#999999', textDecoration: 'line-through', fontFamily: "'Jost', sans-serif" }}>
+                ৳{originalPrice.toFixed(0)}
+              </span>
+            </>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#111111', fontFamily: "'Jost', sans-serif" }}>
+                ৳{minPrice.toLocaleString()}
+              </span>
+              {hasPriceRange && (
+                <span style={{ fontSize: '12px', color: '#555555', fontFamily: "'Jost', sans-serif" }}>
+                  – ৳{maxPrice.toLocaleString()}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </article>

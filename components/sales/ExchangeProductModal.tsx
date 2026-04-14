@@ -261,9 +261,13 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
     );
   };
 
-  const calculateTotals = () => {
-    const parsePrice = (value: string) => parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+  const parsePrice = (value: any) => {
+    if (value == null) return 0;
+    const n = parseFloat(String(value).replace(/[^0-9.-]/g, ''));
+    return isNaN(n) ? 0 : n;
+  };
 
+  const calculateTotals = () => {
     // Calculate original amount for exchanged items
     const originalAmount = selectedProducts.reduce((sum, itemId) => {
       const item = order.items.find(i => i.id === itemId);
@@ -462,7 +466,7 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
                   <div className="text-right">
                     <p className="text-sm text-gray-600 dark:text-gray-400">Order Total</p>
                     <p className="text-lg font-bold text-gray-900 dark:text-white">
-                      ৳{parseFloat(order.total_amount.replace(/[^0-9.-]/g, '')).toLocaleString()}
+                      ৳{parsePrice(order.total_amount).toLocaleString()}
                     </p>
                   </div>
                 </div>
@@ -563,11 +567,11 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
                                   </div>
                                 </div>
                                 <p className="font-bold text-gray-900 dark:text-white">
-                                  ৳{(parseFloat(item.unit_price.replace(/[^0-9.-]/g, '')) * item.quantity).toFixed(2)}
+                                  ৳{(parsePrice(item.unit_price) * item.quantity).toFixed(2)}
                                 </p>
                               </div>
                               <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">
-                                Price: ৳{parseFloat(item.unit_price.replace(/[^0-9.-]/g, '')).toFixed(2)} × Qty: {item.quantity}
+                                Price: ৳{parsePrice(item.unit_price).toFixed(2)} × Qty: {item.quantity}
                               </p>
 
                               {/* ✅ NEW: Show inventory warning */}

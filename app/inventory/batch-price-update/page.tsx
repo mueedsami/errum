@@ -9,6 +9,7 @@ import Sidebar from '@/components/Sidebar';
 
 import productService, { Product as FullProduct } from '@/services/productService';
 import batchService, { Batch } from '@/services/batchService';
+import GroupedAllBarcodesPrinter, { BatchBarcodeSource } from '@/components/GroupedAllBarcodesPrinter';
 
 type ProductPick = {
   id: number;
@@ -276,9 +277,9 @@ export default function BatchPriceUpdatePage() {
           : (firstSuccess?.message || 'Updated selling price for all batches.')
       );
 
-      
+
       sessionStorage.setItem('product_list_refresh_needed', '1');
-// Show update rows from the first response (usually enough for verification)
+      // Show update rows from the first response (usually enough for verification)
       setUpdates(((firstSuccess?.data?.updates || []) as UpdateRow[]) || []);
 
       // Reload batches for the currently selected product (so table reflects new price)
@@ -293,6 +294,16 @@ export default function BatchPriceUpdatePage() {
       setIsSaving(false);
     }
   };
+
+  const updateBarcodeSources: BatchBarcodeSource[] = useMemo(() => {
+    if (!updates.length || !selectedProduct) return [];
+    return updates.map((u) => ({
+      batchId: u.batch_id,
+      productName: selectedProduct.name,
+      price: Number(String(u.new_price).replace(/[^\d.]/g, '')),
+      fallbackCode: u.batch_number || String(u.batch_id),
+    }));
+  }, [updates, selectedProduct]);
 
   return (
     <div className={darkMode ? 'dark' : ''}>
@@ -606,10 +617,23 @@ export default function BatchPriceUpdatePage() {
               {/* Updated list */}
               {updates.length > 0 && (
                 <div className="mt-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-4">
-                  <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Updated batches</h2>
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                    Backend response: per-batch old → new prices.
-                  </p>
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Updated batches</h2>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                        Backend response: per-batch old → new prices.
+                      </p>
+                    </div>
+
+                    <div className="shrink-0">
+                      <GroupedAllBarcodesPrinter
+                        sources={updateBarcodeSources}
+                        buttonLabel="Print Labels (All Updated)"
+                        title={`Barcodes for ${selectedProduct?.name}`}
+                        availableOnly={true}
+                      />
+                    </div>
+                  </div>
 
                   <div className="mt-4 overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
                     <table className="min-w-full text-sm">

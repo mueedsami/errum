@@ -28,6 +28,7 @@ type CartContextType = {
   updateQuantity: (cartItemId: number, quantity: number) => Promise<void>;
   clearCart: () => Promise<void>;
   refreshCart: () => Promise<void>;
+  validateCart: () => Promise<any>;
 };
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
@@ -56,7 +57,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         price: Number(ci.unit_price || 0),
         image: pickImage(ci.product),
         quantity: Number(ci.quantity || 0),
-        maxQuantity: typeof ci.product?.stock_quantity === 'number' ? ci.product.stock_quantity : undefined,
+        maxQuantity: typeof ci.product?.available_inventory === 'number' ? ci.product.available_inventory : undefined,
         sku: ci.product?.sku,
         color: (ci as any)?.variant_options?.color,
         size: (ci as any)?.variant_options?.size,
@@ -105,6 +106,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     await refreshCart();
   };
 
+  const validateCart = async () => {
+    return await cartService.validateCart();
+  };
+
   const getTotalPrice = () => {
     return cart.reduce((sum, item) => sum + (Number(item.price) || 0) * (Number(item.quantity) || 0), 0);
   };
@@ -121,6 +126,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       updateQuantity,
       clearCart,
       refreshCart,
+      validateCart,
     }),
     [cart, isCartOpen, isLoading]
   );

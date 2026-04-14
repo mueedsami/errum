@@ -7,136 +7,225 @@ import { Facebook, Instagram, Youtube, MapPin, Phone, MessageCircle } from "luci
 const BRAND = "Errum";
 
 const stores = [
-  { name: "Mirpur 12",          address: "Level 3, Hazi Kujrat Ali Mollah Market, Mirpur 12", phone: "01942565664" },
-  { name: "Jamuna Future Park", address: "3C-17A, Level 3, Jamuna Future Park",                phone: "01307130535" },
-  { name: "Bashundhara City",   address: "38, 39, 40, Block D, Level 5, Bashundhara City",     phone: "01336041064" },
+  { name: "Mirpur 12", address: "Level 3, Hazi Kujrat Ali Mollah Market, Mirpur 12", phone: "01942565664" },
+  { name: "Jamuna Future Park", address: "3C-17A, Level 3, Jamuna Future Park", phone: "01307130535" },
+  { name: "Bashundhara City", address: "38, 39, 40, Block D, Level 5, Bashundhara City", phone: "01336041064" },
 ];
+
+const LINK_STYLE: React.CSSProperties = {
+  fontSize: '13px',
+  color: '#555555',
+  textDecoration: 'none',
+  lineHeight: 2,
+  display: 'block',
+  transition: 'color 0.15s',
+  fontFamily: "'Jost', sans-serif",
+};
+
+const COL_HEADER_STYLE: React.CSSProperties = {
+  fontSize: '13px',
+  fontWeight: 700,
+  color: '#111111',
+  textTransform: 'uppercase',
+  letterSpacing: '0.10em',
+  marginBottom: '16px',
+  fontFamily: "'Jost', sans-serif",
+};
 
 export default function Footer() {
   const year = new Date().getFullYear();
 
+  const outlets = [
+    { name: "Bashundhara City Complex", image: "/Bashundhara_shopping_mall.png" },
+    { name: "Mirpur 12 Outlet", image: "/Mirpure_store.png" },
+    { name: "Jamuna Future Park", image: "/Jamuna_Future_Park.png" },
+  ];
+
   return (
-    <footer className="ec-root relative" style={{ background: '#0a0a0a', borderTop: '1px solid rgba(255,255,255,0.07)' }}>
-      {/* Gold accent line */}
-      <div className="h-px w-full" style={{ background: 'linear-gradient(90deg, transparent 0%, var(--gold) 50%, transparent 100%)' }} />
+    <footer style={{ background: '#f8f8f8', borderTop: '1px solid rgba(0,0,0,0.08)', paddingBottom: '80px' }}>
+      <div className="ec-container">
 
-      {/* Subtle glow */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute -top-20 left-0 h-64 w-64 rounded-full opacity-[0.07]" style={{ background: 'radial-gradient(circle, var(--gold) 0%, transparent 70%)' }} />
-        <div className="absolute bottom-0 right-0 h-56 w-56 rounded-full opacity-[0.05]" style={{ background: 'radial-gradient(circle, var(--gold) 0%, transparent 70%)' }} />
-      </div>
+        {/* ── Outlet Showcase ── */}
+        <section style={{ padding: '56px 0 0' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginBottom: '32px' }}>
+            <div style={{ height: '1px', flex: 1, maxWidth: '80px', background: '#111111' }} />
+            <h2 style={{ fontFamily: "'Jost', sans-serif", fontSize: '15px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.15em', color: '#111111', margin: 0 }}>
+              Our Outlets
+            </h2>
+            <div style={{ height: '1px', flex: 1, maxWidth: '80px', background: '#111111' }} />
+          </div>
 
-      <div className="ec-container relative">
-        <div className="grid grid-cols-1 gap-10 py-14 md:grid-cols-3">
-
-          {/* Brand */}
-          <div className="space-y-5">
-            <div>
-              <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: '28px', fontWeight: 600, color: 'white', letterSpacing: '0.04em' }}>
-                {BRAND}
-                <span style={{ fontSize: '10px', fontFamily: "'DM Mono', monospace", letterSpacing: '0.2em', color: 'var(--gold)', marginLeft: '8px', fontWeight: 400 }}>STORE</span>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-8 px-2 lg:px-48 mb-12">
+            {outlets.map((outlet, idx) => (
+              <div key={idx} style={{ overflow: 'hidden', borderRadius: '4px', border: '1px solid rgba(0,0,0,0.08)', background: '#ffffff', maxWidth: '320px', margin: '0 auto' }}>
+                <div style={{ position: 'relative', aspectRatio: '4/3', overflow: 'hidden' }}>
+                  <img
+                    src={outlet.image}
+                    alt={outlet.name}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.5s ease' }}
+                    onMouseEnter={e => (e.currentTarget.style.transform = 'scale(1.06)')}
+                    onMouseLeave={e => (e.currentTarget.style.transform = 'scale(1)')}
+                  />
+                </div>
+                <div style={{ padding: '8px', borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+                  <h3 style={{ fontFamily: "'Jost', sans-serif", fontSize: '12px', fontWeight: 700, color: '#111111', margin: 0, textAlign: 'center', letterSpacing: '0.04em' }}>
+                    {outlet.name}
+                  </h3>
+                </div>
               </div>
-              <p className="mt-3 text-[13px] leading-relaxed max-w-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                A complete lifestyle brand — footwear, clothing, watches, and bags curated for everyday confidence across Bangladesh.
-              </p>
-            </div>
+            ))}
+          </div>
+        </section>
 
-            <div className="flex flex-wrap gap-x-5 gap-y-2">
+        {/* ── Main footer grid ── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 md:gap-12" style={{ borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: '48px' }}>
+
+          {/* Column 1 — Brand & Info */}
+          <div>
+            <Link href="/e-commerce" style={{ display: 'inline-block', marginBottom: '16px', textDecoration: 'none' }}>
+              <span style={{ fontFamily: "'Jost', sans-serif", fontSize: '24px', fontWeight: 800, letterSpacing: '0.05em', color: '#111111' }}>
+                ERRUM
+              </span>
+            </Link>
+            <p style={{ fontSize: '13px', lineHeight: 1.7, color: '#555555', maxWidth: '300px', fontFamily: "'Jost', sans-serif", marginBottom: '24px' }}>
+              A complete lifestyle brand — footwear, clothing, watches, and bags curated for everyday confidence across Bangladesh.
+            </p>
+
+            <p style={COL_HEADER_STYLE}>Quick Info</p>
+            <nav style={{ marginBottom: '24px' }}>
               {[
-                { href: '/e-commerce/products',       label: 'Collection' },
-                { href: '/e-commerce/categories',     label: 'Categories' },
-                { href: '/e-commerce/contact',        label: 'Contact' },
-                { href: '/e-commerce/order-tracking', label: 'Track Order' },
+                { href: '/e-commerce/about', label: 'About Us' },
+                { href: '/e-commerce/contact', label: 'Contact Us' },
+                { href: '/e-commerce/track', label: 'Track Your Order' },
+                { href: '/e-commerce/categories', label: 'All Categories' },
+                { href: '/e-commerce/products', label: 'New & Popular' },
               ].map(({ href, label }) => (
-                <Link key={href} href={href} className="text-[12px] transition-colors" style={{ color: 'rgba(255,255,255,0.35)' }}
-                      onMouseEnter={e => (e.currentTarget.style.color = 'var(--gold-light)')}
-                      onMouseLeave={e => (e.currentTarget.style.color = 'rgba(255,255,255,0.35)')}>
+                <Link key={href} href={href}
+                  style={LINK_STYLE}
+                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = '#111111'}
+                  onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = '#555555'}
+                >
                   {label}
                 </Link>
               ))}
-            </div>
+            </nav>
 
-            <div className="flex gap-2.5">
-              {[Facebook, Instagram, Youtube].map((Icon, i) => (
-                <a key={i} href="#" className="flex h-9 w-9 items-center justify-center rounded-xl transition-all"
-                   style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.09)' }}
-                   onMouseEnter={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.background='rgba(176,124,58,0.15)'; el.style.borderColor='rgba(176,124,58,0.3)'; }}
-                   onMouseLeave={e => { const el = e.currentTarget as HTMLAnchorElement; el.style.background='rgba(255,255,255,0.05)'; el.style.borderColor='rgba(255,255,255,0.09)'; }}
-                   aria-label="social">
-                  <Icon size={16} style={{ color: 'rgba(255,255,255,0.5)' }} />
+            {/* Social Icons */}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {[
+                { Icon: Facebook, href: 'https://facebook.com/errum', label: 'Facebook' },
+                { Icon: Instagram, href: 'https://instagram.com/errum', label: 'Instagram' },
+                { Icon: Youtube, href: 'https://youtube.com/errum', label: 'YouTube' },
+              ].map(({ Icon, href, label }) => (
+                <a key={label} href={href} target="_blank" rel="noreferrer" aria-label={label}
+                  style={{
+                    display: 'flex',
+                    width: '36px',
+                    height: '36px',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    borderRadius: '4px',
+                    border: '1px solid rgba(0,0,0,0.15)',
+                    color: '#555555',
+                    textDecoration: 'none',
+                    transition: 'background 0.15s, border-color 0.15s, color 0.15s',
+                  }}
+                  onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.background = '#111111'; el.style.borderColor = '#111111'; el.style.color = '#ffffff'; }}
+                  onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.background = 'transparent'; el.style.borderColor = 'rgba(0,0,0,0.15)'; el.style.color = '#555555'; }}
+                >
+                  <Icon style={{ width: '16px', height: '16px' }} />
                 </a>
               ))}
             </div>
           </div>
 
-          {/* Shopping Promise */}
-          <div className="space-y-4">
-            <h4 className="text-[11px] font-semibold tracking-[0.15em] uppercase" style={{ color: 'rgba(255,255,255,0.3)', fontFamily: "'DM Mono', monospace" }}>
-              Our Promise
-            </h4>
-            <div className="space-y-3">
+          {/* Column 2 — Useful Links */}
+          <div>
+            <p style={COL_HEADER_STYLE}>Useful Links</p>
+            <nav>
               {[
-                { title: 'Comfort & Quality Assured',    sub: 'Thoughtfully selected with quality finishing.' },
-                { title: 'In-Store & Online Support',    sub: 'Visit us or order easily — responsive service.' },
-                { title: 'Nationwide Delivery',          sub: 'Smooth and reliable delivery across Bangladesh.' },
-              ].map(({ title, sub }) => (
-                <div key={title} className="rounded-xl p-4" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                  <p className="text-[13px] font-semibold text-white">{title}</p>
-                  <p className="mt-1 text-[12px]" style={{ color: 'rgba(255,255,255,0.35)' }}>{sub}</p>
-                </div>
+                { href: '/e-commerce/products', label: 'New Arrivals' },
+                { href: '/e-commerce/categories', label: 'Collections' },
+                { href: '/e-commerce/my-account', label: 'My Account' },
+                { href: '/e-commerce/orders', label: 'My Orders' },
+                { href: '/e-commerce/wishlist', label: 'Wishlist' },
+              ].map(({ href, label }) => (
+                <Link key={href} href={href}
+                  style={LINK_STYLE}
+                  onMouseEnter={e => (e.currentTarget as HTMLElement).style.color = '#111111'}
+                  onMouseLeave={e => (e.currentTarget as HTMLElement).style.color = '#555555'}
+                >
+                  {label}
+                </Link>
               ))}
-            </div>
+            </nav>
           </div>
 
-          {/* Stores */}
-          <div className="space-y-5">
-            <h4 className="text-[11px] font-semibold tracking-[0.15em] uppercase" style={{ color: 'rgba(255,255,255,0.3)', fontFamily: "'DM Mono', monospace" }}>
-              Stores & Contact
-            </h4>
-            <div className="space-y-3">
-              {stores.map(store => (
-                <div key={store.name} className="rounded-xl p-4" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}>
-                  <p className="text-[13px] font-semibold text-white mb-2">{store.name}</p>
-                  <div className="space-y-1.5">
-                    <div className="flex items-start gap-2 text-[12px]" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                      <MapPin size={13} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--gold)' }} />
-                      <span>{store.address}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-[12px]" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                      <Phone size={13} className="flex-shrink-0" style={{ color: 'var(--gold)' }} />
-                      <span>{store.phone}</span>
-                    </div>
-                  </div>
+          {/* Column 3 — Our Promise + WhatsApp */}
+          <div>
+            <p style={COL_HEADER_STYLE}>Our Promise</p>
+            <div style={{ marginBottom: '24px' }}>
+              {[
+                { title: 'Comfort & Quality Assured', sub: 'Thoughtfully selected with quality finishing.' },
+                { title: 'In-Store & Online Support', sub: 'Visit us or order easily — responsive service.' },
+                { title: 'Nationwide Delivery', sub: 'Smooth and reliable delivery across Bangladesh.' },
+              ].map(({ title, sub }) => (
+                <div key={title} style={{ paddingBottom: '12px', borderBottom: '1px solid rgba(0,0,0,0.06)', marginBottom: '12px' }}>
+                  <p style={{ fontSize: '13px', fontWeight: 600, color: '#111111', margin: '0 0 2px 0', fontFamily: "'Jost', sans-serif" }}>{title}</p>
+                  <p style={{ fontSize: '12px', color: '#555555', margin: 0, fontFamily: "'Jost', sans-serif" }}>{sub}</p>
                 </div>
               ))}
-
-              {/* WhatsApp */}
-              <div className="rounded-xl p-4" style={{ background: 'rgba(34,197,94,0.06)', border: '1px solid rgba(34,197,94,0.15)' }}>
-                <p className="text-[10px] tracking-[0.15em] uppercase mb-2" style={{ color: 'rgba(255,255,255,0.3)', fontFamily: "'DM Mono', monospace" }}>International Orders</p>
-                <div className="flex items-center gap-2">
-                  <MessageCircle size={14} style={{ color: '#4ade80' }} />
-                  <p className="text-[13px] text-white">WhatsApp: <span className="font-semibold">01942565664</span></p>
-                </div>
-              </div>
             </div>
+
+            <a href="https://wa.me/8801942565664" target="_blank" rel="noreferrer"
+              style={{ padding: '10px 12px', background: '#ffffff', borderRadius: '4px', border: '1px solid rgba(37,211,102,0.25)', display: 'flex', alignItems: 'center', gap: '8px', textDecoration: 'none' }}
+            >
+              <MessageCircle style={{ width: '14px', height: '14px', color: '#25D366', flexShrink: 0 }} />
+              <div>
+                <p style={{ fontSize: '10px', fontWeight: 700, color: '#999999', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 2px 0', fontFamily: "'Jost', sans-serif" }}>International Orders</p>
+                <p style={{ fontSize: '12px', color: '#111111', margin: 0, fontFamily: "'Jost', sans-serif" }}>WhatsApp: <strong>01942565664</strong></p>
+              </div>
+            </a>
           </div>
         </div>
 
-        {/* Bottom bar */}
-        <div className="flex flex-col items-center justify-between gap-3 border-t py-6 md:flex-row" style={{ borderColor: 'rgba(255,255,255,0.07)' }}>
-          <p style={{ fontSize: '11px', color: 'rgba(255,255,255,0.25)', fontFamily: "'DM Mono', monospace", letterSpacing: '0.08em' }}>
-            © {year} {BRAND}. All rights reserved.
+        {/* ── Store Locations (Side by Side) ── */}
+        <div style={{ marginTop: '48px', borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: '48px' }}>
+          <p style={COL_HEADER_STYLE}>Our Store Locations</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
+            {stores.map(store => (
+              <div key={store.name} style={{ padding: '16px', background: '#ffffff', borderRadius: '4px', border: '1px solid rgba(0,0,0,0.08)' }}>
+                <p style={{ fontSize: '14px', fontWeight: 700, color: '#111111', margin: '0 0 8px 0', fontFamily: "'Jost', sans-serif" }}>{store.name}</p>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', marginBottom: '8px' }}>
+                  <MapPin style={{ width: '14px', height: '14px', color: '#999999', marginTop: '2px', flexShrink: 0 }} />
+                  <span style={{ fontSize: '12px', color: '#555555', fontFamily: "'Jost', sans-serif", lineHeight: 1.5 }}>{store.address}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Phone style={{ width: '14px', height: '14px', color: '#999999', flexShrink: 0 }} />
+                  <a href={`tel:${store.phone}`} style={{ fontSize: '12px', color: '#555555', fontFamily: "'Jost', sans-serif", textDecoration: 'none' }}>{store.phone}</a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Bottom bar ── */}
+        <div style={{ marginTop: '48px', paddingTop: '24px', borderTop: '1px solid rgba(0,0,0,0.08)', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+          <p style={{ fontSize: '12px', color: '#999999', fontFamily: "'Jost', sans-serif", margin: 0 }}>
+            © {year} Errum STORE — Handcrafted for Confidence.
           </p>
-          <div className="flex items-center gap-2">
-            <Link href="/e-commerce/order-tracking"
-              className="rounded-lg px-3 py-1.5 text-[11px] font-medium transition-all"
-              style={{ background: 'rgba(176,124,58,0.15)', border: '1px solid rgba(176,124,58,0.25)', color: 'var(--gold-light)' }}
-              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(176,124,58,0.25)')}
-              onMouseLeave={e => (e.currentTarget.style.background = 'rgba(176,124,58,0.15)')}>
-              Track Order
-            </Link>
-            {['bKash', 'Nagad', 'Card'].map(m => (
-              <span key={m} className="rounded-lg px-2.5 py-1.5 text-[11px]" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.09)', color: 'rgba(255,255,255,0.35)', fontFamily: "'DM Mono', monospace" }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {['bKash', 'Nagad', 'Visa', 'Mastercard'].map(m => (
+              <span key={m} style={{
+                padding: '4px 10px',
+                border: '1px solid rgba(0,0,0,0.15)',
+                color: '#555555',
+                fontSize: '10px',
+                fontWeight: 700,
+                fontFamily: "'Jost', sans-serif",
+                borderRadius: '4px',
+                letterSpacing: '0.05em',
+              }}>
                 {m}
               </span>
             ))}

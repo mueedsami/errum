@@ -32,6 +32,7 @@ export default function SSLCommerzPayment({
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [paymentStage, setPaymentStage] = useState<'ready' | 'initializing' | 'redirecting'>('ready');
+  const [showRedirectOverlay, setShowRedirectOverlay] = useState(false);
 
   const handlePayment = async () => {
     setError(null);
@@ -100,14 +101,28 @@ export default function SSLCommerzPayment({
       // Step 3: Clear checkout data before redirect
       localStorage.removeItem('checkout-selected-items');
 
-      // Step 4: Show redirecting message
+      // Step 4: Show redirecting overlay
+      setShowRedirectOverlay(true);
       setPaymentStage('redirecting');
 
-      // Step 5: Redirect to SSLCommerz payment gateway
+      // Step 5: Redirect fallback (8 seconds)
+      const timeoutId = setTimeout(() => {
+        setShowRedirectOverlay((current) => {
+          if (current) {
+            setIsProcessing(false);
+            setError('Payment gateway redirect took too long. Please try again.');
+            setPaymentStage('ready');
+            return false;
+          }
+          return current;
+        });
+      }, 8000);
+
+      // Step 6: Redirect to SSLCommerz payment gateway
       setTimeout(() => {
         console.log('🔄 Redirecting to SSLCommerz...');
         sslcommerzService.redirectToPaymentGateway(response.data.payment_url);
-      }, 1500);
+      }, 1000);
 
     } catch (err: any) {
       console.error('❌ Payment initialization failed:', err);
@@ -165,7 +180,51 @@ export default function SSLCommerzPayment({
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-md p-6">
+    <div className="bg-[var(--bg-surface)] rounded-[var(--radius-lg)] border border-[var(--border-default)] p-8 shadow-sm">
+      {/* 6.5 — SSLCommerz Redirect Overlay */}
+      {showRedirectOverlay && (
+        <div className="fixed inset-0 z-[9999] bg-[var(--bg-root)]/92 backdrop-blur-[8px] flex items-center justify-center p-6 text-center animate-in fade-in duration-700">
+          <div className="max-w-md w-full space-y-10 ec-anim-fade-up">
+            <div className="relative inline-block">
+              <div className="w-24 h-24 rounded-full border-t-2 border-[var(--cyan)] animate-spin" />
+              <div className="absolute inset-0 flex items-center justify-center">
+                <ShieldCheck className="text-[var(--status-success)]" size={40} />
+              </div>
+            </div>
+            
+            <div className="space-y-4">
+              <h2 className="text-3xl font-medium text-[var(--text-primary)]" style={{ fontFamily: "'Cormorant Garamond', serif" }}>Taking you to secure payment...</h2>
+              <p className="text-[var(--text-secondary)] text-[12px] tracking-[0.2em] uppercase" style={{ fontFamily: "'DM Mono', monospace" }}>
+                Encryption handshake active
+              </p>
+            </div>
+
+            <div className="p-6 rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border-default)] flex items-center justify-center gap-8">
+              <div className="flex flex-col items-center gap-2">
+                <div className="h-6 w-12 bg-[var(--bg-depth)] rounded-md" />
+                <span className="text-[9px] text-[var(--text-muted)] uppercase font-bold tracking-widest">VISA</span>
+              </div>
+              <div className="flex flex-col items-center gap-2">
+                <div className="h-6 w-12 bg-[var(--bg-depth)] rounded-md" />
+                <span className="text-[9px] text-[var(--text-muted)] uppercase font-bold tracking-widest">BKASH</span>
+              </div>
+              <div className="w-[1px] h-10 bg-[var(--border-default)]" />
+              <div className="text-left">
+                <p className="text-xs font-bold text-[var(--text-primary)]">Verified by SSLCommerz</p>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <Lock size={10} className="text-[var(--status-success)]" />
+                  <p className="text-[10px] text-[var(--status-success)] font-medium">Bank-level Security</p>
+                </div>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-[var(--text-muted)] italic">
+              Please do not close this window while we secure your session
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center gap-3 mb-6 pb-6 border-b">
         <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center">

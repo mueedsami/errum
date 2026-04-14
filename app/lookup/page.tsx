@@ -10,11 +10,15 @@ import customerService, { Customer, CustomerOrder } from '@/services/customerSer
 import orderService from '@/services/orderService';
 import batchService, { Batch } from '@/services/batchService';
 import barcodeTrackingService from '@/services/barcodeTrackingService';
-import lookupService, { LookupProductData } from '@/services/lookupService';
+import lookupService from '@/services/lookupService';
 import purchaseOrderService from '@/services/purchase-order.service';
 import productImageService from '@/services/productImageService';
 import storeService, { Store } from '@/services/storeService';
 import ReturnExchangeFromOrder from '@/components/lookup/ReturnExchangeFromOrder';
+import ReturnProductModal from '@/components/sales/ReturnProductModal';
+import ExchangeProductModal from '@/components/sales/ExchangeProductModal';
+import productReturnService, { type CreateReturnRequest } from '@/services/productReturnService';
+import refundService, { type CreateRefundRequest } from '@/services/refundService';
 import { connectQZ, getDefaultPrinter } from '@/lib/qz-tray';
 import BatchPrinter from "@/components/BatchPrinter";
 import {
@@ -445,11 +449,22 @@ export default function LookupPage() {
 
   // Purchase info (lookup/product + fallback): PO & vendor details for this barcode
   const [barcodePurchaseInfo, setBarcodePurchaseInfo] = useState<{ poId?: number; poNumber?: string; vendorName?: string } | null>(null);
-  const [barcodeLookupData, setBarcodeLookupData] = useState<LookupProductData | null>(null);
+  const [barcodeLookupData, setBarcodeLookupData] = useState<any | null>(null);
   const [barcodePurchaseLoading, setBarcodePurchaseLoading] = useState(false);
   const [barcodeProductImageUrl, setBarcodeProductImageUrl] = useState<string | null>(null);
   const [barcodeImagePreviewOpen, setBarcodeImagePreviewOpen] = useState(false);
   const [barcodeImagePreviewUrl, setBarcodeImagePreviewUrl] = useState<string | null>(null);
+
+  // Modal states for Return/Exchange
+  const [showReturnModal, setShowReturnModal] = useState(false);
+  const [showExchangeModal, setShowExchangeModal] = useState(false);
+  const [selectedOrderForAction, setSelectedOrderForAction] = useState<any | null>(null);
+
+  const [printStatus, setPrintStatus] = useState<{ loading: boolean; error: string | null; success: boolean }>({
+    loading: false,
+    error: null,
+    success: false,
+  });
 
   const closeBarcodeImagePreview = () => {
     setBarcodeImagePreviewOpen(false);
@@ -1059,7 +1074,7 @@ export default function LookupPage() {
       try {
         const hasStore = !!(orderData as any)?.store?.name || !!(orderData as any)?.store_name || !!(orderData as any)?.store_id;
         if (!hasStore) {
-          const full = await orderService.getById(orderId);
+          const full = await orderService.getById(orderId, true);
           (orderData as any).store = (full as any)?.store ?? (orderData as any).store;
           (orderData as any).store_id = (full as any)?.store?.id ?? (full as any)?.store_id ?? (orderData as any).store_id;
           (orderData as any).store_name = (full as any)?.store?.name ?? (full as any)?.store_name ?? (orderData as any).store_name;
@@ -1104,7 +1119,11 @@ export default function LookupPage() {
     setError('');
 
     try {
-      const res: any = await orderService.getAll({ search: clean.replace(/^#/, ''), per_page: 50 });
+      const res: any = await orderService.getAll({ 
+        search: clean.replace(/^#/, ''), 
+        per_page: 50,
+        skipStoreScope: true
+      });
       const list = res?.data || [];
       const exact = list.find((o: any) => String(o.order_number).toLowerCase() === clean.toLowerCase())
         || list.find((o: any) => String(o.order_number).toLowerCase().includes(clean.toLowerCase()))
@@ -1163,6 +1182,7 @@ export default function LookupPage() {
       const searchResults = await orderService.getAll({
         search: cleanSearch,
         per_page: 10,
+        skipStoreScope: true,
       });
 
       const matching: CustomerOrder[] = searchResults.data
@@ -1313,7 +1333,7 @@ export default function LookupPage() {
               currentLoc?.customer;
 
             try {
-              const o: any = await orderService.getById(id);
+              const o: any = await orderService.getById(id, true);
               return [
                 id,
                 {
@@ -1454,6 +1474,7 @@ export default function LookupPage() {
       const ordersResponse: any = await orderService.getAll({
         search: cleanOrderNumber,
         per_page: 50,
+        skipStoreScope: true,
       });
 
       if (!ordersResponse.data || ordersResponse.data.length === 0) {
@@ -1780,6 +1801,152 @@ export default function LookupPage() {
     setBarcodePurchaseLoading(false);
   };
 
+  const handleReturnInitiate = (order: any) => {
+    setSelectedOrderForAction(order);
+    setShowReturnModal(true);
+  };
+
+  const handleExchangeInitiate = (order: any) => {
+    setSelectedOrderForAction(order);
+    setShowExchangeModal(true);
+  };
+
+  const handleReturnSubmit = async (returnData: any) => {
+    try {
+      if (!selectedOrderForAction) return;
+      console.log('🔄 Processing return (atomic):', returnData);
+
+      const returnRequest: CreateReturnRequest = {
+        order_id: selectedOrderForAction.id,
+        return_reason: returnData.returnReason,
+        return_type: returnData.returnType,
+        received_at_store_id: returnData.receivedAtStoreId,
+        items: returnData.selectedProducts.map((item: any) => ({
+          order_item_id: item.order_item_id,
+          quantity: item.quantity,
+          product_barcode_id: item.product_barcode_id,
+        })),
+        customer_notes: returnData.customerNotes || 'Initiated from lookup page',
+      };
+
+      // Use the atomic quickComplete endpoint
+      await productReturnService.quickComplete(returnRequest);
+
+      // Handle refund if needed
+      if (returnData.refundMethods && returnData.refundMethods.total > 0) {
+        // Need return ID for refund - quickComplete returns the product return object
+        const res = await productReturnService.quickComplete(returnRequest);
+        const returnId = res.data.id;
+
+        const refundRequest: CreateRefundRequest = {
+          return_id: returnId,
+          refund_type: 'full',
+          refund_method: 'cash',
+          refund_method_details: {
+            cash: returnData.refundMethods.cash,
+            card: returnData.refundMethods.card,
+            bkash: returnData.refundMethods.bkash,
+            nagad: returnData.refundMethods.nagad,
+          },
+          internal_notes: 'Refund processed via lookup page',
+        };
+
+        const refundRes = await refundService.create(refundRequest);
+        await refundService.process(refundRes.data.id);
+        await refundService.complete(refundRes.data.id, {
+          transaction_reference: `LOOKUP-REFUND-${Date.now()}`,
+        });
+      }
+
+      alert('✅ Return processed successfully!');
+      setShowReturnModal(false);
+      // Refresh search to show updated status/quantities
+      if (activeTab === 'order' && orderNumber) {
+        handleSearchOrder();
+      }
+    } catch (error: any) {
+      console.error('❌ Return processing failed:', error);
+      alert(`Error: ${error.response?.data?.message || error.message || 'Failed to process return'}`);
+    }
+  };
+
+  const handleExchangeSubmit = async (exchangeData: any) => {
+    try {
+      if (!selectedOrderForAction) return;
+      console.log('🔄 Processing exchange:', exchangeData);
+
+      // Step 1: Create and complete return for old products (using quickComplete)
+      const returnRequest: CreateReturnRequest = {
+        order_id: selectedOrderForAction.id,
+        return_reason: 'other',
+        return_type: 'customer_return',
+        received_at_store_id: exchangeData.exchangeAtStoreId,
+        items: exchangeData.removedProducts.map((item: any) => ({
+          order_item_id: item.order_item_id,
+          quantity: item.quantity,
+          product_barcode_id: item.product_barcode_id,
+        })),
+        customer_notes: `Exchange transaction - Original Order: ${selectedOrderForAction.order_number}`,
+      };
+
+      const returnRes = await productReturnService.quickComplete(returnRequest);
+      const returnId = returnRes.data.id;
+      const returnNumber = returnRes.data.return_number;
+
+      // Step 2: Create refund
+      const refundRequest: CreateRefundRequest = {
+        return_id: returnId,
+        refund_type: 'full',
+        refund_method: 'cash',
+        internal_notes: `Full refund for exchange - Original Order: ${selectedOrderForAction.order_number}`,
+      };
+
+      const refundRes = await refundService.create(refundRequest);
+      await refundService.process(refundRes.data.id);
+      await refundService.complete(refundRes.data.id, {
+        transaction_reference: `EXCHANGE-REFUND-${Date.now()}`,
+      });
+
+      // Step 3: Create new order for replacement products
+      const newOrderTotal = exchangeData.replacementProducts.reduce(
+        (sum: number, p: any) => sum + (p.unit_price * p.quantity), 
+        0
+      );
+
+      const newOrderData = {
+        order_type: 'counter' as const,
+        store_id: exchangeData.exchangeAtStoreId || selectedOrderForAction.store?.id || selectedOrderForAction.store_id,
+        customer_id: selectedOrderForAction.customer?.id,
+        items: exchangeData.replacementProducts.map((p: any) => ({
+          product_id: p.product_id,
+          batch_id: p.batch_id,
+          quantity: p.quantity,
+          unit_price: p.unit_price,
+          barcode: p.barcode,
+          barcode_id: p.barcode_id,
+        })),
+        payment: {
+          payment_method_id: 1, // Cash
+          amount: newOrderTotal,
+          payment_type: 'full' as const,
+        },
+        notes: `Exchange from order #${selectedOrderForAction.order_number} | Return: #${returnNumber}`,
+      };
+
+      const newOrder = await orderService.create(newOrderData);
+      await orderService.complete(newOrder.id);
+
+      alert(`✅ Exchange processed successfully!\n\nReturn: #${returnNumber}\nNew Order: #${newOrder.order_number}`);
+      setShowExchangeModal(false);
+      if (activeTab === 'order' && orderNumber) {
+        handleSearchOrder();
+      }
+    } catch (error: any) {
+      console.error('❌ Exchange failed:', error);
+      alert(`Error: ${error.response?.data?.message || error.message || 'Failed to process exchange'}`);
+    }
+  };
+
   const handleSearchBarcode = async (codeOverride?: string) => {
     const code = (codeOverride ?? barcodeInput).trim();
     if (!code) {
@@ -1810,6 +1977,9 @@ export default function LookupPage() {
       setBarcodeLoading(false);
     }
   };
+
+
+  // -----------------------
 
   // -----------------------
   // Batch handlers
@@ -1889,7 +2059,7 @@ export default function LookupPage() {
     // best effort fetch customer/order_number if orderId exists
     if (orderId) {
       try {
-        const o: any = await orderService.getById(orderId);
+        const o: any = await orderService.getById(orderId, true);
         return {
           orderId,
           orderNumber: orderNo || o?.order_number || `#${orderId}`,
@@ -2513,7 +2683,6 @@ export default function LookupPage() {
                             </tbody>
                           </table>
                         </div>
-
                         {singleOrder.notes && (
                           <div className="mt-3">
                             <p className="text-[9px] font-semibold text-black dark:text-white uppercase mb-1">Notes</p>
@@ -2522,25 +2691,9 @@ export default function LookupPage() {
                         )}
 
                         <ReturnExchangeFromOrder
-                          order={{
-                            id: singleOrder.id,
-                            order_number: singleOrder.order_number,
-                            store: (singleOrder as any).store,
-                            store_id: (singleOrder as any).store_id,
-                            items: singleOrder.items.map((it: any) => ({
-                              id: it.id,
-                              product_id: it.product_id,
-                              product_name: it.product_name,
-                              product_sku: it.product_sku,
-                              quantity: it.quantity,
-                              unit_price: it.unit_price,
-                              total_amount: it.total_amount,
-                              returnable_quantity: it.returnable_quantity,
-                              returned_quantity: it.returned_quantity,
-                              barcodes: it.barcodes,
-                            })),
-                          }}
-                          stores={stores as any}
+                          order={singleOrder}
+                          onInitiateReturn={handleReturnInitiate}
+                          onInitiateExchange={handleExchangeInitiate}
                         />
                       </div>
                     </div>
@@ -3124,14 +3277,14 @@ export default function LookupPage() {
                             id: batchData.batch.id,
                             productId: batchData.batch.product.id,
                             quantity: Number(
-                              batchData.batch.quantity ??
+                              (batchData.batch as any).quantity ??
                                 batchData.batch.original_quantity ??
                                 batchData.summary?.total_units ??
                                 0
                             ),
                             costPrice: Number(prices.cost ?? 0),
                             sellingPrice: Number(prices.sell ?? 0),
-                            baseCode: batchData.batch.base_code,
+                            baseCode: (batchData.batch as any).base_code,
                           };
 
                           const printerProduct: PrinterProduct = {
@@ -3418,6 +3571,21 @@ export default function LookupPage() {
                   </div>
                 </div>
               </div>
+            )}
+            {/* Return/Exchange Modals */}
+            {showReturnModal && selectedOrderForAction && (
+              <ReturnProductModal
+                onClose={() => setShowReturnModal(false)}
+                order={selectedOrderForAction}
+                onReturn={handleReturnSubmit}
+              />
+            )}
+            {showExchangeModal && selectedOrderForAction && (
+              <ExchangeProductModal
+                order={selectedOrderForAction}
+                onClose={() => setShowExchangeModal(false)}
+                onExchange={handleExchangeSubmit}
+              />
             )}
           </main>
         </div>

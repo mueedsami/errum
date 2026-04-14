@@ -20,48 +20,61 @@ const VALUES = [
 
 export default function AboutPage() {
   return (
-    <div className="ec-root min-h-screen">
+    <div className="ec-root min-h-screen bg-[var(--bg-root)]">
       <Navigation />
 
       {/* ── Hero ── */}
-      <section className="relative overflow-hidden ec-page-section" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+      <section className="relative overflow-hidden ec-page-section border-b border-[var(--border-default)]">
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute -left-32 top-0 h-96 w-96 rounded-full opacity-10" style={{ background: 'radial-gradient(circle, var(--gold) 0%, transparent 70%)' }} />
-          <div className="absolute -right-20 bottom-0 h-64 w-64 rounded-full opacity-5" style={{ background: 'radial-gradient(circle, #8fa0c8 0%, transparent 70%)' }} />
-          <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.5) 1px, transparent 1px)', backgroundSize: '60px 60px' }} />
+          <div className="absolute -right-20 bottom-0 h-64 w-64 rounded-full opacity-10" style={{ background: 'radial-gradient(circle, var(--cyan) 0%, transparent 70%)' }} />
         </div>
 
-        <div className="ec-container relative">
+        <div className="ec-container relative py-12">
           <div className="ec-dark-tag mb-6">About Errum</div>
-          <h1 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 'clamp(44px, 8vw, 96px)', fontWeight: 300, lineHeight: 0.95, letterSpacing: '-0.02em', color: 'white' }}>
+          <h1 className="text-[var(--text-primary)]"
+              style={{
+                fontFamily: "'Cormorant Garamond', serif",
+                fontSize: 'clamp(44px, 8vw, 96px)',
+                fontWeight: 300,
+                lineHeight: 0.9,
+                letterSpacing: '-0.02em'
+              }}>
             More Than<br />
-            <span style={{ fontWeight: 600, color: 'var(--gold)' }}>a Brand</span>
+            <span className="italic" style={{ fontWeight: 600, color: 'var(--gold)' }}>a Brand</span>
           </h1>
-          <p className="mt-6 max-w-xl text-[15px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.5)' }}>
-            Errum is Bangladesh's premium lifestyle destination — fashion, footwear, accessories, and fragrances, curated for those who refuse to compromise on style or quality.
+          <p className="mt-8 max-w-xl text-[var(--text-secondary)] text-[16px] leading-relaxed">
+            Errum is Bangladesh&apos;s premium lifestyle destination — fashion, footwear, accessories, and fragrances, curated for those who refuse to compromise on style or quality.
           </p>
-          <div className="mt-8 flex gap-3 flex-wrap">
+          <div className="mt-10 flex gap-4 flex-wrap">
             <Link href="/e-commerce/products" className="ec-btn ec-btn-gold">Shop Collection</Link>
-            <Link href="/e-commerce/contact"  className="ec-btn" style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.8)' }}>Find a Store</Link>
+            <Link href="/e-commerce/contact"  className="ec-btn ec-btn-ghost">Find a Store</Link>
           </div>
         </div>
       </section>
 
       {/* ── Values ── */}
-      <section className="ec-page-section" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+      <section className="ec-page-section border-b border-[var(--border-default)]">
         <div className="ec-container">
-          <p className="ec-eyebrow mb-4">Our Promise</p>
-          <h2 className="mb-10" style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 'clamp(28px, 4vw, 48px)', fontWeight: 500, color: 'white', letterSpacing: '-0.01em' }}>
+          <p className="ec-eyebrow mb-6 text-[var(--cyan)]">Our Promise</p>
+          <h2 className="mb-12 text-[var(--text-primary)]"
+              style={{
+                fontFamily: "'Cormorant Garamond', serif",
+                fontSize: 'clamp(32px, 5vw, 56px)',
+                fontWeight: 500,
+                letterSpacing: '-0.01em',
+                lineHeight: 1
+              }}>
             What We Stand For
           </h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {VALUES.map(({ icon: Icon, title, desc }) => (
-              <div key={title} className="ec-dark-card ec-dark-card-hover p-5">
-                <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: 'rgba(176,124,58,0.15)', border: '1px solid rgba(176,124,58,0.2)' }}>
-                  <Icon className="h-5 w-5" style={{ color: 'var(--gold)' }} />
+              <div key={title} className="ec-surface p-8 group hover:border-[var(--cyan-border)] hover:bg-[var(--bg-surface-2)] transition-all duration-500">
+                <div className="mb-6 flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--cyan-pale)] border border-[var(--cyan-border)] group-hover:bg-[var(--cyan)] transition-colors duration-500">
+                  <Icon className="h-6 w-6 text-[var(--cyan)] group-hover:text-white transition-colors" />
                 </div>
-                <h3 className="mb-2 text-[15px] font-semibold text-white">{title}</h3>
-                <p className="text-[13px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.45)' }}>{desc}</p>
+                <h3 className="mb-3 text-lg font-medium text-[var(--text-primary)]" style={{ fontFamily: "'Cormorant Garamond', serif" }}>{title}</h3>
+                <p className="text-sm leading-relaxed text-[var(--text-secondary)]">{desc}</p>
               </div>
             ))}
           </div>
@@ -69,25 +82,45 @@ export default function AboutPage() {
       </section>
 
       {/* ── Story ── */}
-      <section className="ec-page-section" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+      <section className="ec-page-section border-b border-[var(--border-default)] bg-[var(--bg-depth)]/30">
         <div className="ec-container">
-          <div className="grid gap-12 lg:grid-cols-2 items-center">
-            <div>
-              <p className="ec-eyebrow mb-4">Our Story</p>
-              <h2 className="mb-6" style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 'clamp(28px, 4vw, 52px)', fontWeight: 500, color: 'white', letterSpacing: '-0.01em', lineHeight: 1.05 }}>
+          <div className="grid gap-16 lg:grid-cols-2 items-center">
+            <div className="ec-anim-fade-up">
+              <p className="ec-eyebrow mb-6">Our Story</p>
+              <h2 className="mb-8 text-[var(--text-primary)]"
+                  style={{
+                    fontFamily: "'Cormorant Garamond', serif",
+                    fontSize: 'clamp(32px, 5vw, 64px)',
+                    fontWeight: 500,
+                    letterSpacing: '-0.01em',
+                    lineHeight: 0.95
+                  }}>
                 Born in Dhaka,<br />
-                <span style={{ color: 'var(--gold)' }}>Built for You</span>
+                <span className="italic" style={{ color: 'var(--gold)' }}>Built for You</span>
               </h2>
-              <div className="space-y-4 text-[14px] leading-relaxed" style={{ color: 'rgba(255,255,255,0.5)' }}>
+              <div className="space-y-6 text-[15px] leading-relaxed text-[var(--text-secondary)]">
                 <p>Errum was founded with a simple belief: everyone deserves access to premium fashion without the premium price tag. We started small — a single store in Mirpur — and grew into a brand trusted by thousands across Bangladesh.</p>
                 <p>Today, with three physical locations and a growing online presence, we continue to handpick every product in our catalogue, ensuring authenticity, quality, and style that stands the test of time.</p>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              {[['2020', 'Founded'], ['3', 'Stores'], ['500+', 'Products'], ['10k+', 'Customers']].map(([val, lbl]) => (
-                <div key={lbl} className="ec-dark-card p-6 text-center">
-                  <div className="text-4xl font-bold mb-1" style={{ fontFamily: "'Cormorant Garamond', serif", color: 'var(--gold)' }}>{val}</div>
-                  <div style={{ fontSize: '11px', fontFamily: "'DM Mono', monospace", letterSpacing: '0.15em', color: 'rgba(255,255,255,0.3)' }}>{lbl.toUpperCase()}</div>
+            <div className="grid grid-cols-2 gap-4">
+              {[
+                ['2020', 'Founded'],
+                ['3', 'Stores'],
+                ['500+', 'Products'],
+                ['10k+', 'Customers']
+              ].map(([val, lbl], i) => (
+                <div key={lbl}
+                     className="ec-surface p-8 text-center bg-[var(--bg-root)] ec-anim-fade-up"
+                     style={{ animationDelay: `${0.2 + i * 0.1}s` }}>
+                  <div className="text-5xl font-bold mb-2 text-[var(--gold)]"
+                       style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+                    {val}
+                  </div>
+                  <div className="text-[10px] uppercase font-bold tracking-[0.2em] text-[var(--text-muted)]"
+                       style={{ fontFamily: "'DM Mono', monospace" }}>
+                    {lbl}
+                  </div>
                 </div>
               ))}
             </div>
@@ -98,21 +131,27 @@ export default function AboutPage() {
       {/* ── Stores ── */}
       <section className="ec-page-section">
         <div className="ec-container">
-          <p className="ec-eyebrow mb-4">Visit Us</p>
-          <h2 className="mb-8" style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: 'clamp(28px, 4vw, 48px)', fontWeight: 500, color: 'white', letterSpacing: '-0.01em' }}>
+          <p className="ec-eyebrow mb-6">Visit Us</p>
+          <h2 className="mb-10 text-[var(--text-primary)]"
+              style={{
+                fontFamily: "'Cormorant Garamond', serif",
+                fontSize: 'clamp(32px, 5vw, 56px)',
+                fontWeight: 500,
+                letterSpacing: '-0.01em'
+              }}>
             Our Stores
           </h2>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
             {STORES.map(store => (
-              <div key={store.name} className="ec-dark-card ec-dark-card-hover p-5">
-                <h3 className="text-[15px] font-semibold text-white mb-3">{store.name}</h3>
-                <div className="space-y-2">
-                  <div className="flex items-start gap-2.5 text-[13px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                    <MapPin className="h-4 w-4 flex-shrink-0 mt-0.5" style={{ color: 'var(--gold)' }} />
-                    <span>{store.address}</span>
+              <div key={store.name} className="ec-surface p-8 group hover:border-[var(--border-strong)] transition-all">
+                <h3 className="text-xl font-medium text-[var(--text-primary)] mb-6" style={{ fontFamily: "'Cormorant Garamond', serif" }}>{store.name}</h3>
+                <div className="space-y-4">
+                  <div className="flex items-start gap-4 text-[14px] text-[var(--text-secondary)]">
+                    <MapPin className="h-5 w-5 flex-shrink-0 mt-0.5 text-[var(--gold)]" />
+                    <span className="leading-relaxed">{store.address}</span>
                   </div>
-                  <div className="flex items-center gap-2.5 text-[13px]" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                    <Phone className="h-4 w-4 flex-shrink-0" style={{ color: 'var(--gold)' }} />
+                  <div className="flex items-center gap-4 text-[14px] text-[var(--text-secondary)]">
+                    <Phone className="h-5 w-5 flex-shrink-0 text-[var(--gold)]" />
                     <span>{store.phone}</span>
                   </div>
                 </div>

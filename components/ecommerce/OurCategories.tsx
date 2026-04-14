@@ -4,23 +4,14 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import catalogService, { CatalogCategory } from '@/services/catalogService';
 import { toAbsoluteAssetUrl } from '@/lib/assetUrl';
-import SectionHeader from '@/components/ecommerce/ui/SectionHeader';
 
 const slugify = (v: string) =>
   v.toLowerCase().trim().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-');
 
-/**
- * Home "Shop by Category" should show TOP-LEVEL categories (not subcategories).
- * If the API ever returns a flat list, we fall back gracefully.
- */
 const getTopLevelCategories = (items: CatalogCategory[]): CatalogCategory[] => {
   const named = (Array.isArray(items) ? items : []).filter(c => c && c.name);
-
-  // Prefer top-level categories if present
   const top = named.filter(c => (c.parent_id ?? null) === null);
   const base = top.length ? top : named;
-
-  // Sort by product_count desc, then name for stability
   return [...base].sort((a, b) => {
     const da = Number(a.product_count || 0);
     const db = Number(b.product_count || 0);
@@ -28,19 +19,6 @@ const getTopLevelCategories = (items: CatalogCategory[]): CatalogCategory[] => {
     return String(a.name || '').localeCompare(String(b.name || ''));
   });
 };
-
-const PALETTE = [
-  ['#e8e4df','#b8b0a8'],
-  ['#dde4e8','#a0afc0'],
-  ['#ede8e0','#c4b89a'],
-  ['#e0e8e4','#9abfb0'],
-  ['#e8e0e8','#b898b8'],
-  ['#e8e8de','#b8b89a'],
-  ['#e0e4e8','#9aaab8'],
-  ['#ece8e0','#ccc0a0'],
-  ['#e4e8e4','#a0b8a0'],
-  ['#e8e4e0','#c0b8b0'],
-];
 
 interface OurCategoriesProps {
   categories?: CatalogCategory[];
@@ -67,107 +45,129 @@ const OurCategories: React.FC<OurCategoriesProps> = ({ categories: categoriesPro
     return () => { active = false; };
   }, [categoriesProp]);
 
-  const display = getTopLevelCategories(categories || []).slice(0, 10);
+  const allDisplay = getTopLevelCategories(categories || []);
 
   if (loading || isFetching) {
     return (
-      <section className="ec-section">
+      <section style={{ background: '#ffffff', padding: '48px 0' }}>
         <div className="ec-container">
-          <div className="ec-surface p-5 sm:p-7">
-            <div className="mb-6 space-y-2">
-              <div className="h-2.5 w-28 rounded-full animate-pulse" style={{ background: 'rgba(255,255,255,0.08)' }} />
-              <div className="h-9 w-52 rounded-lg animate-pulse" style={{ background: 'rgba(255,255,255,0.08)' }} />
-            </div>
-            <div className="grid grid-cols-3 gap-3 sm:grid-cols-5">
-              {Array.from({ length: 10 }).map((_, i) => (
-                <div key={i} className="animate-pulse">
-                  <div className="aspect-[3/4] rounded-2xl mb-2" style={{ background: 'rgba(255,255,255,0.05)' }} />
-                  <div className="h-3 rounded-full w-3/4 mx-auto" style={{ background: 'rgba(255,255,255,0.05)' }} />
-                </div>
-              ))}
-            </div>
+          {/* Header skeleton */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginBottom: '32px' }}>
+            <div style={{ height: '1px', width: '48px', background: '#e0e0e0' }} />
+            <div style={{ height: '24px', width: '180px', background: '#f0f0f0', borderRadius: '4px' }} />
+            <div style={{ height: '1px', width: '48px', background: '#e0e0e0' }} />
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 md:gap-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} style={{ aspectRatio: '3/4', background: '#f5f5f5', borderRadius: '4px', animation: 'pulse 1.5s ease-in-out infinite' }} />
+            ))}
           </div>
         </div>
       </section>
     );
   }
 
-  if (display.length === 0) return null;
+  if (allDisplay.length === 0) return null;
 
   return (
-    <section className="ec-section">
+    <section style={{ background: '#ffffff', padding: '48px 0' }}>
       <div className="ec-container">
-        <div className="ec-surface p-5 sm:p-7 relative overflow-hidden">
-          <div className="pointer-events-none absolute -bottom-16 -right-16 h-48 w-48 rounded-full opacity-40"
-               style={{ background: 'radial-gradient(circle, rgba(176,124,58,0.09) 0%, transparent 70%)', filter: 'blur(24px)' }} />
-          <SectionHeader
-            eyebrow="Shop by Category"
-            title="Explore Collections"
-            subtitle="Discover our curated product categories"
-            actionLabel="All Categories"
-            onAction={() => router.push('/e-commerce/categories')}
-          />
+        {/* Section header — reference style */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginBottom: '32px' }}>
+          <div style={{ height: '1px', flex: 1, maxWidth: '80px', background: '#111111' }} />
+          <h2 style={{
+            fontFamily: "'Jost', sans-serif",
+            fontSize: '18px',
+            fontWeight: 800,
+            textTransform: 'uppercase',
+            letterSpacing: '0.15em',
+            color: '#111111',
+            margin: 0,
+          }}>
+            FEATURED CATEGORIES
+          </h2>
+          <div style={{ height: '1px', flex: 1, maxWidth: '80px', background: '#111111' }} />
+        </div>
 
-          <div className="grid grid-cols-2 min-[420px]:grid-cols-3 sm:grid-cols-5 gap-3">
-            {display.map((cat, i) => {
-              const imgSrc = toAbsoluteAssetUrl(cat.image || cat.image_url || '');
-              const [from, to] = PALETTE[i % PALETTE.length];
+        {/* 4-col grid matching reference */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-1.5 md:gap-3">
+          {allDisplay.map((cat, i) => {
+            const imgSrc = toAbsoluteAssetUrl(cat.image || cat.image_url || '');
 
-              return (
-                <button
-                  key={cat.id}
-                  onClick={() => router.push(`/e-commerce/${encodeURIComponent(cat.slug || slugify(cat.name))}`)}
-                  className="group text-left"
-                  type="button"
-                >
-                  {/* Portrait image card */}
-                  <div
-                    className="relative overflow-hidden rounded-2xl transition-all duration-300 group-hover:shadow-lg group-hover:-translate-y-0.5"
-                    style={{ aspectRatio: '3/4' }}
-                  >
-                    {imgSrc ? (
-                      <img
-                        src={imgSrc}
-                        alt={cat.name}
-                        className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
-                        onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-                      />
-                    ) : (
-                      <div
-                        className="absolute inset-0"
-                        style={{ background: `linear-gradient(160deg, ${from} 0%, ${to} 100%)` }}
-                      />
-                    )}
-
-                    {/* Dark gradient overlay */}
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
-
-                    {/* Category name on image */}
-                    <div className="absolute inset-x-0 bottom-0 p-2.5 sm:p-3">
-                      <p
-                        className="text-white font-semibold leading-tight drop-shadow"
-                        style={{
-                          fontFamily: "'Cormorant Garamond', serif",
-                          fontSize: 'clamp(12px, 2.5vw, 17px)',
-                          letterSpacing: '-0.01em',
-                        }}
-                      >
-                        {cat.name}
-                      </p>
-                      {Number(cat.product_count || 0) > 0 && (
-                        <p
-                          className="mt-0.5 text-white/60"
-                          style={{ fontFamily: "'DM Mono', monospace", fontSize: '9px', letterSpacing: '0.12em' }}
-                        >
-                          {cat.product_count} items
-                        </p>
-                      )}
-                    </div>
+            return (
+              <button
+                key={cat.id}
+                onClick={() => router.push(`/e-commerce/${encodeURIComponent(cat.slug || slugify(cat.name))}`)}
+                type="button"
+                style={{
+                  position: 'relative',
+                  overflow: 'hidden',
+                  aspectRatio: '3/4',
+                  border: 'none',
+                  padding: 0,
+                  cursor: 'pointer',
+                  background: '#e8e8e8',
+                  display: 'block',
+                  width: '100%',
+                }}
+                onMouseEnter={e => {
+                  const img = (e.currentTarget as HTMLElement).querySelector('img');
+                  if (img) img.style.transform = 'scale(1.06)';
+                }}
+                onMouseLeave={e => {
+                  const img = (e.currentTarget as HTMLElement).querySelector('img');
+                  if (img) img.style.transform = 'scale(1)';
+                }}
+              >
+                {imgSrc ? (
+                  <img
+                    src={imgSrc}
+                    alt={cat.name}
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                      objectPosition: 'top',
+                      transition: 'transform 0.6s ease',
+                    }}
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                  />
+                ) : (
+                  <div style={{
+                    position: 'absolute',
+                    inset: 0,
+                    background: `hsl(${(i * 40) % 360}, 12%, 88%)`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}>
+                    <span style={{ fontFamily: "'Jost', sans-serif", fontSize: '48px', fontWeight: 700, color: 'rgba(0,0,0,0.15)' }}>{cat.name.charAt(0)}</span>
                   </div>
-                </button>
-              );
-            })}
-          </div>
+                )}
+
+                {/* Dark gradient overlay */}
+                <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(to top, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.10) 50%, transparent 100%)' }} />
+
+                {/* Category label at bottom */}
+                <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, padding: '16px 12px', textAlign: 'left' }}>
+                  <h3 style={{
+                    fontFamily: "'Jost', sans-serif",
+                    fontSize: '14px',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.08em',
+                    color: '#ffffff',
+                    margin: 0,
+                    textShadow: '0 1px 4px rgba(0,0,0,0.4)',
+                  }}>
+                    {cat.name}
+                  </h3>
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
     </section>

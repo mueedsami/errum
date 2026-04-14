@@ -84,8 +84,8 @@ axiosInstance.interceptors.request.use(
       try {
         const method = String(config.method || 'get').toLowerCase();
 
-        // 1) Respect manual bypass flag
-        if (config.skipStoreScope) {
+        // 1) Respect manual bypass flag or header
+        if (config.skipStoreScope || config.headers?.['X-Skip-Store-Scope']) {
           return config;
         }
 
@@ -101,36 +101,58 @@ axiosInstance.interceptors.request.use(
           // Scoping logic: 
           // If NOT a global role AND a storeId exists, inject it into all requests.
           if (!isGlobalRole && storeId && Number.isFinite(storeId)) {
-            // GET/DELETE: inject via query params
+            // GET/DELETE: inject via query params if not already present
             if (method === 'get' || method === 'delete') {
-              config.params = { ...(config.params || {}), store_id: storeId };
+              if (config.params && !Object.prototype.hasOwnProperty.call(config.params, 'store_id')) {
+                config.params = { ...config.params, store_id: storeId };
+              } else if (!config.params) {
+                config.params = { store_id: storeId };
+              }
             }
 
             // POST/PATCH/PUT: inject into body
             if (['post', 'put', 'patch'].includes(method)) {
               let data: any = config.data || {};
+              let alreadyHasStoreId = false;
               
               if (data instanceof FormData) {
+                alreadyHasStoreId = data.has('store_id');
                 // If store_id not already present, append it.
-                if (!data.has('store_id')) {
+                if (!alreadyHasStoreId) {
                   data.append('store_id', String(storeId));
                 }
               } else if (typeof data === 'string') {
                 try {
                   data = JSON.parse(data);
-                  data.store_id = storeId;
+                  if (data && typeof data === 'object') {
+                    alreadyHasStoreId = Object.prototype.hasOwnProperty.call(data, 'store_id');
+                    if (!alreadyHasStoreId) {
+                      data.store_id = storeId;
+                    }
+                  }
                   config.data = JSON.stringify(data);
                 } catch {
                   // Fallback for non-JSON strings
                 }
               } else {
                 // Plane object
-                data.store_id = storeId;
+                if (data && typeof data === 'object') {
+                  alreadyHasStoreId = Object.prototype.hasOwnProperty.call(data, 'store_id');
+                  if (!alreadyHasStoreId) {
+                    data.store_id = storeId;
+                  }
+                }
                 config.data = data;
               }
               
-              // Also keep in params for safety (some backend controllers read from request query even on POST)
-              config.params = { ...(config.params || {}), store_id: storeId };
+              // Only inject into params for POST/PUT/PATCH if NOT already injected into body
+              if (!alreadyHasStoreId) {
+                if (config.params && !Object.prototype.hasOwnProperty.call(config.params, 'store_id')) {
+                  config.params = { ...config.params, store_id: storeId };
+                } else if (!config.params) {
+                  config.params = { store_id: storeId };
+                }
+              }
             }
           }
         }

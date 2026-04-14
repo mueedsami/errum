@@ -110,7 +110,7 @@ const DailyCashReportModal: React.FC<DailyCashReportModalProps> = ({
     rows.forEach((row, i) => {
       const y = startY + (i * rowHeight);
       doc.text(String(row[0]), 20, y);
-      doc.text(`৳${Number(row[1]).toFixed(2)}`, 190, y, { align: 'right' });
+      doc.text(`Tk. ${Number(row[1]).toFixed(2)}`, 190, y, { align: 'right' });
       
       if (i < rows.length - 1) {
         doc.setDrawColor(243, 244, 246); // Gray-100

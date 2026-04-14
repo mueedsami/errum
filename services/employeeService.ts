@@ -35,11 +35,25 @@ const employeeService = {
       const response = await axiosInstance.get('/employees', { params });
       const result = response.data;
       
-      if (!result.success) {
-        throw new Error(result.message || 'Failed to fetch employees');
+      // 1. Direct array? (e.g. unpaginated direct return)
+      if (Array.isArray(result)) return result;
+
+      // 2. { success: true, data: [...] } ?
+      if (result && result.data && Array.isArray(result.data)) {
+        return result.data;
+      }
+
+      // 3. { success: true, data: { data: [...paginated] } } ?
+      if (result && result.data && result.data.data && Array.isArray(result.data.data)) {
+        return result.data.data;
       }
       
-      return result.data || [];
+      // 4. { data: [...], current_page: ... } ? (direct paginator)
+      if (result && Array.isArray(result.data)) {
+         return result.data;
+      }
+
+      return [];
     } catch (error: any) {
       console.error('Get employees error:', error);
       throw new Error(error.response?.data?.message || 'Failed to fetch employees');

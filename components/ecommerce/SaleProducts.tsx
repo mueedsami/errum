@@ -55,7 +55,7 @@ export default function SaleProducts() {
         </div>
 
         {/* Products Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
           {products.map((product) => (
             <div
               key={product.id}
@@ -73,7 +73,7 @@ export default function SaleProducts() {
                     e.currentTarget.style.display = 'none';
                   }}
                 />
-                
+
                 {/* Discount Badge */}
                 <span className="absolute top-3 left-3 bg-rose-500 text-white px-3 py-1.5 text-xs font-bold rounded-lg shadow-lg">
                   {product.discount}
@@ -91,8 +91,7 @@ export default function SaleProducts() {
 
                 {/* Add to Cart Button */}
                 <button className={`absolute bottom-0 left-0 right-0 bg-neutral-900 text-white py-3.5 font-semibold transition-transform duration-300 flex items-center justify-center gap-2 ${hoveredId === product.id ? 'translate-y-0' : 'translate-y-full'}`}>
-                  <ShoppingCart size={18} />
-                  Add to Cart
+                  Choose Options
                 </button>
               </div>
 

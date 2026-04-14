@@ -30,6 +30,8 @@ import {
   ExternalLink,
   User,
   CreditCard,
+  RotateCcw,
+  FileSpreadsheet,
 } from 'lucide-react';
 
 import orderService, { type Order as BackendOrder } from '@/services/orderService';
@@ -43,6 +45,8 @@ import axios from '@/lib/axios';
 import batchService from '@/services/batchService';
 import productService from '@/services/productService';
 import serviceManagementService from '@/services/serviceManagementService';
+import orderManagementService from '@/services/orderManagementService';
+import storeService, { type Store } from '@/services/storeService';
 
 import ReturnProductModal from '@/components/sales/ReturnProductModal';
 import ExchangeProductModal from '@/components/sales/ExchangeProductModal';
@@ -74,6 +78,8 @@ interface Order {
     quantity: number;
     price: number;
     discount: number;
+    batchNumber?: string | null;
+    availableStock?: number;
   }>;
   services: Array<{
     id: number;
@@ -96,6 +102,7 @@ interface Order {
   // ✅ backend order status
   status: string;
   statusLabel: string;
+  fulfillmentStatus?: string;
 
   // ✅ payment status separate
   paymentStatus: string;
@@ -316,6 +323,10 @@ export default function OrdersDashboard() {
   const [selectedOrderPathao, setSelectedOrderPathao] = useState<PathaoLookupData | null>(null);
   const [isPathaoLookupLoading, setIsPathaoLookupLoading] = useState(false);
   const pathaoInFlightRef = useRef<Set<string>>(new Set());
+
+  const [isExportingBulk, setIsExportingBulk] = useState(false);
+  const [stores, setStores] = useState<Store[]>([]);
+  const [storeFilter, setStoreFilter] = useState<number | 'All Stores'>('All Stores');
 
   const [search, setSearch] = useState('');
   const [dateFilter, setDateFilter] = useState('');
@@ -550,6 +561,15 @@ export default function OrdersDashboard() {
     details: Array<{ orderId?: number; orderNumber?: string; status: 'success' | 'failed'; message: string }>;
   }>({ show: false, current: 0, total: 0, success: 0, failed: 0, batchCode: undefined, batchStatus: 'preparing', details: [] });
 
+  const [bulkDeliverProgress, setBulkDeliverProgress] = useState<{
+    show: boolean;
+    current: number;
+    total: number;
+    success: number;
+    failed: number;
+    details: Array<{ orderId?: number; orderNumber?: string; status: 'success' | 'failed'; message: string }>;
+  }>({ show: false, current: 0, total: 0, success: 0, failed: 0, details: [] });
+
   // ✅ QZ / printer state
   const [qzConnected, setQzConnected] = useState(false);
   const [printers, setPrinters] = useState<string[]>([]);
@@ -559,11 +579,23 @@ export default function OrdersDashboard() {
   // ✅ Single action loading (per-order)
   const [singleActionLoading, setSingleActionLoading] = useState<{
     orderId: number;
-    action: 'print' | 'pathao';
+    action: 'print' | 'pathao' | 'revert' | 'deliver';
   } | null>(null);
 
-  const isSingleLoading = (orderId: number, action: 'print' | 'pathao') =>
+  const isSingleLoading = (orderId: number, action: 'print' | 'pathao' | 'revert' | 'deliver') =>
     singleActionLoading?.orderId === orderId && singleActionLoading?.action === action;
+
+  useEffect(() => {
+    const fetchStores = async () => {
+      try {
+        const list = await storeService.getAllStores();
+        setStores(list);
+      } catch (err) {
+        console.error('Failed to load stores:', err);
+      }
+    };
+    fetchStores();
+  }, []);
 
   useEffect(() => {
     const name = localStorage.getItem('userName') || '';
@@ -575,7 +607,7 @@ export default function OrdersDashboard() {
     }
     checkPrinterStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewMode]);
+  }, [viewMode, storeFilter]);
 
 
   const parseMoney = (val: any) => Number(String(val ?? '0').replace(/[^0-9.-]/g, ''));
@@ -884,6 +916,8 @@ export default function OrdersDashboard() {
           quantity: item.quantity,
           price: unitPrice,
           discount: discountAmount,
+          batchNumber: item.batch_number || null,
+          availableStock: item.global_available || 0,
         };
       });
 
@@ -962,6 +996,7 @@ export default function OrdersDashboard() {
 
       status: normalize(oStatusRaw) || 'pending',
       statusLabel: statusLabel(oStatusRaw || 'pending'),
+      fulfillmentStatus: order.fulfillment_status,
 
       paymentStatus: normalize(pStatusRaw) || 'pending',
       paymentStatusLabel: statusLabel(pStatusRaw || 'pending'),
@@ -1132,30 +1167,30 @@ export default function OrdersDashboard() {
     setIsLoading(true);
     try {
       let allOrders: any[] = [];
+      const commonParams: any = {
+        store_id: storeFilter === 'All Stores' ? undefined : storeFilter,
+        sort_by: 'created_at',
+        sort_order: 'desc',
+        per_page: 1000,
+      };
 
       if (viewMode === 'installments') {
         const inst = await orderService.getAll({
+          ...commonParams,
           order_type: 'counter',
           installment_only: true,
-          sort_by: 'created_at',
-          sort_order: 'desc',
-          per_page: 1000,
         });
 
         allOrders = inst.data || [];
       } else {
         const [social, ecommerce] = await Promise.all([
           orderService.getAll({
+            ...commonParams,
             order_type: 'social_commerce',
-            sort_by: 'created_at',
-            sort_order: 'desc',
-            per_page: 1000,
           }),
           orderService.getAll({
+            ...commonParams,
             order_type: 'ecommerce',
-            sort_by: 'created_at',
-            sort_order: 'desc',
-            per_page: 1000,
           }),
         ]);
 
@@ -1916,6 +1951,106 @@ export default function OrdersDashboard() {
   };
 
   // ✅ Bulk: Send to Pathao
+  const handleBulkMarkAsDelivered = async () => {
+    if (selectedOrders.size === 0) return;
+
+    if (!window.confirm(`Are you sure you want to mark ${selectedOrders.size} orders as delivered?`)) {
+      return;
+    }
+
+    const orderIds = Array.from(selectedOrders);
+    setBulkDeliverProgress({
+      show: true,
+      current: 0,
+      total: orderIds.length,
+      success: 0,
+      failed: 0,
+      details: [],
+    });
+
+    try {
+      const response = await orderManagementService.bulkMarkAsDelivered(orderIds);
+      
+      const successes = response.results?.success || [];
+      const failures = response.results?.failed || [];
+
+      // Build details for the progress UI
+      const details: any[] = [
+        ...successes.map((s: any) => ({
+          orderId: s.order_id,
+          orderNumber: orders.find(o => o.id === s.order_id)?.orderNumber || `#${s.order_id}`,
+          status: 'success',
+          message: 'Marked as delivered'
+        })),
+        ...failures.map((f: any) => ({
+          orderId: f.order_id,
+          orderNumber: orders.find(o => o.id === f.order_id)?.orderNumber || `#${f.order_id}`,
+          status: 'failed',
+          message: f.error || 'Failed to update'
+        }))
+      ];
+
+      setBulkDeliverProgress({
+        show: true,
+        current: orderIds.length,
+        total: orderIds.length,
+        success: successes.length,
+        failed: failures.length,
+        details: details
+      });
+
+    } catch (error: any) {
+      console.error('❌ Bulk delivery error:', error);
+      setBulkDeliverProgress(prev => ({
+        ...prev,
+        current: prev.total,
+        failed: prev.total,
+        details: orderIds.map(id => ({
+          orderId: id,
+          orderNumber: orders.find(o => o.id === id)?.orderNumber || `#${id}`,
+          status: 'failed',
+          message: error.message || 'System error'
+        }))
+      }));
+    }
+
+    // Auto-close after 5 seconds then reload
+    setTimeout(() => {
+      setBulkDeliverProgress(prev => ({ ...prev, show: false }));
+      setSelectedOrders(new Set());
+      loadOrders();
+    }, 5000);
+  };
+
+  const handleBulkExport = async () => {
+    if (selectedOrders.size === 0) {
+      alert('Please select at least one order to export.');
+      return;
+    }
+
+    setIsExportingBulk(true);
+    try {
+      const orderIds = Array.from(selectedOrders);
+      const blob = await orderService.bulkExport(orderIds);
+      
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `orders_export_${new Date().toISOString().split('T')[0]}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+      setSelectedOrders(new Set());
+    } catch (error: any) {
+      console.error('❌ Export error:', error);
+      alert(error.message || 'Failed to export orders');
+    } finally {
+      setIsExportingBulk(false);
+    }
+  };
+
   const handleBulkSendToPathao = async () => {
     if (selectedOrders.size === 0) {
       alert('Please select at least one order to send to Pathao.');
@@ -2487,9 +2622,42 @@ export default function OrdersDashboard() {
       });
 
       alert('✅ Invoice ready (printed or opened in preview)!');
+    } finally {
+      setSingleActionLoading(null);
+    }
+  };
+
+  const handleRevertAssignment = async (orderId: number) => {
+    if (!confirm('Are you sure you want to revert store assignment? This will set the order back to Pending Assignment.')) return;
+
+    setSingleActionLoading({ orderId, action: 'revert' });
+    setActiveMenu(null);
+
+    try {
+      await orderManagementService.revertAssignment(orderId);
+      alert('✅ Order assignment reverted successfully!');
+      await loadOrders();
     } catch (error: any) {
-      console.error('Single invoice print error:', error);
-      alert(`Failed to print invoice: ${error?.message || 'Unknown error'}`);
+      console.error('Revert assignment error:', error);
+      alert(`Failed to revert assignment: ${error.message || 'Unknown error'}`);
+    } finally {
+      setSingleActionLoading(null);
+    }
+  };
+
+  const handleMarkAsDelivered = async (orderId: number) => {
+    if (!confirm('Are you sure you want to mark this order as delivered?')) return;
+
+    setSingleActionLoading({ orderId, action: 'deliver' });
+    setActiveMenu(null);
+
+    try {
+      await orderManagementService.markAsDelivered(orderId);
+      alert('✅ Order marked as delivered successfully!');
+      await loadOrders();
+    } catch (error: any) {
+      console.error('Mark as delivered error:', error);
+      alert(`Failed to mark as delivered: ${error.message || 'Unknown error'}`);
     } finally {
       setSingleActionLoading(null);
     }
@@ -2600,8 +2768,8 @@ export default function OrdersDashboard() {
             sku: prod.sku,
             imageUrl,
             batchId: null,
-            batchNumber: 'N/A (Warehouse/To Assign)',
-            price: parseMoney(prod.base_price || 0),
+            batchNumber: 'Unassigned (Global Stock)',
+            price: parseMoney((prod as any).selling_price || prod.base_price || 0),
             available: (prod as any).global_available || 0,
             relevance_score: (prod as any).relevance_score || 0,
             search_stage: (prod as any).search_stage || 'api',
@@ -3204,6 +3372,21 @@ export default function OrdersDashboard() {
                     ))}
                   </select>
 
+                  {!isRole('branch-manager') && (
+                    <select
+                      value={storeFilter}
+                      onChange={(e) => setStoreFilter(e.target.value === 'All Stores' ? 'All Stores' : Number(e.target.value))}
+                      className="px-3 py-2 text-sm border border-gray-200 dark:border-gray-800 rounded-lg bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-1 focus:ring-black dark:focus:ring-white min-w-[140px]"
+                    >
+                      <option value="All Stores">All Stores</option>
+                      {stores.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
                   <select
                     value={paymentStatusFilter}
                     onChange={(e) => setPaymentStatusFilter(e.target.value)}
@@ -3415,6 +3598,25 @@ export default function OrdersDashboard() {
                           <Truck className="w-3 h-3" />
                           {isSendingBulk ? 'Sending' : 'Pathao'}
                         </button>
+
+                        <button
+                          onClick={handleBulkExport}
+                          disabled={isExportingBulk}
+                          className="flex items-center gap-1 px-2 py-1 bg-black dark:bg-white hover:bg-gray-800 dark:hover:bg-gray-200 text-white dark:text-black rounded transition-colors disabled:opacity-50 text-[10px] font-medium"
+                          title="Export selected orders to CSV"
+                        >
+                          <FileSpreadsheet className="w-3 h-3" />
+                          {isExportingBulk ? 'Exporting' : 'Export'}
+                        </button>
+
+                        <button
+                          onClick={handleBulkMarkAsDelivered}
+                          className="flex items-center gap-1 px-2 py-1 bg-green-600 hover:bg-green-700 dark:bg-green-500 dark:hover:bg-green-600 text-white rounded transition-colors text-[10px] font-medium"
+                          title="Mark selected orders as Delivered"
+                        >
+                          <CheckCircle className="w-3 h-3" />
+                          Mark Delivered
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -3485,6 +3687,59 @@ export default function OrdersDashboard() {
                     </div>
                   </div>
                 )}
+
+                {/* Bulk Progress: Deliver */}
+                {bulkDeliverProgress.show && (
+                  <div className="mb-2 border border-gray-300 dark:border-gray-700 rounded px-3 py-1.5 bg-green-50/50 dark:bg-green-900/10">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-[10px] font-semibold text-black dark:text-white flex items-center gap-1">
+                        <CheckCircle className="w-3 h-3 text-green-500" />
+                        Marking Delivered {bulkDeliverProgress.current}/{bulkDeliverProgress.total}
+                      </p>
+                      <button 
+                        onClick={() => setBulkDeliverProgress(prev => ({ ...prev, show: false }))}
+                        className="text-[10px] text-gray-500 hover:text-black dark:hover:text-white"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                    
+                    <div className="w-full bg-gray-200 dark:bg-gray-800 rounded-full h-1.5 mb-2 overflow-hidden">
+                      <div 
+                        className="bg-green-600 h-1.5 transition-all duration-500 rounded-full"
+                        style={{ width: `${bulkDeliverProgress.total > 0 ? (bulkDeliverProgress.current / bulkDeliverProgress.total) * 100 : 0}%` }}
+                      ></div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[9px] mb-2">
+                      <div className="bg-white dark:bg-black/40 p-1.5 rounded border border-green-100 dark:border-green-800/20 text-center">
+                        <p className="text-green-600 font-bold">{bulkDeliverProgress.success}</p>
+                        <p className="text-gray-500">Success</p>
+                      </div>
+                      <div className="bg-white dark:bg-black/40 p-1.5 rounded border border-red-100 dark:border-red-800/20 text-center">
+                        <p className="text-red-600 font-bold">{bulkDeliverProgress.failed}</p>
+                        <p className="text-gray-500">Failed</p>
+                      </div>
+                    </div>
+
+                    {bulkDeliverProgress.details.length > 0 && (
+                      <div className="max-h-32 overflow-y-auto space-y-1 custom-scrollbar pr-1">
+                        {bulkDeliverProgress.details.slice().reverse().map((detail, idx) => (
+                          <div key={idx} className="flex items-center justify-between py-1 border-b border-gray-100 dark:border-gray-800 last:border-0">
+                            <span className="text-[9px] font-medium dark:text-gray-300">{detail.orderNumber}</span>
+                            {detail.status === 'success' ? (
+                              <span className="text-[8px] text-green-600 flex items-center gap-0.5">
+                                <CheckCircle className="w-2 h-2" /> Delivered
+                              </span>
+                            ) : (
+                              <span className="text-[8px] text-red-600" title={detail.message}>{detail.message}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
             )}
@@ -3536,6 +3791,9 @@ export default function OrdersDashboard() {
                                 <p className="text-sm font-bold text-black dark:text-white leading-tight">
                                   {order.orderNumber}
                                 </p>
+                                {order.store && (
+                                  <p className="text-[10px] text-gray-500 font-medium">Store: {order.store}</p>
+                                )}
                                 <p className="text-[11px] text-gray-600 dark:text-gray-400 mt-0.5 truncate">
                                   {order.customer.name} • {order.customer.phone}
                                 </p>
@@ -3643,6 +3901,9 @@ export default function OrdersDashboard() {
                                 <div>
                                   <p className="text-sm font-bold text-black dark:text-white leading-tight">{order.orderNumber}</p>
                                   <p className="text-[10px] text-gray-400 dark:text-gray-500 font-mono italic">#{order.id}</p>
+                                  {order.store && (
+                                    <p className="text-[10px] text-gray-500 font-medium mt-1">Store: {order.store}</p>
+                                  )}
                                 </div>
                                 <div className="flex flex-wrap items-center gap-1">
                                   {getOrderTypeBadge(order.orderType)}
@@ -3960,108 +4221,55 @@ export default function OrdersDashboard() {
             );
           })()}
 
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              const order = filteredOrders.find((o) => o.id === activeMenu);
-              if (order) handleSinglePrintReceipt(order);
-            }}
-            disabled={(() => {
-              const order = filteredOrders.find((o) => o.id === activeMenu);
-              return order ? isSingleLoading(order.id, 'print') : false;
-            })()}
-            className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700 disabled:opacity-50"
-          >
-            <Printer className="h-5 w-5 flex-shrink-0" />
-            <span>
-              {(() => {
-                const order = filteredOrders.find((o) => o.id === activeMenu);
-                return order && isSingleLoading(order.id, 'print') ? 'Printing...' : 'Print Receipt';
-              })()}
-            </span>
-          </button>
-
-          {(() => {
-            const order = filteredOrders.find((o) => o.id === activeMenu);
-            if (!order || !isSocialOrder(order)) return null;
-
-            return (
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  const o = filteredOrders.find((x) => x.id === activeMenu);
-                  if (o) handleSinglePrintInvoice(o);
-                }}
-                disabled={(() => {
-                  const o = filteredOrders.find((x) => x.id === activeMenu);
-                  return o ? isSingleLoading(o.id, 'print') : false;
-                })()}
-                className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700 disabled:opacity-50"
-              >
-                <Printer className="h-5 w-5 flex-shrink-0" />
-                <span>
-                  {(() => {
-                    const o = filteredOrders.find((x) => x.id === activeMenu);
-                    return o && isSingleLoading(o.id, 'print') ? 'Printing...' : 'Print Invoice';
-                  })()}
-                </span>
-              </button>
-            );
-          })()}
-
-
-          {viewMode === 'online' && (
+          {(isRole('online-moderator') || isRole('admin') || isRole('super-admin')) && (
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 const order = filteredOrders.find((o) => o.id === activeMenu);
-                if (order) handleSingleSendToPathao(order);
+                if (order) handleRevertAssignment(order.id);
               }}
               disabled={(() => {
                 const order = filteredOrders.find((o) => o.id === activeMenu);
-                return (order ? isSingleLoading(order.id, 'pathao') : false) || isBranchManager;
+                return order ? isSingleLoading(order.id, 'revert') : false;
               })()}
-              className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700 disabled:opacity-50"
+              className="w-full px-4 py-3 text-left text-sm font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700 disabled:opacity-50"
             >
-              <Truck className="h-5 w-5 flex-shrink-0" />
+              <RotateCcw className="h-5 w-5 flex-shrink-0" />
               <span>
                 {(() => {
                   const order = filteredOrders.find((o) => o.id === activeMenu);
-                  return order && isSingleLoading(order.id, 'pathao') ? 'Sending...' : 'Send to Pathao';
+                  return order && isSingleLoading(order.id, 'revert') ? 'Reverting...' : 'Revert Assignment';
                 })()}
               </span>
             </button>
           )}
 
+          {(() => {
+            const order = filteredOrders.find((o) => o.id === activeMenu);
+            if (!order) return null;
+            
+            const canMarkDelivered = (isRole('online-moderator') || isRole('admin') || isRole('super-admin')) && 
+                                   (order.status === 'confirmed' || order.fulfillmentStatus === 'fulfilled') &&
+                                   order.status !== 'delivered';
 
-          {viewMode === 'online' && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                const order = filteredOrders.find((o) => o.id === activeMenu);
-                if (order) openReturnModal(order);
-              }}
-              className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700"
-            >
-              <RefreshCw className="h-5 w-5 flex-shrink-0" />
-              <span>Return Order</span>
-            </button>
-          )}
+            if (!canMarkDelivered) return null;
 
-
-          {viewMode === 'online' && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                const order = filteredOrders.find((o) => o.id === activeMenu);
-                if (order) openExchangeModal(order);
-              }}
-              className="w-full px-4 py-3 text-left text-sm font-medium text-black dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3 border-b-2 border-gray-300 dark:border-gray-600"
-            >
-              <ArrowLeftRight className="h-5 w-5 flex-shrink-0" />
-              <span>Exchange Order</span>
-            </button>
-          )}
+            return (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleMarkAsDelivered(order.id);
+                }}
+                disabled={isSingleLoading(order.id, 'deliver')}
+                className="w-full px-4 py-3 text-left text-sm font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 transition-colors flex items-center gap-3 border-b border-gray-100 dark:border-gray-700 disabled:opacity-50"
+              >
+                <Package className="h-5 w-5 flex-shrink-0" />
+                <span>
+                  {isSingleLoading(order.id, 'deliver') ? 'Marking...' : 'Mark as Delivered'}
+                </span>
+              </button>
+            );
+          })()}
 
 
           <button
@@ -4877,9 +5085,28 @@ export default function OrdersDashboard() {
                               e.currentTarget.src = '/placeholder-product.png';
                             }}
                           />
-                          <div className="flex-1">
-                            <p className="text-sm font-medium text-black dark:text-white break-words whitespace-normal">{item.name}</p>
-                            <p className="text-xs text-gray-500 dark:text-gray-500">SKU: {item.sku}</p>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-black dark:text-white truncate">{item.name}</p>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[10px] text-gray-400 dark:text-gray-500 font-mono">SKU: {item.sku}</span>
+                              {item.batchNumber ? (
+                                <span className="px-1 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded text-[9px] font-mono border border-zinc-200 dark:border-zinc-700">
+                                  {item.batchNumber}
+                                </span>
+                              ) : (
+                                <span className="px-1 py-0.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 rounded text-[9px] font-medium border border-amber-100/50 dark:border-amber-800/30">
+                                  Unassigned
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <div className={`w-1.5 h-1.5 rounded-full ${(item.availableStock ?? 0) >= item.quantity ? "bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]" : "bg-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.4)]"}`} />
+                              <p className="text-[10px] text-gray-500 dark:text-gray-400">
+                                <span className={(item.availableStock ?? 0) >= item.quantity ? "text-green-600 dark:text-green-500" : "text-rose-600 dark:text-rose-400 font-medium"}>
+                                  {item.availableStock ?? 0} in stock
+                                </span>
+                              </p>
+                            </div>
                           </div>
 
                           <div className="w-24">

@@ -84,7 +84,7 @@ export default function BestSellerProducts() {
         // Calculate stats for grouped products
         const productsWithStats: ProductWithStats[] = Object.entries(groupedProducts).map(([baseId, variations]) => {
           const mainProduct = variations[0];
-          const productInventory = inventory.filter(item => 
+          const productInventory = inventory.filter(item =>
             variations.some(v => v.id === item.productId || Number(v.id) === item.productId)
           );
 
@@ -107,8 +107,8 @@ export default function BestSellerProducts() {
           const prices = variationsWithPrice
             .map(v => v.price)
             .filter(p => !isNaN(p) && p > 0);
-          
-          const priceRange = prices.length > 1 
+
+          const priceRange = prices.length > 1
             ? `${Math.min(...prices).toLocaleString()}-${Math.max(...prices).toLocaleString()}`
             : prices[0]?.toLocaleString() || '0';
 
@@ -127,7 +127,7 @@ export default function BestSellerProducts() {
         const sorted = productsWithStats
           .filter(p => p.soldCount > 0)
           .sort((a, b) => b.soldCount - a.soldCount)
-          .slice(0, 5);
+          .slice(0, 4);
 
         setBestSellers(sorted);
       } catch (err) {
@@ -148,7 +148,7 @@ export default function BestSellerProducts() {
     e.stopPropagation();
     const variation = product.variations[0];
     const productId = variation.id;
-    
+
     if (wishlistIds.has(productId)) {
       wishlistUtils.remove(productId);
     } else {
@@ -188,7 +188,7 @@ export default function BestSellerProducts() {
       console.error('Add to cart failed:', err);
       setAddingProductId(null);
       fireToast(err?.message || 'Failed to add to cart', 'error');
-      }
+    }
   };
 
   const handleCloseCart = () => {
@@ -220,10 +220,10 @@ export default function BestSellerProducts() {
             <p className="text-lg text-gray-600">Our customers' favorite picks</p>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
             {bestSellers.map((product) => {
               const isInWishlist = wishlistIds.has(product.variations[0].id);
-              
+
               return (
                 <div
                   key={product.id}
@@ -231,7 +231,7 @@ export default function BestSellerProducts() {
                   onMouseEnter={() => setHoveredId(product.id)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
-                  <div 
+                  <div
                     onClick={() => navigateToProduct(product.variations[0].id)}
                     className="relative aspect-square overflow-hidden bg-gray-50 cursor-pointer"
                   >
@@ -254,24 +254,22 @@ export default function BestSellerProducts() {
                     )}
 
                     <div
-                      className={`absolute top-2 right-2 flex flex-col gap-2 transition-all duration-300 ${
-                        hoveredId === product.id ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4'
-                      }`}
-                    >
-                      <button 
-                        onClick={(e) => toggleWishlist(product, e)}
-                        className={`p-2 rounded-full shadow-lg transition-all duration-300 ${
-                          isInWishlist 
-                            ? 'bg-rose-600 text-white scale-110' 
-                            : 'bg-white hover:bg-rose-50'
+                      className={`absolute top-2 right-2 flex flex-col gap-2 transition-all duration-300 ${hoveredId === product.id ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4'
                         }`}
+                    >
+                      <button
+                        onClick={(e) => toggleWishlist(product, e)}
+                        className={`p-2 rounded-full shadow-lg transition-all duration-300 ${isInWishlist
+                            ? 'bg-rose-600 text-white scale-110'
+                            : 'bg-white hover:bg-rose-50'
+                          }`}
                       >
-                        <Heart 
-                          size={16} 
-                          className={isInWishlist ? 'fill-white' : 'text-gray-700'} 
+                        <Heart
+                          size={16}
+                          className={isInWishlist ? 'fill-white' : 'text-gray-700'}
                         />
                       </button>
-                      <button 
+                      <button
                         onClick={(e) => {
                           e.stopPropagation();
                           navigateToProduct(product.variations[0].id);
@@ -285,9 +283,8 @@ export default function BestSellerProducts() {
                     <button
                       onClick={(e) => handleAddToCart(product, e)}
                       disabled={addingProductId === product.id}
-                      className={`absolute bottom-0 left-0 right-0 bg-neutral-900 text-white py-3 text-sm font-bold transition-transform duration-300 flex items-center justify-center gap-2 hover:bg-neutral-800 ${
-                        hoveredId === product.id ? 'translate-y-0' : 'translate-y-full'
-                      } ${addingProductId === product.id ? 'bg-green-600' : ''}`}
+                      className={`absolute bottom-0 left-0 right-0 bg-neutral-900 text-white py-3 text-sm font-bold transition-transform duration-300 flex items-center justify-center gap-2 hover:bg-neutral-800 ${hoveredId === product.id ? 'translate-y-0' : 'translate-y-full'
+                        } ${addingProductId === product.id ? 'bg-green-600' : ''}`}
                     >
                       {addingProductId === product.id ? (
                         <>✓ ADDED</>
@@ -303,7 +300,7 @@ export default function BestSellerProducts() {
                   </div>
 
                   <div className="p-4 text-center">
-                    <h3 
+                    <h3
                       onClick={() => navigateToProduct(product.variations[0].id)}
                       className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2 group-hover:text-rose-600 transition-colors cursor-pointer"
                     >

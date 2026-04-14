@@ -46,8 +46,11 @@ export interface Product {
   weight?: number;
   dimensions?: string;
   in_stock: boolean;
+  images: ProductImage[];
+  tags?: string[];
   stock_quantity: number;
   available_inventory?: number | null;
+  reserved_inventory?: number | null;
   category: ProductCategory | string;
   images: ProductImage[];
   tags?: string[];
@@ -100,6 +103,8 @@ export interface CatalogGroupedProduct {
   total_variants: number;
   in_stock_variants: number;
   total_stock: number;
+  total_available?: number;
+  total_reserved?: number;
   min_price: number;
   max_price: number;
 }
@@ -517,8 +522,11 @@ const normalizeProduct = (
 
   const sellingPrice = toNumber(raw?.selling_price ?? raw?.price ?? raw?.sale_price, 0);
   const costPrice = toNumber(raw?.cost_price ?? raw?.regular_price ?? sellingPrice, sellingPrice);
-  const stockQty = toNumber(raw?.stock_quantity ?? raw?.quantity ?? raw?.available_quantity ?? raw?.global_available ?? raw?.total_quantity, 0);
-  const availableInventory = raw?.available_inventory != null ? toNumber(raw.available_inventory, 0) : stockQty;
+  const stockQty = toNumber(raw?.stock_quantity ?? raw?.quantity ?? raw?.total_quantity ?? raw?.physical_quantity, 0);
+  const reservedQty = toNumber(raw?.reserved_inventory ?? raw?.reserved_quantity ?? raw?.assigned_quantity, 0);
+  const availableInventory = raw?.available_inventory != null 
+    ? toNumber(raw.available_inventory, 0) 
+    : (raw?.available_quantity != null ? toNumber(raw.available_quantity, 0) : Math.max(0, stockQty - reservedQty));
 
   const explicitInStock = raw?.in_stock;
   const inStock = typeof explicitInStock === 'boolean' ? explicitInStock : stockQty > 0;
@@ -571,6 +579,7 @@ const normalizeProduct = (
     in_stock: inStock,
     stock_quantity: stockQty,
     available_inventory: availableInventory,
+    reserved_inventory: reservedQty,
     category: category || '',
     images,
     tags: Array.isArray(raw?.tags) ? raw.tags : undefined,
@@ -722,8 +731,10 @@ const normalizeGroupedProduct = (rawGroup: any): CatalogGroupedProduct => {
   const minPrice = allPrices.length ? Math.min(...allPrices) : 0;
   const maxPrice = allPrices.length ? Math.max(...allPrices) : 0;
 
-  const totalStock = all.reduce((sum, v) => sum + toNumber(v.stock_quantity, 0), 0);
-  const inStockVariants = all.filter((v) => v.in_stock || toNumber(v.stock_quantity, 0) > 0).length;
+  const totalStock = all.reduce((sum, v) => sum + (v.stock_quantity || 0), 0);
+  const totalAvailable = all.reduce((sum, v) => sum + (v.available_inventory || 0), 0);
+  const totalReserved = all.reduce((sum, v) => sum + (v.reserved_inventory || 0), 0);
+  const inStockVariants = all.filter((v) => (v.available_inventory || 0) > 0).length;
 
   return {
     base_name: baseName,
@@ -735,6 +746,8 @@ const normalizeGroupedProduct = (rawGroup: any): CatalogGroupedProduct => {
     total_variants: all.length,
     in_stock_variants: inStockVariants,
     total_stock: totalStock,
+    total_available: totalAvailable,
+    total_reserved: totalReserved,
     min_price: minPrice,
     max_price: maxPrice,
   };
@@ -976,9 +989,12 @@ const catalogService = {
     }
   },
 
-  async getProduct(productIdentifier: number | string): Promise<ProductDetailResponse> {
+  async getProduct(
+    productIdentifier: number | string,
+    params?: { include_availability?: boolean }
+  ): Promise<ProductDetailResponse> {
     try {
-      const response = await api.get(`/catalog/products/${productIdentifier}`);
+      const response = await api.get(`/catalog/products/${productIdentifier}`, { params });
       const payload = response?.data?.data ?? response?.data ?? {};
 
       // Legacy shape: { product, related_products }

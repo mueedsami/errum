@@ -16,6 +16,7 @@ import {
   TrendingUp,
   Award,
   Box,
+  ChevronDown,
 } from 'lucide-react';
 import Header from '@/components/Header';
 import Sidebar from '@/components/Sidebar';
@@ -35,6 +36,7 @@ export default function StoreAssignmentPage() {
   const [pendingOrders, setPendingOrders] = useState<PendingAssignmentOrder[]>([]);
   const [isLoadingOrders, setIsLoadingOrders] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
 
   // Assignment state
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
@@ -53,7 +55,7 @@ export default function StoreAssignmentPage() {
   useEffect(() => {
     fetchPendingOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sortOrder]);
 
   useEffect(() => {
     if (selectedOrderId) {
@@ -162,8 +164,11 @@ export default function StoreAssignmentPage() {
 
       const inventoryDetails = rawDetails.map((d: any) => {
         const requiredQty = toNumber(d?.required_quantity);
-        const availableQty = toNumber(d?.available_quantity ?? d?.quantity ?? d?.stock ?? 0);
         const productId = toNumber(d?.product_id);
+        const physicalQty = toNumber(d?.physical_quantity ?? d?.quantity ?? d?.stock ?? 0);
+        const assignedQty = toNumber(d?.assigned_quantity ?? 0);
+        const availableQty = toNumber(d?.available_quantity ?? (physicalQty - assignedQty));
+        const globalAvailable = toNumber(d?.global_available ?? 0);
 
         return {
           ...d,
@@ -171,7 +176,10 @@ export default function StoreAssignmentPage() {
           product_name: d?.product_name ?? d?.name ?? 'Unknown Product',
           product_sku: d?.product_sku ?? d?.sku ?? '',
           required_quantity: requiredQty,
+          physical_quantity: physicalQty,
+          assigned_quantity: assignedQty,
           available_quantity: availableQty,
+          global_available: globalAvailable,
           can_fulfill: availableQty >= requiredQty,
         };
       });
@@ -444,6 +452,7 @@ export default function StoreAssignmentPage() {
           const resp = await orderManagementService.getPendingAssignment({
             per_page: 100,
             status,
+            sort_order: sortOrder,
           } as any);
 
           let orders = extractOrders(resp);
@@ -478,7 +487,14 @@ export default function StoreAssignmentPage() {
         if (!byId.has(oid)) byId.set(oid, o);
       }
 
-      const orders = Array.from(byId.values());
+      let orders = Array.from(byId.values());
+      
+      // Global sort after merging
+      orders = orders.sort((a, b) => {
+        const timeA = new Date(a.created_at).getTime();
+        const timeB = new Date(b.created_at).getTime();
+        return sortOrder === 'asc' ? timeA - timeB : timeB - timeA;
+      });
 
       setPendingOrders(orders);
       console.log('📦 Loaded pending/unassigned orders:', orders.length);
@@ -612,14 +628,27 @@ export default function StoreAssignmentPage() {
                       Assign pending e-commerce orders to stores based on inventory availability
                     </p>
                   </div>
-                  <button
-                    onClick={fetchPendingOrders}
-                    disabled={isLoadingOrders}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50"
-                  >
-                    <RefreshCw className={`h-4 w-4 ${isLoadingOrders ? 'animate-spin' : ''}`} />
-                    Refresh
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <div className="relative">
+                      <select
+                        value={sortOrder}
+                        onChange={(e) => setSortOrder(e.target.value as 'asc' | 'desc')}
+                        className="appearance-none pl-3 pr-10 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer shadow-sm"
+                      >
+                        <option value="asc">Oldest First</option>
+                        <option value="desc">Newest First</option>
+                      </select>
+                      <ChevronDown className="absolute right-3 top-2.5 h-4 w-4 text-gray-400 pointer-events-none" />
+                    </div>
+                    <button
+                      onClick={fetchPendingOrders}
+                      disabled={isLoadingOrders}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 shadow-sm"
+                    >
+                      <RefreshCw className={`h-4 w-4 ${isLoadingOrders ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </button>
+                  </div>
                 </div>
 
                 {/* Stats Cards */}
@@ -974,9 +1003,19 @@ export default function StoreAssignmentPage() {
                                 )}
                               </div>
                               <div className="flex items-center justify-between text-xs">
-                                <span className="text-gray-600 dark:text-gray-400">
-                                  Required: {detail.required_quantity} | Available: {detail.available_quantity}
-                                </span>
+                                <div className="flex flex-col gap-1">
+                                  <span className="text-gray-600 dark:text-gray-400">
+                                    Required: <span className="font-bold text-gray-900 dark:text-white">{detail.required_quantity}</span>
+                                  </span>
+                                  <div className="flex flex-wrap gap-2 text-[10px]">
+                                    <span className="bg-white/50 dark:bg-black/20 px-1.5 py-0.5 rounded border border-gray-100 dark:border-gray-700">Physical: {detail.physical_quantity}</span>
+                                    <span className="bg-white/50 dark:bg-black/20 px-1.5 py-0.5 rounded border border-gray-100 dark:border-gray-700 text-amber-600 dark:text-amber-400">Promise: {detail.assigned_quantity}</span>
+                                    <span className="bg-blue-100/50 dark:bg-blue-900/30 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-800 font-bold text-blue-700 dark:text-blue-300">Available: {detail.available_quantity}</span>
+                                    {detail.global_available !== undefined && (
+                                      <span className="bg-teal-100/50 dark:bg-teal-900/30 px-1.5 py-0.5 rounded border border-teal-200 dark:border-teal-800 text-teal-700 dark:text-teal-300">Global Avail: {detail.global_available}</span>
+                                    )}
+                                  </div>
+                                </div>
                                 <span
                                   className={`font-semibold ${
                                     detail.can_fulfill

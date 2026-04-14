@@ -114,68 +114,23 @@ export default function DispatchManagementPage() {
     try {
       setLoading(true);
 
-      // Create dispatch
-      const dispatchResponse = await dispatchService.createDispatch({
-        source_store_id: parseInt(data.source_store_id),
-        destination_store_id: parseInt(data.destination_store_id),
+      // Create dispatch with items and draft scans in ONE atomic call
+      await dispatchService.createDispatch({
+        source_store_id: typeof data.source_store_id === 'string' ? parseInt(data.source_store_id) : data.source_store_id,
+        destination_store_id: typeof data.destination_store_id === 'string' ? parseInt(data.destination_store_id) : data.destination_store_id,
         expected_delivery_date: data.expected_delivery_date,
         carrier_name: data.carrier_name,
         tracking_number: data.tracking_number,
         notes: data.notes,
+        items: data.items.map((item: any) => ({
+          batch_id: typeof item.batch_id === 'string' ? parseInt(item.batch_id) : item.batch_id,
+          quantity: typeof item.quantity === 'string' ? parseInt(item.quantity) : item.quantity,
+        })),
+        draft_scan_history: (data.draft_scan_history || []).map((s: any) => ({
+          barcode: s.barcode,
+          batch_id: typeof s.batch_id === 'string' ? parseInt(s.batch_id) : s.batch_id,
+        })),
       });
-
-      const dispatchId = dispatchResponse.data.id;
-
-      // Add items
-      for (const item of data.items) {
-        await dispatchService.addItem(dispatchId, {
-          batch_id: parseInt(item.batch_id),
-          quantity: parseInt(item.quantity),
-        });
-      }
-
-      // If staff scanned barcodes while creating the dispatch (quick-add),
-      // attach those scans to the newly created dispatch items immediately (DB),
-      // so the dispatch cannot be marked "in_transit" until all required barcodes are scanned.
-      if (Array.isArray(data?.draft_scan_history) && data.draft_scan_history.length > 0) {
-        let synced = 0;
-        let failed = 0;
-
-        try {
-          const details = await dispatchService.getDispatch(dispatchId);
-          const fullDispatch = details.data;
-          const fullItems = Array.isArray(fullDispatch?.items) ? fullDispatch.items : [];
-
-          const batchToItemId: Record<string, number> = {};
-          for (const it of fullItems) {
-            const batchId = it?.batch?.id;
-            if (batchId) batchToItemId[String(batchId)] = it.id;
-          }
-
-          for (const s of data.draft_scan_history) {
-            const itemId = batchToItemId[String(s.batch_id)];
-            if (!itemId) {
-              failed += 1;
-              continue;
-            }
-            try {
-              await dispatchService.scanBarcode(dispatchId, itemId, s.barcode);
-              synced += 1;
-            } catch {
-              failed += 1;
-            }
-          }
-        } catch {
-          failed = data.draft_scan_history.length;
-        }
-
-        if (synced > 0) {
-          showToast(`Saved ${synced} barcode scan(s) to this dispatch.`, 'success');
-        }
-        if (failed > 0) {
-          showToast(`${failed} barcode(s) could not be saved. You can re-scan from "Scan to Send".`, 'error');
-        }
-      }
 
       showToast('Dispatch created successfully', 'success');
       setShowCreateModal(false);

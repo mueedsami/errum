@@ -8,6 +8,7 @@ import Sidebar from '@/components/Sidebar';
 import Toast from '@/components/Toast';
 import AccessDenied from '@/components/AccessDenied';
 import { useAuth } from '@/contexts/AuthContext';
+import { useTheme } from '@/contexts/ThemeContext';
 import FieldsSidebar from '@/components/product/FieldsSidebar';
 import DynamicFieldInput from '@/components/product/DynamicFieldInput';
 import VariationCard from '@/components/product/VariationCard';
@@ -102,7 +103,7 @@ export default function AddEditProductPage({
   const isEditMode = mode === 'edit';
   const addVariationMode = mode === 'addVariation';
   
-  const [darkMode, setDarkMode] = useState<boolean>(false);
+  const { darkMode, setDarkMode } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'general' | 'variations'>('general');
   const [loading, setLoading] = useState<boolean>(false);

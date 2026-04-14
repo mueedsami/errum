@@ -11,14 +11,14 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { productService, Product } from '@/services/productService';
 import productImageService, { ProductImage } from '@/services/productImageService';
 import { toAbsoluteAssetUrl } from '@/lib/urlUtils';
-import { 
-  ArrowLeft, 
-  CheckCircle2, 
-  Loader2, 
-  RefreshCw, 
-  Save, 
-  Search, 
-  ImageIcon, 
+import {
+  ArrowLeft,
+  CheckCircle2,
+  Loader2,
+  RefreshCw,
+  Save,
+  Search,
+  ImageIcon,
   ExternalLink,
   Info,
   ChevronLeft,
@@ -27,17 +27,17 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
-const PAGE_SIZE = 1000;
+const PAGE_SIZE = 500;
 
 function imageUrlFor(image: Partial<ProductImage> | null | undefined): string {
   if (!image) return '/placeholder-product.svg';
-  
+
   const raw = image?.image_url || image?.image_path || '';
   if (!raw) return '/placeholder-product.svg';
-  
+
   if (raw.startsWith('/storage/')) return toAbsoluteAssetUrl(raw);
   if (/^(https?:)?\/\//i.test(raw)) return raw;
-  
+
   // Try to determine if it's a raw filename or a path
   if (raw.includes('/')) return toAbsoluteAssetUrl(`/storage/${raw}`);
   return toAbsoluteAssetUrl(`/storage/product-images/${raw}`);
@@ -65,7 +65,7 @@ export default function PrimaryImageFixPage() {
   const { hasAnyPermission, permissionsResolved } = useAuth();
   const { darkMode, setDarkMode } = useTheme();
   const router = useRouter();
-  
+
   const canAccess = hasAnyPermission(['products.view', 'products.edit', 'products.manage_images']);
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -112,7 +112,7 @@ export default function PrimaryImageFixPage() {
         const initialImages = (product.display_images as ProductImage[]) || (product.images as ProductImage[]) || [];
         const merged = sortImages(initialImages);
         const currentPrimary = merged.find((img) => img.is_primary) || merged[0] || null;
-        
+
         return {
           product,
           images: merged,
@@ -132,17 +132,17 @@ export default function PrimaryImageFixPage() {
         try {
           const fetchedImages = sortImages(await productImageService.getProductImages(row.product.id));
           const currentPrimary = fetchedImages.find((img) => img.is_primary) || null;
-          
+
           setRows((prev) =>
             prev.map((item) =>
               item.product.id === row.product.id
                 ? {
-                    ...item,
-                    images: fetchedImages,
-                    selectedImageId: currentPrimary?.id ?? (fetchedImages.length > 0 ? fetchedImages[0].id : null),
-                    originalPrimaryId: currentPrimary?.id ?? null,
-                    loadingImages: false,
-                  }
+                  ...item,
+                  images: fetchedImages,
+                  selectedImageId: currentPrimary?.id ?? (fetchedImages.length > 0 ? fetchedImages[0].id : null),
+                  originalPrimaryId: currentPrimary?.id ?? null,
+                  loadingImages: false,
+                }
                 : item
             )
           );
@@ -197,13 +197,13 @@ export default function PrimaryImageFixPage() {
         prev.map((r) =>
           r.product.id === productId
             ? {
-                ...r,
-                images: fetchedImages,
-                selectedImageId: currentPrimary?.id ?? (fetchedImages.length > 0 ? fetchedImages[0].id : null),
-                originalPrimaryId: currentPrimary?.id ?? null,
-                loadingImages: false,
-                saving: false,
-              }
+              ...r,
+              images: fetchedImages,
+              selectedImageId: currentPrimary?.id ?? (fetchedImages.length > 0 ? fetchedImages[0].id : null),
+              originalPrimaryId: currentPrimary?.id ?? null,
+              loadingImages: false,
+              saving: false,
+            }
             : r
         )
       );
@@ -220,18 +220,18 @@ export default function PrimaryImageFixPage() {
     try {
       const fetchedImages = sortImages(await productImageService.getProductImages(productId));
       const currentPrimary = fetchedImages.find((img) => img.is_primary) || null;
-      
+
       setRows((prev) =>
         prev.map((row) =>
           row.product.id === productId
             ? {
-                ...row,
-                images: fetchedImages,
-                selectedImageId: currentPrimary?.id ?? (fetchedImages.length > 0 ? fetchedImages[0].id : null),
-                originalPrimaryId: currentPrimary?.id ?? null,
-                loadingImages: false,
-                saving: false,
-              }
+              ...row,
+              images: fetchedImages,
+              selectedImageId: currentPrimary?.id ?? (fetchedImages.length > 0 ? fetchedImages[0].id : null),
+              originalPrimaryId: currentPrimary?.id ?? null,
+              loadingImages: false,
+              saving: false,
+            }
             : row
         )
       );
@@ -253,9 +253,9 @@ export default function PrimaryImageFixPage() {
   return (
     <div className={`flex h-screen ${darkMode ? 'dark' : ''} bg-gray-50 dark:bg-gray-900 overflow-hidden`}>
       <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
-      
+
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Header 
+        <Header
           darkMode={darkMode}
           setDarkMode={setDarkMode}
           toggleSidebar={() => setSidebarOpen(!sidebarOpen)}
@@ -276,7 +276,7 @@ export default function PrimaryImageFixPage() {
                   Quickly correct primary product images across your catalog. Use the search below to find specific products or SKUs requiring fixes.
                 </p>
               </div>
-              
+
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setRefreshTick(v => v + 1)}
@@ -301,7 +301,7 @@ export default function PrimaryImageFixPage() {
                   onChange={(e) => setSearchInput(e.target.value)}
                 />
               </div>
-              
+
               <div className="flex items-center gap-2 px-4 py-2 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl text-amber-700 dark:text-amber-400 text-xs">
                 <Info className="w-4 h-4 flex-shrink-0" />
                 <span>Primary images are used as thumbnails in catalogs and orders.</span>
@@ -329,7 +329,7 @@ export default function PrimaryImageFixPage() {
                 <h3 className="text-lg font-semibold text-gray-900 dark:text-white">No products found</h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400">Try adjusting your search terms or filters.</p>
               </div>
-              <button 
+              <button
                 onClick={() => setSearchInput('')}
                 className="text-blue-600 dark:text-blue-400 text-sm font-semibold hover:underline"
               >
@@ -351,7 +351,7 @@ export default function PrimaryImageFixPage() {
                   <ChevronLeft className="w-4 h-4" />
                   BACK
                 </button>
-                
+
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase">Page</span>
                   <div className="px-4 py-1.5 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 font-mono text-sm font-bold text-gray-900 dark:text-white">
@@ -374,9 +374,9 @@ export default function PrimaryImageFixPage() {
 
               {rows.map((row, index) => {
                 const isDirty = !!row.selectedImageId && row.selectedImageId !== row.originalPrimaryId;
-                
+
                 return (
-                  <div 
+                  <div
                     key={row.product.id}
                     className="group bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 animate-in fade-in slide-in-from-bottom-4"
                     style={{ animationDelay: `${index * 50}ms` }}
@@ -416,7 +416,7 @@ export default function PrimaryImageFixPage() {
                             Primary Correct
                           </div>
                         )}
-                        
+
                         <div className="h-4 w-[1px] bg-gray-200 dark:bg-gray-700 mx-1"></div>
                       </div>
                     </div>
@@ -432,7 +432,7 @@ export default function PrimaryImageFixPage() {
                         <div className="flex flex-col items-center justify-center py-12 space-y-3 bg-white dark:bg-gray-800 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
                           <ImageIcon className="w-8 h-8 text-gray-300 dark:text-gray-700" />
                           <p className="text-sm text-gray-500 dark:text-gray-500">No active assets found for this product.</p>
-                          <Link 
+                          <Link
                             href={`/product/add?id=${row.product.id}`}
                             className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
                           >
@@ -451,28 +451,27 @@ export default function PrimaryImageFixPage() {
                                 key={image.id}
                                 onClick={() => handlePickAndSave(row.product.id, image.id)}
                                 disabled={row.saving || row.loadingImages}
-                                className={`relative group/img flex flex-col p-2.5 rounded-2xl border-2 text-left transition-all duration-300 disabled:opacity-70 ${
-                                  isSelected 
-                                    ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-500/10 ring-4 ring-blue-500/10 shadow-md' 
+                                className={`relative group/img flex flex-col p-2.5 rounded-2xl border-2 text-left transition-all duration-300 disabled:opacity-70 ${isSelected
+                                    ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-500/10 ring-4 ring-blue-500/10 shadow-md'
                                     : 'border-white dark:border-gray-800 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 shadow-sm'
-                                }`}
+                                  }`}
                               >
                                 <div className="aspect-square rounded-xl overflow-hidden bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-700 relative">
-                                  <img 
-                                    src={imageUrlFor(image)} 
-                                    alt="Product asset" 
+                                  <img
+                                    src={imageUrlFor(image)}
+                                    alt="Product asset"
                                     className="w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-110"
                                     onError={(e) => {
                                       (e.currentTarget as HTMLImageElement).src = '/placeholder-product.svg';
                                     }}
                                   />
-                                  
+
                                   {isOriginal && (
                                     <div className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-gray-900/90 text-[9px] font-bold text-white shadow-xl backdrop-blur-sm">
                                       Primary
                                     </div>
                                   )}
-                                  
+
                                   {isJustChanged && (
                                     <div className="absolute top-2 right-2 p-1 rounded-full bg-blue-600 text-white shadow-lg animate-bounce">
                                       <CheckCircle2 className="w-3.5 h-3.5" />
@@ -512,7 +511,7 @@ export default function PrimaryImageFixPage() {
                   <ChevronLeft className="w-4 h-4" />
                   BACK
                 </button>
-                
+
                 <div className="flex items-center gap-3">
                   <span className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase">Page</span>
                   <div className="px-4 py-1.5 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 font-mono text-sm font-bold text-gray-900 dark:text-white">
@@ -534,12 +533,12 @@ export default function PrimaryImageFixPage() {
               </div>
             </div>
           )}
-          
+
           <div className="text-center py-4">
-             <p className="text-[10px] text-gray-400 dark:text-gray-600 font-bold uppercase tracking-widest flex items-center justify-center gap-2">
-               <Info className="w-3 h-3" />
-               SYSTEM UTILITY - USE WITH CAUTION
-             </p>
+            <p className="text-[10px] text-gray-400 dark:text-gray-600 font-bold uppercase tracking-widest flex items-center justify-center gap-2">
+              <Info className="w-3 h-3" />
+              SYSTEM UTILITY - USE WITH CAUTION
+            </p>
           </div>
         </main>
       </div>

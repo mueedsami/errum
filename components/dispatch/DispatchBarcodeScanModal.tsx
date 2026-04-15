@@ -14,8 +14,8 @@ interface Props {
   dispatch: ProductDispatch | null;
   isOpen: boolean;
   onClose: () => void;
-  /** Called after a successful scan (send/receive) */
-  onComplete?: () => void;
+  /** Called after a successful scan (send/receive). Can refresh parent dispatch state. */
+  onComplete?: () => void | Promise<void>;
   /** If provided, a "Complete Delivery" button is shown in receive mode */
   onMarkDelivered?: (dispatchId: number) => Promise<void>;
   mode: DispatchScanMode;
@@ -291,7 +291,7 @@ export default function DispatchBarcodeScanModal({
         }
         
         // Signal that dispatch items might have changed
-        if (onComplete) onComplete();
+        if (onComplete) await Promise.resolve(onComplete());
       } else {
         if (!selectedItemId) {
           throw new Error('Please select an item to receive');
@@ -327,7 +327,7 @@ export default function DispatchBarcodeScanModal({
       if (selectedItemId) {
         await fetchProgress(selectedItemId);
       }
-      onComplete?.();
+      await Promise.resolve(onComplete?.());
 
       // In receive mode, auto-refresh overall status after processing a burst
       if (mode === 'receive') {

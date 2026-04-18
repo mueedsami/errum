@@ -214,8 +214,8 @@ export default function PurchaseOrdersPage() {
         it?.product_sku ||
         'Product';
 
-      // Prefer sell price if provided by PO receive flow; otherwise fallback (avoid leaking cost to moderators).
-      const price = toNumber(it?.unit_sell_price ?? pb?.sell_price ?? (isRole(['online-moderator']) ? 0 : it?.unit_cost) ?? 0);
+      // Prefer sell price if provided by PO receive flow; otherwise fallback.
+      const price = toNumber(it?.unit_sell_price ?? pb?.sell_price ?? it?.unit_cost ?? 0);
 
       const fallbackCode =
         pb?.barcode?.barcode ||
@@ -296,34 +296,6 @@ export default function PurchaseOrdersPage() {
     items: [],
     new_items: [],
   });
-
-  const [editBulkQty, setEditBulkQty] = useState('');
-  const [editBulkCost, setEditBulkCost] = useState('');
-  const [editBulkSell, setEditBulkSell] = useState('');
-
-  const applyEditBulk = () => {
-    if (!editBulkQty && !editBulkCost && !editBulkSell) return;
-
-    setEditForm((prev) => ({
-      ...prev,
-      items: prev.items.map((it) => ({
-        ...it,
-        quantity_ordered: editBulkQty || it.quantity_ordered,
-        unit_cost: editBulkCost || it.unit_cost,
-        unit_sell_price: editBulkSell || it.unit_sell_price,
-      })),
-      new_items: prev.new_items.map((it) => ({
-        ...it,
-        quantity_ordered: editBulkQty || it.quantity_ordered,
-        unit_cost: editBulkCost || it.unit_cost,
-        unit_sell_price: editBulkSell || it.unit_sell_price,
-      })),
-    }));
-
-    setEditBulkQty('');
-    setEditBulkCost('');
-    setEditBulkSell('');
-  };
 
   // Add more products in PO Edit — category-based browser
   const [categoryList, setCategoryList] = useState<CategoryTree[]>([]);
@@ -1121,9 +1093,7 @@ export default function PurchaseOrdersPage() {
                               <AccessControl roles={['super-admin', 'admin']}>
                                 <th className="px-4 py-2 text-right text-gray-900 dark:text-gray-100">Unit Cost</th>
                               </AccessControl>
-                              <AccessControl roles={['super-admin', 'admin']}>
-                                <th className="px-4 py-2 text-right text-gray-900 dark:text-gray-100">Total</th>
-                              </AccessControl>
+                              <th className="px-4 py-2 text-right text-gray-900 dark:text-gray-100">Total</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -1168,14 +1138,12 @@ export default function PurchaseOrdersPage() {
                                 </td>
                                 <AccessControl roles={['super-admin', 'admin']}>
                                   <td className="px-4 py-2 text-right text-gray-900 dark:text-gray-100">
-                                  ৳{formatCurrency(item.unit_cost)}
+                                    ৳{formatCurrency(item.unit_cost)}
                                   </td>
                                 </AccessControl>
-                                <AccessControl roles={['super-admin', 'admin']}>
-                                  <td className="px-4 py-2 text-right font-medium text-gray-900 dark:text-gray-100">
-                                    ৳{formatCurrency((item.quantity_ordered || 0) * (item.unit_cost || 0))}
-                                  </td>
-                                </AccessControl>
+                                <td className="px-4 py-2 text-right font-medium text-gray-900 dark:text-gray-100">
+                                  ৳{formatCurrency((item.quantity_ordered || 0) * (item.unit_cost || 0))}
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -1635,52 +1603,6 @@ export default function PurchaseOrdersPage() {
               <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
                 <div className="px-4 py-3 bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
                   <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Items (Quantity &amp; Prices)</h3>
-                </div>
-
-                <div className="p-4 bg-gray-50 dark:bg-gray-700/30 border-b border-gray-200 dark:border-gray-700">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Bulk Qty</label>
-                      <input
-                        type="number"
-                        value={editBulkQty}
-                        onChange={(e) => setEditBulkQty(e.target.value)}
-                        placeholder="Qty for all"
-                        className="w-full px-3 py-1.5 text-sm border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                      />
-                    </div>
-                    <AccessControl roles={['super-admin', 'admin']}>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Bulk Cost</label>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={editBulkCost}
-                          onChange={(e) => setEditBulkCost(e.target.value)}
-                          placeholder="Cost for all"
-                          className="w-full px-3 py-1.5 text-sm border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                        />
-                      </div>
-                    </AccessControl>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Bulk Sell</label>
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editBulkSell}
-                        onChange={(e) => setEditBulkSell(e.target.value)}
-                        placeholder="Sell for all"
-                        className="w-full px-3 py-1.5 text-sm border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={applyEditBulk}
-                      className="px-4 py-1.5 text-sm bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-md font-medium hover:bg-gray-700 dark:hover:bg-gray-200 transition-colors"
-                    >
-                      Apply to all
-                    </button>
-                  </div>
                 </div>
 
                 <div className="overflow-x-auto">

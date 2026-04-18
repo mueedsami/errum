@@ -45,9 +45,6 @@ interface Store {
   id: number;
   name: string;
   address: string;
-  phone?: string;
-  mobile?: string;
-  contact_phone?: string;
   type: string;
   is_active: boolean;
 }
@@ -275,67 +272,6 @@ export default function POSPage() {
       () => setToasts((prev) => prev.filter((toast) => toast.id !== id)),
       5000
     );
-  };
-
-  const buildPrintableOrderWithStore = async (order: any) => {
-    const storeId = Number(order?.store?.id || order?.store_id || selectedOutlet || 0);
-
-    let storeDetails: any =
-      outlets.find((o) => Number(o.id) === storeId) ||
-      outlets.find((o) => String(o.id) === String(selectedOutlet));
-
-    if ((!storeDetails?.address || !(storeDetails?.phone || storeDetails?.mobile || storeDetails?.contact_phone)) && storeId) {
-      try {
-        const res: any = await storeService.getStore(storeId);
-        storeDetails = res?.data ?? res ?? storeDetails;
-      } catch (err) {
-        console.warn('Failed to fetch full store details for receipt:', err);
-      }
-    }
-
-    const storePhone =
-      order?.store?.phone ||
-      order?.store?.mobile ||
-      order?.store?.contact_phone ||
-      order?.store_phone ||
-      order?.storePhone ||
-      order?.branch_phone ||
-      order?.branchPhone ||
-      storeDetails?.phone ||
-      storeDetails?.mobile ||
-      storeDetails?.contact_phone ||
-      '';
-
-    const storeAddress =
-      order?.store?.address ||
-      order?.store_address ||
-      order?.storeAddress ||
-      order?.branch_address ||
-      order?.branchAddress ||
-      storeDetails?.address ||
-      '';
-
-    return {
-      ...order,
-      store: {
-        ...(typeof order?.store === 'object' ? order.store : {}),
-        id: storeId || order?.store?.id,
-        name:
-          order?.store?.name ||
-          order?.store_name ||
-          order?.storeName ||
-          order?.branch_name ||
-          order?.branchName ||
-          storeDetails?.name ||
-          '',
-        address: storeAddress,
-        phone: storePhone,
-      },
-      store_address: storeAddress,
-      store_phone: storePhone,
-      branch_address: order?.branch_address || order?.branchAddress || storeAddress,
-      branch_phone: order?.branch_phone || order?.branchPhone || storePhone,
-    };
   };
 
   // ============ DEFECT ITEM LOADING ============
@@ -1032,7 +968,7 @@ export default function POSPage() {
                 category: c.serviceCategory ?? c.category,
               }));
 
-            const printableOrderBase = {
+            const printableOrder = {
               ...(fullOrder as any),
               payment_breakdown: receiptPaymentBreakdown,
               change_amount: change,
@@ -1045,7 +981,6 @@ export default function POSPage() {
                 : {}),
             };
 
-            const printableOrder = await buildPrintableOrderWithStore(printableOrderBase);
             await printReceipt(printableOrder, undefined, { template: 'pos_receipt' });
             showToast('✅ Receipt printed', 'success');
           } catch (e: any) {
@@ -1129,8 +1064,7 @@ export default function POSPage() {
         showToast('QZ Tray offline - opening receipt preview (Print → Save as PDF)', 'error');
       }
       const fullOrder = await orderService.getById(lastCompletedOrderId);
-      const printableOrder = await buildPrintableOrderWithStore(fullOrder);
-      await printReceipt(printableOrder, undefined, { template: 'pos_receipt' });
+      await printReceipt(fullOrder, undefined, { template: 'pos_receipt' });
       showToast('✅ Receipt printed', 'success');
     } catch (e: any) {
       console.error('❌ Receipt print failed:', e);

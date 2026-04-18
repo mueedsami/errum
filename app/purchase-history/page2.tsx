@@ -82,9 +82,7 @@ interface PurchaseHistoryOrder {
 interface Store {
   id: number;
   name: string;
-  location?: string;
-  address?: string;
-  phone?: string;
+  location: string;
 }
 
 export default function PurchaseHistoryPage() {
@@ -276,56 +274,6 @@ export default function PurchaseHistoryPage() {
     setShowExchangeModal(true);
   };
 
-  const buildPrintableOrderWithStore = async (order: any) => {
-    const storeId = Number(order?.store?.id || order?.store_id || selectedStore || scopedStoreId || 0);
-
-    let storeDetails: any = stores.find((s) => Number(s.id) === storeId);
-
-    if ((!storeDetails?.address || !storeDetails?.phone) && storeId) {
-      try {
-        const res: any = await storeService.getStore(storeId);
-        storeDetails = res?.data ?? res ?? storeDetails;
-      } catch (err) {
-        console.warn('Failed to fetch full store details for receipt:', err);
-      }
-    }
-
-    return {
-      ...order,
-      store: {
-        ...(typeof order?.store === 'object' ? order.store : {}),
-        id: storeId || order?.store?.id,
-        name:
-          order?.store?.name ||
-          order?.store_name ||
-          storeDetails?.name ||
-          '',
-        address:
-          order?.store?.address ||
-          order?.store_address ||
-          storeDetails?.address ||
-          storeDetails?.location ||
-          '',
-        phone:
-          order?.store?.phone ||
-          order?.store_phone ||
-          storeDetails?.phone ||
-          '',
-      },
-      store_address:
-        order?.store_address ||
-        order?.store?.address ||
-        storeDetails?.address ||
-        storeDetails?.location ||
-        '',
-      store_phone:
-        order?.store_phone ||
-        order?.store?.phone ||
-        storeDetails?.phone ||
-        '',
-    };
-  };
-
   const handlePrint = async (order: PurchaseHistoryOrder) => {
     setActiveMenu(null);
 
@@ -336,9 +284,8 @@ export default function PurchaseHistoryPage() {
       }
 
       const fullOrder = await orderService.getById(order.id);
-      const printableOrder = await buildPrintableOrderWithStore(fullOrder);
-      await printReceipt(printableOrder, undefined, { template: 'pos_receipt' });
-      alert(`✅ Receipt printed for order #${printableOrder.order_number || printableOrder.id}`);
+      await printReceipt(fullOrder, undefined, { template: 'pos_receipt' });
+      alert(`✅ Receipt printed for order #${fullOrder.order_number || fullOrder.id}`);
     } catch (error: any) {
       console.error('Print receipt error:', error);
       alert(`Failed to print receipt: ${error?.message || 'Unknown error'}`);

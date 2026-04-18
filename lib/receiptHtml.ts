@@ -74,7 +74,7 @@ function receiptBody(r: ReceiptOrder) {
           <span class="k">Paid</span>
           <span class="v payValue">${escapeHtml(money(paidAmount))}</span>
         </div>
-        <div class="payItem highlightDark">
+        <div class="payItem highlightLight">
           <span class="k">COD</span>
           <span class="v payValue">${escapeHtml(money(codAmount))}</span>
         </div>

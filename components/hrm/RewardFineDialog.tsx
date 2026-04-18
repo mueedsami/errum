@@ -61,14 +61,7 @@ export default function RewardFineDialog({ isOpen, onClose, storeId, employee, o
       }
       if (res.success) { toast.success(editData ? 'Entry updated!' : 'Entry created!'); onSuccess(); onClose(); }
       else toast.error(res.message || 'Failed');
-    } catch (error: any) {
-      const validationErrors = error?.response?.data?.errors;
-      const firstValidationMessage = validationErrors
-        ? Object.values(validationErrors).flat().find(Boolean)
-        : null;
-      const message = firstValidationMessage || error?.response?.data?.message || error?.message || 'Error';
-      toast.error(String(message));
-    }
+    } catch (error: any) { toast.error(error.message || 'Error'); }
     finally { setIsLoading(false); }
   };
 

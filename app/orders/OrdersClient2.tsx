@@ -678,106 +678,7 @@ export default function OrdersDashboard() {
     return '';
   };
 
-  const extractAddressFromNotes = (notes: any): string => {
-    const text = cleanText(notes);
-    if (!text) return '';
 
-    const match = text.match(/(?:^|[\n|])\s*Address:\s*(.+?)(?=(?:,\s*Change Given:|[\n|]|$))/i);
-    return cleanText(match?.[1] || '');
-  };
-
-  const sanitizeReceiptNotes = (notes: any): string => {
-    let text = cleanText(notes);
-    if (!text) return '';
-
-    text = text.replace(/(?:^|[\n|])\s*Address:\s*(.+?)(?=(?:,\s*Change Given:|[\n|]|$))/ig, '');
-    text = text.replace(/^[\s|,;-]+|[\s|,;-]+$/g, '');
-    text = text.replace(/\s{2,}/g, ' ');
-
-    return text.trim();
-  };
-
-  const buildPrintableOrderWithStore = async (order: any, summaryOrder?: Order): Promise<any> => {
-    const storeId = Number(
-      order?.store?.id ||
-      order?.store_id ||
-      order?.storeId ||
-      summaryOrder?.storeId ||
-      0
-    );
-
-    let storeDetails: any =
-      stores.find((s) => Number(s.id) === storeId) ||
-      (storeId ? null : null);
-
-    if ((!storeDetails?.address || !storeDetails?.phone) && storeId) {
-      try {
-        const res: any = await storeService.getStore(storeId);
-        storeDetails = res?.data ?? res ?? storeDetails;
-      } catch (err) {
-        console.warn('Failed to fetch full store details for receipt:', err);
-      }
-    }
-
-    const summaryAddress = cleanText(summaryOrder?.customer?.address);
-    const addressFromShipping = cleanText(
-      order?.customer_address ||
-      formatShippingAddress(order?.shipping_address) ||
-      formatShippingAddress(order?.shippingAddress)
-    );
-    const addressFromNotes = extractAddressFromNotes(order?.notes);
-    const customerAddress = summaryAddress || addressFromShipping || addressFromNotes;
-
-    const rawShipping =
-      (order?.shipping_address && typeof order.shipping_address === 'object' ? order.shipping_address : null) ||
-      (order?.shippingAddress && typeof order.shippingAddress === 'object' ? order.shippingAddress : null) ||
-      null;
-
-    const shippingAddress = rawShipping
-      ? {
-        ...rawShipping,
-        address:
-          rawShipping.address ||
-          rawShipping.address_line1 ||
-          rawShipping.address_line_1 ||
-          rawShipping.street ||
-          customerAddress ||
-          '',
-      }
-      : customerAddress
-        ? {
-          address: customerAddress,
-          address_line1: customerAddress,
-          street: customerAddress,
-          name: order?.customer?.name || order?.customer_name || summaryOrder?.customer?.name || '',
-          phone: order?.customer?.phone || order?.customer_phone || summaryOrder?.customer?.phone || '',
-        }
-        : order?.shipping_address || order?.shippingAddress || null;
-
-    return {
-      ...order,
-      notes: sanitizeReceiptNotes(order?.notes),
-      customer_address: customerAddress || order?.customer_address || '',
-      shipping_address: shippingAddress,
-      shippingAddress,
-      customer: {
-        ...(typeof order?.customer === 'object' && order?.customer ? order.customer : {}),
-        name: order?.customer?.name || order?.customer_name || summaryOrder?.customer?.name || '',
-        phone: order?.customer?.phone || order?.customer_phone || summaryOrder?.customer?.phone || '',
-        email: order?.customer?.email || order?.customer_email || summaryOrder?.customer?.email || '',
-        address: customerAddress || order?.customer?.address || summaryAddress || '',
-      },
-      store: {
-        ...(typeof order?.store === 'object' && order?.store ? order.store : {}),
-        id: storeId || order?.store?.id,
-        name: order?.store?.name || order?.store_name || summaryOrder?.store || storeDetails?.name || '',
-        address: order?.store?.address || order?.store_address || storeDetails?.address || '',
-        phone: order?.store?.phone || order?.store_phone || storeDetails?.phone || '',
-      },
-      store_address: order?.store_address || order?.store?.address || storeDetails?.address || '',
-      store_phone: order?.store_phone || order?.store?.phone || storeDetails?.phone || '',
-    };
-  };
 
   // ✅ Pathao lookup helpers (for editing Social Commerce address)
   const fetchPathaoCities = async () => {
@@ -2444,8 +2345,7 @@ export default function OrdersDashboard() {
 
         try {
           const fullOrder = await orderService.getById(o.id);
-          const printableOrder = await buildPrintableOrderWithStore(fullOrder, o);
-          fullOrders.push(printableOrder);
+          fullOrders.push(fullOrder);
         } catch (e) {
           console.error('Failed to fetch order for invoice:', o.id, e);
           setBulkPrintProgress((prev) => ({ ...prev, failed: prev.failed + 1 }));
@@ -2541,8 +2441,7 @@ export default function OrdersDashboard() {
 
         try {
           const fullOrder = await orderService.getById(o.id);
-          const printableOrder = await buildPrintableOrderWithStore(fullOrder, o);
-          fullOrders.push(printableOrder);
+          fullOrders.push(fullOrder);
         } catch (e) {
           console.error('Failed to fetch order for receipt:', o.id, e);
           setBulkPrintProgress((prev) => ({ ...prev, failed: prev.failed + 1 }));
@@ -2678,8 +2577,7 @@ export default function OrdersDashboard() {
       }
 
       const fullOrder = await orderService.getById(order.id);
-      const printableOrder = await buildPrintableOrderWithStore(fullOrder, order);
-      await printReceipt(printableOrder as any, status.connected ? selectedPrinter : undefined);
+      await printReceipt(fullOrder as any, status.connected ? selectedPrinter : undefined);
 
       alert('✅ Receipt ready (printed or opened in preview)!');
     } catch (error: any) {
@@ -2718,8 +2616,7 @@ export default function OrdersDashboard() {
       }
 
       const fullOrder = await orderService.getById(order.id);
-      const printableOrder = await buildPrintableOrderWithStore(fullOrder, order);
-      await printReceipt(printableOrder as any, status.connected ? selectedPrinter : undefined, {
+      await printReceipt(fullOrder as any, status.connected ? selectedPrinter : undefined, {
         template: 'pos_receipt',
         title: 'Invoice',
       });

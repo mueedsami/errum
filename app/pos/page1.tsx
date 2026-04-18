@@ -800,15 +800,6 @@ export default function POSPage() {
         discount_amount: totalDiscount,
         shipping_amount: transportCost,
 
-        // ✅ Put customer address into shipping_address so receipts print it with customer info
-        ...(address
-          ? {
-            shipping_address: {
-              address,
-            },
-          }
-          : {}),
-
         // ✅ FIXED: start_date should be undefined instead of null
         ...(isInstallment
           ? {
@@ -820,10 +811,10 @@ export default function POSPage() {
           }
           : {}),
 
-        // ✅ Keep only operational notes here — do not put customer address in notes
-        ...(change > 0
+        // ✅ Add notes if any
+        ...(address || change > 0
           ? {
-            notes: `Change Given: ৳${change.toFixed(2)}`.trim(),
+            notes: `${address ? `Address: ${address}` : ''}${address && change > 0 ? ', ' : ''}${change > 0 ? `Change Given: ৳${change.toFixed(2)}` : ''}`.trim(),
           }
           : {}),
       };

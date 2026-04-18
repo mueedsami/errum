@@ -811,7 +811,7 @@ export default function VendorPaymentPage() {
     }
 
     // basic validation to avoid NaN
-    const bad = validItems.find((it) => !it.quantity_ordered);
+    const bad = validItems.find((it) => !it.quantity_ordered || (!isRole(['online-moderator']) && !it.unit_cost));
     if (bad) {
       showAlert('error', 'Please fill Quantity & Unit Cost for all items');
       return;
@@ -1204,8 +1204,8 @@ export default function VendorPaymentPage() {
                         <td className="px-6 py-3">
                           <span
                             className={`text-xs px-2 py-1 rounded ${(vendor as any).is_active
-                              ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
-                              : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                                ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
+                                : 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
                               }`}
                           >
                             {(vendor as any).is_active ? 'Active' : 'Inactive'}
@@ -1900,9 +1900,7 @@ export default function VendorPaymentPage() {
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Variation</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Qty</th>
-                    <AccessControl roles={['super-admin', 'admin']}>
-                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Unit Cost</th>
-                    </AccessControl>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Unit Cost</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase">Sell Price</th>
                   </tr>
                 </thead>

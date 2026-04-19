@@ -12,6 +12,7 @@ import batchService, { Batch, CreateBatchData, UpdateBatchData } from '@/service
 import storeService, { Store } from '@/services/storeService';
 import PaginationControls from '@/components/PaginationControls';
 import useDebounce from '@/lib/hooks/useDebounce';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface Product {
   id: number;
@@ -34,6 +35,8 @@ export default function BatchPage() {
 
   const { darkMode, setDarkMode } = useTheme();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const { isRole } = useAuth();
+  const isAdmin = isRole(['admin', 'super-admin']);
 
   const [stores, setStores] = useState<Store[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
@@ -474,7 +477,7 @@ export default function BatchPage() {
                             {q.product_name}
                           </div>
                           <div className="text-sm text-gray-500 dark:text-gray-400">
-                            Store: {q.store_name || q.store_id} • Qty: {q.quantity} • Cost: {q.cost_price} • Sell: {q.sell_price}
+                            Store: {q.store_name || q.store_id} • Qty: {q.quantity} {isAdmin && `• Cost: ${q.cost_price}`} • Sell: {q.sell_price}
                           </div>
                         </div>
 

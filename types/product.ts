@@ -11,6 +11,7 @@ export interface ProductVariant {
   sku: string;
   color?: string;
   size?: string;
+  variation_suffix?: string;
   image?: string | null;
 }
 

@@ -1,6 +1,6 @@
 // lib/receipt.ts
 // Normalizes different order shapes (social commerce UI, backend API order, POS order)
-// into a single receipt-friendly model for printing.
+import { CLIENT_ADDRESS, CLIENT_MOBILE } from './constants';
 
 export type ReceiptItem = {
   name: string;
@@ -28,6 +28,8 @@ export type ReceiptOrder = {
   orderNo: string;
   dateTime: string; // human readable
   storeName?: string;
+  storeAddress?: string;
+  storePhone?: string;
   salesBy?: string;
   customerName?: string;
   customerPhone?: string;
@@ -97,8 +99,24 @@ export function normalizeOrderForReceipt(order: any): ReceiptOrder {
     formatDateTime(order?.order_date || order?.created_at || order?.createdAt || order?.date);
 
   // Store
+  const storeObj = order?.store || order?.branch || order?.outlet || order?.assigned_store || order?.assignedStore;
   const storeName =
-    safeString(order?.store?.name) || safeString(order?.store) || safeString(order?.storeName);
+    safeString(storeObj?.name) || safeString(storeObj?.store_name) || safeString(order?.storeName) || safeString(order?.store) || 'Main Store';
+  
+  const storeAddress = 
+    safeString(storeObj?.address) || 
+    safeString(storeObj?.store_address) || 
+    safeString(order?.storeAddress) || 
+    safeString(order?.store_address) || 
+    CLIENT_ADDRESS;
+
+  const storePhone = 
+    safeString(storeObj?.phone) || 
+    safeString(storeObj?.mobile) || 
+    safeString(storeObj?.contact_phone) || 
+    safeString(order?.storePhone) || 
+    safeString(order?.store_phone) || 
+    CLIENT_MOBILE;
 
   // Salesperson
   const salesBy =
@@ -249,6 +267,8 @@ export function normalizeOrderForReceipt(order: any): ReceiptOrder {
     orderNo,
     dateTime,
     storeName,
+    storeAddress,
+    storePhone,
     salesBy,
     customerName,
     customerPhone,

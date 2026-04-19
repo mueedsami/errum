@@ -85,7 +85,7 @@ export default function ProductListItem({
 
   // Group variants by color for display
   const variantsByColor = productGroup.variants.reduce((acc, variant) => {
-    const color = variant.color || 'No Color';
+    const color = variant.color || 'na';
     if (!acc[color]) {
       acc[color] = [];
     }
@@ -302,7 +302,7 @@ export default function ProductListItem({
                       className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 transition-colors"
                     >
                       <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                        {variant.size || 'One Size'}
+                        {variant.variation_suffix || variant.size || 'One Size'}
                       </span>
                       <div className="flex gap-1 ml-auto">
                         {canEdit && (

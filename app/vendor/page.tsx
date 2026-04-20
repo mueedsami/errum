@@ -1750,7 +1750,7 @@ export default function VendorPaymentPage() {
                               }}
                             />
                             <div className="min-w-0">
-                              <div className="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">{base.name}</div>
+                              <div className="text-xl font-semibold text-gray-900 dark:text-white truncate">{base.name}</div>
                               <div className="text-[11px] text-gray-500 dark:text-gray-400 truncate">
                                 {(base as any).sku}
                                 {base.category?.title ? ` • ${base.category.title}` : ''}
@@ -2027,7 +2027,7 @@ export default function VendorPaymentPage() {
 
                           <div className="min-w-0">
                             <div
-                              className="font-medium truncate cursor-zoom-in"
+                              className="text-2xl font-semibold text-gray-900 dark:text-white truncate cursor-zoom-in"
                               title="Click to view image"
                               onClick={() => setImagePreview({ url: getProductPrimaryImage(v), name: v.name })}
                             >

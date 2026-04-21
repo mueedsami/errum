@@ -10,7 +10,13 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
-  ArrowRight
+  ArrowRight,
+  Eye,
+  HelpCircle,
+  Truck,
+  RotateCcw,
+  ShieldCheck,
+  Grid
 } from 'lucide-react';
 
 import PremiumProductCard from '@/components/ecommerce/ui/PremiumProductCard';
@@ -410,8 +416,8 @@ export default function ProductDetailPage() {
   // ✅ Safe price formatter (prevents toLocaleString crash)
   const formatBDT = (value: any) => {
     const n = Number(value);
-    if (!Number.isFinite(n) || n <= 0) return '৳0.00';
-    return `৳${n.toLocaleString('en-BD', { minimumFractionDigits: 2 })}`;
+    if (!Number.isFinite(n) || n <= 0) return 'Tk 0.00';
+    return `Tk ${n.toLocaleString('en-BD', { minimumFractionDigits: 2 })}`;
   };
 
   // Check if user is authenticated
@@ -423,6 +429,31 @@ export default function ProductDetailPage() {
     return !!token;
   };
 
+
+  const buildVariantFromAny = (variant: any): ProductVariant => {
+    const name = variant?.name || '';
+    const meta = deriveVariantMeta(variant, name);
+
+    return {
+      id: Number(variant?.id),
+      name,
+      sku: variant?.sku || `product-${variant?.id}`,
+      color: meta.color,
+      size: meta.size,
+      variation_suffix: meta.variationSuffix,
+      option_label: meta.optionLabel,
+      selling_price: Number(variant?.selling_price ?? variant?.price ?? 0),
+      in_stock:
+        typeof variant?.in_stock === 'boolean'
+          ? variant.in_stock
+          : Number(variant?.stock_quantity || 0) > 0,
+      stock_quantity: Number(variant?.stock_quantity || 0),
+      available_inventory: variant?.available_inventory != null
+        ? Number(variant.available_inventory)
+        : Number(variant?.stock_quantity || 0),
+      images: Array.isArray(variant?.images) ? variant.images : [],
+    };
+  };
 
   // Fetch product data and variations
   useEffect(() => {
@@ -440,6 +471,9 @@ export default function ProductDetailPage() {
       const existingMatch = productVariants.find(v => v.id === productId);
       if (existingMatch) {
         setSelectedVariant(existingMatch);
+        // Even if we found it, it might have partial images. 
+        // handleVariantChange handles fetching full details if needed, 
+        // but for initial load, if it's a found variant, we should ideally ensure it's full.
         return;
       }
 
@@ -457,30 +491,6 @@ export default function ProductDetailPage() {
           ? (mainProduct as any).variants
           : [];
 
-        const buildVariantFromAny = (variant: any): ProductVariant => {
-          const name = variant?.name || '';
-          const meta = deriveVariantMeta(variant, name);
-
-          return {
-            id: Number(variant?.id),
-            name,
-            sku: variant?.sku || `product-${variant?.id}`,
-            color: meta.color,
-            size: meta.size,
-            variation_suffix: meta.variationSuffix,
-            option_label: meta.optionLabel,
-            selling_price: Number(variant?.selling_price ?? variant?.price ?? 0),
-            in_stock:
-              typeof variant?.in_stock === 'boolean'
-                ? variant.in_stock
-                : Number(variant?.stock_quantity || 0) > 0,
-            stock_quantity: Number(variant?.stock_quantity || 0),
-            available_inventory: variant?.available_inventory != null
-              ? Number(variant.available_inventory)
-              : Number(variant?.stock_quantity || 0),
-            images: Array.isArray(variant?.images) ? variant.images : [],
-          };
-        };
 
         // Prefer backend-provided grouped variants from single-product endpoint
         if (directVariantsRaw.length > 0) {
@@ -666,16 +676,33 @@ export default function ProductDetailPage() {
   }, [selectedVariant]);
 
   // Handlers
-  const handleVariantChange = (variant: ProductVariant) => {
+  const handleVariantChange = async (variant: ProductVariant) => {
     // 3.8 — Prevent scroll-to-top on variant change
     if (typeof window !== 'undefined') {
       (window as any).__ERRUM_SKIP_SCROLL__ = true;
     }
+
+    // Instantly update for responsiveness (shows primary image from the list)
     setSelectedVariant(variant);
     setSelectedImageIndex(0);
     setQuantity(1);
+
     // 3.5 — No page reload
     window.history.pushState(null, '', `/e-commerce/product/${variant.id}`);
+
+    // Background fetch for FULL details (including all images)
+    try {
+      const response = await catalogService.getProduct(variant.id, { include_availability: false });
+      if (response?.product) {
+        const fullVariant = buildVariantFromAny(response.product);
+
+        // Update the variant in the list and current selection
+        setProductVariants(prev => prev.map(v => v.id === variant.id ? fullVariant : v));
+        setSelectedVariant(prev => (prev?.id === variant.id ? fullVariant : prev));
+      }
+    } catch (err) {
+      console.warn('Failed to fetch full variant details in background:', err);
+    }
   };
 
   const handleToggleWishlist = () => {
@@ -937,25 +964,36 @@ export default function ProductDetailPage() {
       <Navigation />
       <CartSidebar isOpen={cartSidebarOpen} onClose={() => setCartSidebarOpen(false)} />
 
-      {/* Breadcrumb */}
-      <div className="border-b border-[var(--border-default)]">
-        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-4 hidden sm:block">
-          <div className="flex items-center gap-2 text-[10px] sm:text-[11px] font-medium tracking-[0.1em] text-[var(--text-muted)]"
-            style={{ fontFamily: "'DM Mono', monospace" }}>
-            <button onClick={() => router.push('/e-commerce')} className="hover:text-[var(--text-primary)] transition-colors">HOME</button>
-            <span className="text-[var(--border-strong)]">›</span>
-            <button onClick={() => router.back()} className="hover:text-[var(--text-primary)] transition-colors uppercase">
-              {getCategoryName(product.category) || 'PRODUCTS'}
-            </button>
-            <span className="text-[var(--border-strong)]">›</span>
-            <span className="text-[var(--text-secondary)] uppercase truncate max-w-xs">{baseName}</span>
+      {/* Breadcrumb & Navigation */}
+      <div className="border-b border-gray-100">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-[10px] font-bold tracking-[0.15em] text-gray-400 uppercase">
+              <button onClick={() => router.push('/e-commerce')} className="hover:text-gray-900 transition-colors">HOME</button>
+              <span className="text-gray-200">/</span>
+              <button onClick={() => router.push('/e-commerce/search')} className="hover:text-gray-900 transition-colors">SHOP ALL PRODUCTS</button>
+              <span className="text-gray-200 lg:inline hidden">/</span>
+              <span className="text-gray-900 lg:inline hidden truncate max-w-[200px]">{baseName}</span>
+            </div>
+            
+            <div className="flex items-center gap-4 text-gray-400">
+               <button onClick={() => router.back()} className="hover:text-gray-900 transition-colors flex items-center gap-1">
+                 <ChevronLeft size={16} />
+               </button>
+               <button onClick={() => router.push('/e-commerce/search')} className="hover:text-gray-900 transition-colors">
+                 <Grid size={16} />
+               </button>
+               <button className="hover:text-gray-900 transition-colors opacity-30 cursor-not-allowed">
+                 <ChevronRight size={16} />
+               </button>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Main product section */}
-      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 pt-24 pb-8 sm:pt-28 sm:pb-12 md:pt-16 md:pb-16">
-        <div className="grid lg:grid-cols-[6fr_4fr] gap-10 lg:gap-20 items-start">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-8 md:pt-10 md:pb-12">
+        <div className="grid lg:grid-cols-2 gap-8 lg:gap-16 items-start">
 
           {/* 3.1 — Image Gallery */}
           <ProductImageGallery
@@ -966,25 +1004,30 @@ export default function ProductDetailPage() {
           />
 
           {/* ── Buy Column ── */}
-          <div className="lg:sticky lg:top-24 space-y-8">
-            <div className="space-y-6">
+          <div className="lg:sticky lg:top-24 space-y-4">
+            <div className="space-y-4">
               {/* Product Info */}
-              <div>
-                <p className="text-[10px] font-bold tracking-[0.2em] uppercase text-[var(--text-muted)] mb-2"
-                  style={{ fontFamily: "'DM Mono', monospace" }}>
-                  {getCategoryName(product.category) || 'ERRUM COLLECTION'}
-                </p>
-                <h1 className="text-3xl sm:text-4xl md:text-5xl font-light text-[var(--text-primary)] tracking-tight"
-                  style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+              <div className="space-y-4">
+                <div className="flex justify-between items-start">
+                  <p className="text-[10px] font-bold tracking-widest text-[#b83228] uppercase">
+                    New Collection
+                  </p>
+                  <button className="flex items-center gap-1.5 text-[10px] font-bold tracking-wider text-gray-500 hover:text-gray-900 transition-colors uppercase underline underline-offset-4">
+                    <HelpCircle size={14} />
+                    Ask a Question
+                  </button>
+                </div>
+
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight leading-tight uppercase">
                   {baseName}
                 </h1>
 
-                <div className="mt-6 flex flex-wrap items-baseline gap-4">
-                  <span className="text-3xl font-bold text-[var(--text-primary)]" style={{ fontFamily: "'Jost', sans-serif" }}>
+                <div className="flex items-baseline gap-4 pt-2">
+                  <span className="text-2xl font-bold text-gray-900">
                     {formatBDT(sellingPrice)}
                   </span>
                   {(costPrice > sellingPrice || salePromo) && originalSellingPrice > 0 && (
-                    <span className="text-xl line-through text-[var(--text-muted)] opacity-60" style={{ fontFamily: "'Jost', sans-serif" }}>
+                    <span className="text-lg line-through text-gray-400 font-medium">
                       {formatBDT(salePromo ? originalSellingPrice : Math.max(costPrice, originalSellingPrice))}
                     </span>
                   )}
@@ -992,33 +1035,27 @@ export default function ProductDetailPage() {
               </div>
 
               {/* Urgency & Social Proof */}
-              <div className="space-y-4 py-6 border-y border-[var(--border-default)]">
-                {/* Live Activity (3.2) */}
-                <div className="ec-badge-live px-3 py-2 flex items-center gap-2 w-fit">
-                  <span className="flex h-1.5 w-1.5 rounded-full bg-[var(--cyan)] animate-pulse" />
-                  <span>{liveViewers} people viewing this right now</span>
+              <div className="space-y-6">
+                {/* Live Activity */}
+                <div className="flex items-center gap-2 text-sm font-medium text-gray-600 bg-gray-50/80 w-fit px-4 py-2 rounded-full border border-gray-100">
+                  <Eye size={16} className="text-gray-400" />
+                  <span><span className="text-gray-900 font-bold">{liveViewers}</span> people viewing this right now</span>
                 </div>
 
-                {/* Stock Progress Bar (3.3) */}
-                <div className="space-y-2">
-                  <div className="flex justify-between text-[10px] font-bold uppercase tracking-widest"
-                    style={{
-                      fontFamily: "'DM Mono', monospace",
-                      color: availableInventory <= 5 ? 'var(--status-danger)' : availableInventory <= 10 ? 'var(--gold-bright)' : 'var(--status-success)'
-                    }}>
-                    <span>
+                {/* Stock Progress Bar */}
+                <div className="space-y-2 p-3 bg-gray-50/50 rounded-xl border border-gray-100">
+                  <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest">
+                    <span className={availableInventory <= 5 ? 'text-[#b83228]' : 'text-gray-600'}>
                       {availableInventory <= 0 ? 'Out of stock' :
-                        availableInventory <= 5 ? `🔥 Almost gone! Only ${availableInventory} left` :
-                          availableInventory <= 10 ? `Selling fast — only ${availableInventory} left` :
-                            'In Stock'}
+                        availableInventory <= 8 ? `HURRY! ONLY ${availableInventory} LEFT IN STOCK.` :
+                          `IN STOCK — READY TO SHIP`}
                     </span>
+                    <span className="text-gray-400">{Math.round(Math.min((availableInventory / 25) * 100, 100))}%</span>
                   </div>
-                  <div className="h-[6px] w-full bg-[var(--bg-lifted)] rounded-[var(--radius-pill)] overflow-hidden">
+                  <div className="h-[4px] w-full bg-white rounded-full overflow-hidden">
                     <div
-                      className={`h-full transition-[width,background-color] duration-700 ease-out rounded-[var(--radius-pill)] ${
-                        availableInventory <= 5 ? 'bg-[var(--status-danger)] animate-pulse' :
-                        availableInventory <= 10 ? 'bg-[var(--status-warning)]' :
-                        'bg-[var(--status-success)]'
+                      className={`h-full transition-all duration-1000 ease-out ${
+                        availableInventory <= 5 ? 'bg-[#b83228]' : 'bg-gray-400'
                       }`}
                       style={{ width: `${Math.min((availableInventory / 25) * 100, 100)}%` }}
                     />
@@ -1036,18 +1073,18 @@ export default function ProductDetailPage() {
                 />
               )}
 
-              {/* Quantity + CTAs */}
-              <div className="space-y-4 pt-4">
+               {/* Quantity + CTAs */}
+              <div className="space-y-4 pt-2">
                 <div className="flex items-center gap-4">
-                  <div className="flex items-center h-[56px] border border-[var(--border-default)] rounded-2xl overflow-hidden bg-[var(--bg-surface)]">
+                  <div className="flex items-center h-[52px] border border-gray-200 rounded-lg overflow-hidden bg-white">
                     <button onClick={() => handleQuantityChange(-1)} disabled={quantity <= 1}
-                      className="px-4 h-full text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-30">
-                      <Minus size={16} />
+                      className="px-4 h-full text-gray-400 hover:text-black transition-colors disabled:opacity-20">
+                      <Minus size={14} strokeWidth={3} />
                     </button>
-                    <span className="min-w-[40px] text-center font-bold text-[var(--text-primary)]">{quantity}</span>
+                    <span className="min-w-[40px] text-center font-bold text-gray-900">{quantity}</span>
                     <button onClick={() => handleQuantityChange(1)} disabled={quantity >= availableInventory}
-                      className="px-4 h-full text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-30">
-                      <Plus size={16} />
+                      className="px-4 h-full text-gray-400 hover:text-black transition-colors disabled:opacity-20">
+                      <Plus size={14} strokeWidth={3} />
                     </button>
                   </div>
 
@@ -1055,11 +1092,11 @@ export default function ProductDetailPage() {
                     ref={mainCtaRef}
                     onClick={handleAddToCart}
                     disabled={!selectedVariant.in_stock || isAdding || availableInventory <= 0}
-                    className={`flex-1 h-[56px] rounded-2xl font-bold uppercase tracking-widest text-[10px] sm:text-xs flex items-center justify-center gap-3 transition-all active:scale-95 disabled:bg-[var(--bg-surface-2)] disabled:text-[var(--text-muted)] disabled:shadow-none shadow-[var(--shadow-card)] ${
-                      cartStatus === 'success' ? 'bg-[var(--status-success)] text-[var(--text-on-accent)]' : 'ec-btn-primary'
+                    className={`flex-1 h-[52px] rounded-lg font-bold uppercase tracking-wider text-[11px] flex items-center justify-center gap-3 transition-all active:scale-95 disabled:bg-gray-100 disabled:text-gray-400 ${
+                      cartStatus === 'success' ? 'bg-[#1a9456] text-white' : 'bg-black text-white hover:bg-gray-800'
                     }`}
                   >
-                    {cartStatus === 'idle' && <ShoppingCart size={18} />}
+                    {cartStatus === 'idle' && <ShoppingCart size={16} />}
                     {cartStatus === 'loading' && <div className="h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                     {cartStatus === 'success' && <span>✓ Added!</span>}
                     {cartStatus === 'idle' && (availableInventory <= 0 ? 'SOLD OUT' : 'ADD TO CART')}
@@ -1069,39 +1106,61 @@ export default function ProductDetailPage() {
                 <button
                   onClick={handleBuyItNow}
                   disabled={!selectedVariant.in_stock || isAdding || availableInventory <= 0}
-                  className="w-full h-[56px] bg-transparent text-[var(--text-primary)] border-2 border-[var(--text-primary)] rounded-2xl font-bold uppercase tracking-widest text-xs transition-all hover:bg-[var(--text-primary)] hover:text-[var(--bg-root)] active:scale-95 disabled:opacity-50"
+                  className="w-full h-[52px] bg-black text-white rounded-lg font-bold uppercase tracking-wider text-[11px] transition-all hover:bg-gray-800 active:scale-95 disabled:opacity-50"
                 >
                   BUY IT NOW
                 </button>
               </div>
 
               {/* Payment Options */}
-              <div className="pt-2">
+              <div className="pt-0">
                 <img
                   src="/payment_option.png"
                   alt="Payment Options"
-                  className="w-full h-auto object-contain"
+                  className="w-[85%] h-auto object-contain mx-auto lg:mx-0"
                 />
               </div>
 
               {/* Accordion Sections */}
-              <div className="pt-8 space-y-px border-t border-[var(--border-default)]">
+              <div className="pt-4 space-y-2 border-t border-gray-100">
                 {[
-                  { title: 'Description', content: product.description || product.short_description },
-                  { title: 'Additional Information', content: `SKU: ${selectedVariant.sku}\nCategory: ${getCategoryName(product.category)}` }
+                  { title: 'DESCRIPTION', content: product.description || product.short_description },
+                  { title: 'ADDITIONAL INFORMATION', content: `SKU: ${selectedVariant.sku}\nCategory: ${getCategoryName(product.category)}` }
                 ].map((section, idx) => (
-                  <details key={idx} className="group py-4 border-b border-[var(--border-default)]">
-                    <summary className="flex items-center justify-between cursor-pointer list-none">
-                      <span className="text-sm font-bold uppercase tracking-widest text-[var(--text-primary)]" style={{ fontFamily: "'Jost', sans-serif" }}>
+                  <details key={idx} className="group overflow-hidden rounded-md border border-gray-100">
+                    <summary className="flex items-center justify-between cursor-pointer list-none p-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
+                      <span className="text-[10px] font-bold tracking-widest text-gray-900">
                         {section.title}
                       </span>
-                      <Plus size={18} className="text-[var(--text-muted)] group-open:rotate-45 transition-transform" />
+                      <Plus size={14} className="text-gray-400 group-open:rotate-45 transition-transform" />
                     </summary>
-                    <div className="mt-4 text-sm text-[var(--text-secondary)] leading-relaxed whitespace-pre-line">
+                    <div className="p-3 text-sm text-gray-600 leading-relaxed whitespace-pre-line bg-white border-t border-gray-100">
                       {section.content}
                     </div>
                   </details>
                 ))}
+              </div>
+
+              {/* Bottom Trust Badges */}
+              <div className="grid grid-cols-3 gap-2 pt-4 border-t border-gray-100">
+                <div className="flex flex-col items-center text-center gap-1">
+                  <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
+                    <Truck size={16} strokeWidth={1.5} />
+                  </div>
+                  <span className="text-[8px] font-bold tracking-wider text-gray-900 uppercase">Shipping Worldwide</span>
+                </div>
+                <div className="flex flex-col items-center text-center gap-1">
+                  <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
+                    <RotateCcw size={16} strokeWidth={1.5} />
+                  </div>
+                  <span className="text-[8px] font-bold tracking-wider text-gray-900 uppercase">Easy Returns</span>
+                </div>
+                <div className="flex flex-col items-center text-center gap-1">
+                  <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
+                    <ShieldCheck size={16} strokeWidth={1.5} />
+                  </div>
+                  <span className="text-[8px] font-bold tracking-wider text-gray-900 uppercase">Secure Checkout</span>
+                </div>
               </div>
             </div>
           </div>

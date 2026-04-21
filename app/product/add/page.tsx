@@ -46,8 +46,8 @@ export default function AddEditProductPage({
   onSuccess,
 }: AddEditProductPageProps) {
   const router = useRouter();
-  const { hasAnyPermission, hasPermission, permissionsResolved } = useAuth();
-  const canViewProducts = hasAnyPermission(['products.view', 'products.create', 'products.edit', 'products.delete']);
+  const { permissionsResolved, isRole } = useAuth();
+  const canAccess = isRole(['super-admin', 'admin', 'online-moderator']);
   const [modeResolved, setModeResolved] = useState(false);
   
   // Read from sessionStorage if props not provided
@@ -1354,18 +1354,9 @@ export default function AddEditProductPage({
     );
   }
 
-  // Don't hard-deny until we actually know permissions (common when /me lacks role.permissions).
-  // Backend will still enforce 403 for unauthorized actions.
-  if (permissionsResolved && !canViewProducts) {
+  // Route-level authorization (fully synced with lib/accessMap.ts)
+  if (permissionsResolved && !canAccess) {
     return <AccessDenied />;
-  }
-
-  if (permissionsResolved && isEditMode && !hasPermission('products.edit')) {
-    return <AccessDenied title="You don't have access to edit products" />;
-  }
-
-  if (permissionsResolved && !isEditMode && !hasPermission('products.create')) {
-    return <AccessDenied title="You don't have access to create products" />;
   }
 
   return (

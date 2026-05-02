@@ -129,6 +129,10 @@ export default function AddEditProductPage({
   const [savingRowIds, setSavingRowIds] = useState<Record<number, boolean>>({});
   const [savingAll, setSavingAll] = useState<boolean>(false);
 
+  // "Update image for entire SKU" toggle (edit mode only)
+  const [updateImageForEntireSku, setUpdateImageForEntireSku] = useState<boolean>(false);
+  const [skuImagesSaving, setSkuImagesSaving] = useState<boolean>(false);
+
   // Common Edit (SKU group) state
   const [commonBaseName, setCommonBaseName] = useState<string>('');
   const [commonBrand, setCommonBrand] = useState<string>('');
@@ -435,14 +439,16 @@ export default function AddEditProductPage({
   };
 
   const parseVariantFromName = (name: string): { base?: string; color?: string; size?: string } => {
-    const raw = (name || '').trim();
+    const raw = (name || "").trim();
     if (!raw) return {};
 
-    const parts = raw.split(/\s*-\s*/).map(p => p.trim()).filter(Boolean);
+    // Use a stricter split that requires spaces around hyphens to distinguish from hyphens in product names (e.g., "Premium-Quality")
+    const parts = raw.split(/\s+-\s+/).map(p => p.trim()).filter(Boolean);
+    
     if (parts.length >= 3) {
       const size = parts[parts.length - 1];
       const color = parts[parts.length - 2];
-      const base = parts.slice(0, parts.length - 2).join(' - ').trim();
+      const base = parts.slice(0, parts.length - 2).join(" - ").trim();
       return { base, color, size };
     }
 
@@ -476,32 +482,52 @@ export default function AddEditProductPage({
   };
 
   const getGroupBaseName = (items: Product[], fallback: string) => {
-    // Prefer backend-provided base_name
-    const bases = items
-      .map(v => String((v as any).base_name || '').trim())
-      .filter(Boolean)
-      .concat(
-        items
-          .map(v => (parseVariantFromName(v.name).base || '').trim())
-          .filter(Boolean)
-      );
-    if (bases.length === 0) return fallback;
+    // 1. First priority: Prefer explicit base_name stored in the database
+    const explicitBases = items
+      .map(v => String((v as any).base_name || "").trim())
+      .filter(Boolean);
+    
+    if (explicitBases.length > 0) {
+      // Find the most frequent explicit base_name
+      const counts = new Map<string, number>();
+      explicitBases.forEach(b => counts.set(b, (counts.get(b) || 0) + 1));
+      
+      let best = explicitBases[0];
+      let max = -1;
+      for (const [val, count] of counts.entries()) {
+        if (count > max) {
+          max = count;
+          best = val;
+        }
+      }
+      return best;
+    }
+
+    // 2. Second priority: Guessed bases from full product names
+    const guessedBases = items
+      .map(v => (parseVariantFromName(v.name).base || "").trim())
+      .filter(Boolean);
+    
+    if (guessedBases.length === 0) return fallback;
 
     const counts = new Map<string, number>();
     const originalMap = new Map<string, string>();
-    bases.forEach(b => {
+    guessedBases.forEach(b => {
       const key = b.toLowerCase();
       counts.set(key, (counts.get(key) || 0) + 1);
       if (!originalMap.has(key)) originalMap.set(key, b);
     });
 
-    let bestKey = '';
+    let bestKey = "";
     let bestCount = -1;
-    let bestLen = Infinity;
+    let bestLen = -1; // Changed from Infinity to -1 to prefer LONGER names when tied
+
     for (const [key, c] of counts.entries()) {
       const candidate = originalMap.get(key) || key;
       const len = candidate.length;
-      if (c > bestCount || (c === bestCount && len < bestLen)) {
+      
+      // Prefer higher count, OR longer name if counts are equal (avoids truncated guesses)
+      if (c > bestCount || (c === bestCount && len > bestLen)) {
         bestKey = key;
         bestCount = c;
         bestLen = len;
@@ -567,6 +593,79 @@ export default function AddEditProductPage({
       });
     } finally {
       setSkuGroupLoading(false);
+    }
+  };
+
+  /**
+   * Sync all images in the current ImageGalleryManager to every variant
+   * sharing the same SKU. Only new (non-uploaded) files are sent; existing
+   * server images are cleared on the backend inside a DB transaction.
+   */
+  const handleSyncSkuImages = async () => {
+    if (!productId) return;
+
+    // 1. New files to upload
+    const pendingFiles = productImages
+      .filter((img: any) => img.file && !img.uploaded)
+      .map((img: any) => img.file as File);
+
+    // 2. Existing image paths (already on server)
+    const existingPaths = productImages
+      .filter((img: any) => img.uploaded && !img.file)
+      .map((img: any) => {
+          // Extract the storage path from the URL
+          // The URL looks like: http://domain/storage/products/sku-XXX/image.jpg
+          // We need: products/sku-XXX/image.jpg
+          const preview = img.preview || '';
+          if (preview.includes('/storage/')) {
+            return preview.split('/storage/')[1];
+          }
+          return preview; // fallback
+      })
+      .filter(Boolean);
+
+    if (pendingFiles.length === 0 && existingPaths.length === 0) {
+      setToast({
+        message:
+          'No images to sync. Please upload new images or ensure existing ones are visible.',
+        type: 'warning',
+      });
+      return;
+    }
+
+    // Find which of the pending files is marked as primary.
+    const pendingImages = productImages.filter((img: any) => img.file && !img.uploaded);
+    const primaryIdx = pendingImages.findIndex((img: any) => img.is_primary);
+    const primaryIndex = primaryIdx >= 0 ? primaryIdx : 0;
+
+    try {
+      setSkuImagesSaving(true);
+      setToast({ message: 'Syncing images to all SKU variants…', type: 'success' });
+
+      const result = await productImageService.syncSkuImages(
+        parseInt(productId!),
+        pendingFiles,
+        existingPaths,
+        primaryIndex
+      );
+
+      setToast({
+        message: result.message || `Images synced to ${result.variants_updated} variant(s) successfully!`,
+        type: 'success',
+      });
+
+      // Turn toggle off and refresh images
+      setUpdateImageForEntireSku(false);
+      // Refresh the SKU group to reflect new images
+      await fetchSkuGroupByProductId(productId);
+    } catch (error: any) {
+      console.error('Sync SKU images failed:', error);
+      setToast({
+        message: 'Error updating image for all sku',
+        type: 'error',
+      });
+    } finally {
+      setSkuImagesSaving(false);
     }
   };
 
@@ -968,13 +1067,7 @@ export default function AddEditProductPage({
   };
 
   const slugify = (val: string): string => {
-    return String(val || '')
-      .toLowerCase()
-      .trim()
-      .replace(/\s+/g, '-')
-      .replace(/[^a-z0-9-]/g, '')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '');
+    return String(val || '').trim();
   };
 
   const buildVariationSuffix = (color?: string, size?: string): string => {
@@ -1586,13 +1679,81 @@ export default function AddEditProductPage({
                       <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
                         Product Images
                       </h2>
+
+                      {/* ── Update image for entire SKU toggle (edit mode only) ── */}
+                      {isEditMode && (
+                        <div className="mb-5 rounded-lg border border-amber-200 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex-1">
+                              <p className="text-sm font-semibold text-amber-900 dark:text-amber-300">
+                                Update image for entire SKU
+                              </p>
+                              <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
+                                When <strong>ON</strong>: saving images will{' '}
+                                <strong>clear all images from every variant</strong> sharing
+                                this SKU and replace them with the images you upload here,
+                                in the same order. The primary flag follows your selection.
+                                This operation is atomic — all variants update together or
+                                none do.
+                              </p>
+                            </div>
+                            {/* Toggle button */}
+                            <button
+                              id="toggle-update-sku-images"
+                              type="button"
+                              onClick={() => setUpdateImageForEntireSku((v) => !v)}
+                              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 ${
+                                updateImageForEntireSku
+                                  ? 'bg-amber-500'
+                                  : 'bg-gray-200 dark:bg-gray-700'
+                              }`}
+                              aria-pressed={updateImageForEntireSku}
+                            >
+                              <span
+                                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                  updateImageForEntireSku ? 'translate-x-6' : 'translate-x-1'
+                                }`}
+                              />
+                            </button>
+                          </div>
+
+                          {/* Save SKU images button — only visible when toggle is on */}
+                          {updateImageForEntireSku && (
+                            <div className="mt-4 flex items-center gap-3">
+                              <button
+                                id="save-sku-images-btn"
+                                type="button"
+                                onClick={handleSyncSkuImages}
+                                disabled={skuImagesSaving}
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-medium text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                              >
+                                {skuImagesSaving ? (
+                                  <>
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Syncing…
+                                  </>
+                                ) : (
+                                  'Save Images for Entire SKU'
+                                )}
+                              </button>
+                              <p className="text-xs text-amber-700 dark:text-amber-400">
+                                Upload new images below, then click this button to apply them
+                                to all variants.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <ImageGalleryManager
                         productId={isEditMode ? parseInt(productId!) : undefined}
+                        existingImages={editingProduct?.images || []}
                         onImagesChange={(images) => {
                           setProductImages(images);
                         }}
                         maxImages={10}
                         allowReorder={true}
+                        disableAutoUpload={updateImageForEntireSku}
                       />
                     </div>
                   )}

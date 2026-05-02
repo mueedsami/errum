@@ -14,8 +14,10 @@ export interface Store {
 
 export interface GlobalInventoryItem {
   product_id: number;
+  category_id?: number;
   product_name: string;
   base_name: string;
+  variation_suffix?: string;
   sku: string;
   total_quantity: number;
   available_quantity?: number;
@@ -27,7 +29,10 @@ export interface GlobalInventoryItem {
 
 export interface ProductAvailability {
   product_id: number;
+  category_id?: number;
   product_name: string;
+  base_name: string;
+  variation_suffix?: string;
   sku: string;
   total_quantity: number;
   available_quantity?: number;
@@ -135,6 +140,7 @@ export interface StockAgingResponse {
 export interface GlobalInventoryParams {
   product_id?: number;
   store_id?: number;
+  category_id?: number;
   low_stock?: boolean;
   skipStoreScope?: boolean;
 }

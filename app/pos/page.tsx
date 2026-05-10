@@ -45,9 +45,6 @@ interface Store {
   id: number;
   name: string;
   address: string;
-  phone?: string;
-  mobile?: string;
-  contact_phone?: string;
   type: string;
   is_active: boolean;
 }
@@ -82,6 +79,34 @@ export interface ExtendedCartItem extends CartItem {
   serviceId?: number; // NEW: Service ID if it's a service
   serviceCategory?: string; // NEW: Service category
 }
+
+// ✅ Helper to calculate item totals consistently
+const calculateItemLineTotals = (
+  price: number,
+  qty: number,
+  discountValue: number,
+  discountType: 'fixed' | 'percentage'
+) => {
+  const baseAmount = price * qty;
+  let computedDiscount = 0;
+
+  if (discountType === 'percentage') {
+    // Percentage applies to the total line amount (subtotal)
+    computedDiscount = (baseAmount * discountValue) / 100;
+  } else {
+    // Fixed discount is treated as "per unit" to ensure it scales with quantity
+    // and correctly responds to quantity updates.
+    computedDiscount = discountValue * qty;
+  }
+
+  // Ensure discount doesn't exceed base amount
+  computedDiscount = Math.min(computedDiscount, baseAmount);
+
+  return {
+    discount: Math.round(computedDiscount * 100) / 100,
+    amount: Math.round((baseAmount - computedDiscount) * 100) / 100,
+  };
+};
 
 export default function POSPage() {
   const { user, role, scopedStoreId, canSelectStore, canAccessDailyCashReport } = useAuth();
@@ -138,11 +163,30 @@ export default function POSPage() {
     return s;
   }, [cart]);
 
-  // Ref-based copy used to block ultra-fast duplicate scan events before React state re-renders
   const scannedBarcodesRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     scannedBarcodesRef.current = new Set(scannedBarcodes);
   }, [scannedBarcodes]);
+
+  // ✅ NEW: Centralized Derived Cart State (Source of Truth for derived values)
+  const totaledCart = useMemo(() => {
+    return cart.map((item) => {
+      const { discount, amount } = calculateItemLineTotals(
+        item.price,
+        item.qty,
+        item.discountValue || 0,
+        item.discountType || 'fixed'
+      );
+      return {
+        ...item,
+        discount,
+        amount
+      };
+    });
+  }, [cart]);
+
+  // ✅ NEW: Debounced manual form discount state
+  const manualFormDebounceTimer = useRef<NodeJS.Timeout | null>(null);
 
   // Products (for manual entry)
   const [products, setProducts] = useState<Product[]>([]);
@@ -277,67 +321,6 @@ export default function POSPage() {
     );
   };
 
-  const buildPrintableOrderWithStore = async (order: any) => {
-    const storeId = Number(order?.store?.id || order?.store_id || selectedOutlet || 0);
-
-    let storeDetails: any =
-      outlets.find((o) => Number(o.id) === storeId) ||
-      outlets.find((o) => String(o.id) === String(selectedOutlet));
-
-    if ((!storeDetails?.address || !(storeDetails?.phone || storeDetails?.mobile || storeDetails?.contact_phone)) && storeId) {
-      try {
-        const res: any = await storeService.getStore(storeId);
-        storeDetails = res?.data ?? res ?? storeDetails;
-      } catch (err) {
-        console.warn('Failed to fetch full store details for receipt:', err);
-      }
-    }
-
-    const storePhone =
-      order?.store?.phone ||
-      order?.store?.mobile ||
-      order?.store?.contact_phone ||
-      order?.store_phone ||
-      order?.storePhone ||
-      order?.branch_phone ||
-      order?.branchPhone ||
-      storeDetails?.phone ||
-      storeDetails?.mobile ||
-      storeDetails?.contact_phone ||
-      '';
-
-    const storeAddress =
-      order?.store?.address ||
-      order?.store_address ||
-      order?.storeAddress ||
-      order?.branch_address ||
-      order?.branchAddress ||
-      storeDetails?.address ||
-      '';
-
-    return {
-      ...order,
-      store: {
-        ...(typeof order?.store === 'object' ? order.store : {}),
-        id: storeId || order?.store?.id,
-        name:
-          order?.store?.name ||
-          order?.store_name ||
-          order?.storeName ||
-          order?.branch_name ||
-          order?.branchName ||
-          storeDetails?.name ||
-          '',
-        address: storeAddress,
-        phone: storePhone,
-      },
-      store_address: storeAddress,
-      store_phone: storePhone,
-      branch_address: order?.branch_address || order?.branchAddress || storeAddress,
-      branch_phone: order?.branch_phone || order?.branchPhone || storePhone,
-    };
-  };
-
   // ============ DEFECT ITEM LOADING ============
 
   /**
@@ -446,6 +429,8 @@ export default function POSPage() {
       qty: 1,
       price: scannedProduct.price,
       discount: 0,
+      discountType: 'fixed',
+      discountValue: 0,
       amount: scannedProduct.price,
       availableQty: scannedProduct.availableQty,
       barcode: scannedProduct.barcode,
@@ -474,9 +459,16 @@ export default function POSPage() {
       return;
     }
 
-    const baseAmount = sellingPrice * quantity;
-    const discountValue =
-      discountPercent > 0 ? (baseAmount * discountPercent) / 100 : discountAmount;
+    const discountType = discountPercent > 0 ? 'percentage' : 'fixed';
+    const discountVal = discountPercent > 0 ? discountPercent : discountAmount;
+
+    // Derived values will be calculated by totaledCart memo
+    const { discount, amount } = calculateItemLineTotals(
+      sellingPrice,
+      quantity,
+      discountVal,
+      discountType
+    );
 
     const newItem: ExtendedCartItem = {
       id: Date.now() + Math.random(),
@@ -486,8 +478,10 @@ export default function POSPage() {
       batchNumber: selectedBatch.batch_number,
       qty: quantity,
       price: sellingPrice,
-      discount: discountValue,
-      amount: baseAmount - discountValue,
+      discount: discount,
+      discountType: discountType,
+      discountValue: discountVal,
+      amount: amount,
       availableQty: selectedBatch.quantity,
       barcode: undefined,
     };
@@ -523,23 +517,16 @@ export default function POSPage() {
     setCart((prev) =>
       prev.map((item) => {
         if (item.id === id) {
-          // ✅ Prevent quantity changes for defective items
           if (item.isDefective) {
             showToast('Cannot change quantity of defective items', 'error');
             return item;
           }
 
           if (newQty <= item.availableQty) {
-            const baseAmount = item.price * newQty;
-            const discountValue =
-              item.discount > 0
-                ? baseAmount * (item.discount / (item.price * item.qty))
-                : 0;
-
+            // Simplified: only update qty, totaledCart memo handles derived values
             return {
               ...item,
               qty: newQty,
-              amount: baseAmount - discountValue,
             };
           }
         }
@@ -551,17 +538,15 @@ export default function POSPage() {
   /**
    * ✅ NEW: Update item discount in cart
    */
-  const updateCartItemDiscount = (id: number, discountValue: number) => {
+  const updateCartItemDiscount = (id: number, discountValue: number, discountType: 'fixed' | 'percentage') => {
     setCart((prev) =>
       prev.map((item) => {
         if (item.id === id) {
-          const baseAmount = item.price * item.qty;
-          const newDiscount = Math.min(discountValue, baseAmount); // Can't discount more than total
-
+          // Simplified: only update authoritative fields
           return {
             ...item,
-            discount: newDiscount,
-            amount: baseAmount - newDiscount,
+            discountType: discountType,
+            discountValue: discountValue,
           };
         }
         return item;
@@ -582,6 +567,8 @@ export default function POSPage() {
       qty: service.quantity,
       price: service.price,
       discount: 0,
+      discountType: 'fixed',
+      discountValue: 0,
       amount: service.amount,
       availableQty: 999, // Services have unlimited availability
       isService: true,
@@ -615,9 +602,11 @@ export default function POSPage() {
 
   // ============ CALCULATIONS ============
 
-  const subtotal = cart.reduce((sum, item) => sum + item.amount, 0);
-  const totalDiscount = cart.reduce((sum, item) => sum + item.discount, 0);
-  const total = subtotal + transportCost;
+  // ============ CALCULATIONS ============
+
+  const subtotal = useMemo(() => totaledCart.reduce((sum, item) => sum + item.amount, 0), [totaledCart]);
+  const totalDiscount = useMemo(() => totaledCart.reduce((sum, item) => sum + item.discount, 0), [totaledCart]);
+  const total = useMemo(() => subtotal + transportCost, [subtotal, transportCost]);
 
   // Installment amount (ceil to 2 decimals so collected amount is not less than required per installment)
   const installmentAmount = useMemo(() => {
@@ -717,7 +706,7 @@ export default function POSPage() {
       }
 
       // VAT is inclusive in product prices; do not add extra tax in POS
-      const itemsWithTax = cart.map((item) => ({ item, taxAmount: 0 }));
+      const itemsWithTax = totaledCart.map((item) => ({ item, taxAmount: 0 }));
 
       // Create order payload
       const orderPayload = {
@@ -800,15 +789,6 @@ export default function POSPage() {
         discount_amount: totalDiscount,
         shipping_amount: transportCost,
 
-        // ✅ Put customer address into shipping_address so receipts print it with customer info
-        ...(address
-          ? {
-            shipping_address: {
-              address,
-            },
-          }
-          : {}),
-
         // ✅ FIXED: start_date should be undefined instead of null
         ...(isInstallment
           ? {
@@ -820,12 +800,8 @@ export default function POSPage() {
           }
           : {}),
 
-        // ✅ Keep only operational notes here — do not put customer address in notes
-        ...(change > 0
-          ? {
-            notes: `Change Given: ৳${change.toFixed(2)}`.trim(),
-          }
-          : {}),
+        // ✅ Add notes (customer address only, no auto-generated change note)
+        notes: address || "",
       };
 
       console.log('═══════════════════════════════════');
@@ -926,19 +902,21 @@ export default function POSPage() {
           let adjustedNagadPaid = nagadPaid;
 
           if (change > 0) {
-            // Customer overpaid - reduce cash payment by the change amount
-            adjustedCashPaid = Math.max(0, cashPaid - change);
             console.log(
-              `⚠️ Overpayment detected. Reducing cash from ৳${cashPaid} to ৳${adjustedCashPaid}`
+              `⚠️ Overpayment detected: ৳${change.toFixed(2)}. This amount is not charged to the ledger but shown on receipt.`
             );
+            // We do NOT reduce adjustedCashPaid here for the receipt; 
+            // the receipt should show what the customer actually handed over.
+            // But we DO reduce it for the payment service below to avoid over-charging the ledger.
+            adjustedCashPaid = Math.max(0, cashPaid - change);
           }
 
-          // Save exact split for receipt printing
+          // Save exact split for receipt printing (actual amounts handed by customer)
           receiptPaymentBreakdown = {
-            cash: adjustedCashPaid,
-            card: adjustedCardPaid,
-            bkash: adjustedBkashPaid,
-            nagad: adjustedNagadPaid,
+            cash: cashPaid,
+            card: cardPaid,
+            bkash: bkashPaid,
+            nagad: nagadPaid,
           };
 
           if (adjustedCashPaid > 0) {
@@ -1041,8 +1019,9 @@ export default function POSPage() {
                 category: c.serviceCategory ?? c.category,
               }));
 
-            const printableOrderBase = {
+            const printableOrder = {
               ...(fullOrder as any),
+              paid_amount: totalPaid, // Actual total handed by customer
               payment_breakdown: receiptPaymentBreakdown,
               change_amount: change,
               cashPaid: receiptPaymentBreakdown.cash,
@@ -1054,7 +1033,6 @@ export default function POSPage() {
                 : {}),
             };
 
-            const printableOrder = await buildPrintableOrderWithStore(printableOrderBase);
             await printReceipt(printableOrder, undefined, { template: 'pos_receipt' });
             showToast('✅ Receipt printed', 'success');
           } catch (e: any) {
@@ -1138,8 +1116,7 @@ export default function POSPage() {
         showToast('QZ Tray offline - opening receipt preview (Print → Save as PDF)', 'error');
       }
       const fullOrder = await orderService.getById(lastCompletedOrderId);
-      const printableOrder = await buildPrintableOrderWithStore(fullOrder);
-      await printReceipt(printableOrder, undefined, { template: 'pos_receipt' });
+      await printReceipt(fullOrder, undefined, { template: 'pos_receipt' });
       showToast('✅ Receipt printed', 'success');
     } catch (e: any) {
       console.error('❌ Receipt print failed:', e);
@@ -1755,8 +1732,13 @@ export default function POSPage() {
                             value={discountPercent === 0 ? '' : discountPercent}
                             placeholder="0"
                             onChange={(e) => {
-                              setDiscountPercent(e.target.value === '' ? 0 : Number(e.target.value));
-                              setDiscountAmount(0);
+                              const val = e.target.value === '' ? 0 : Number(e.target.value);
+                              setDiscountPercent(val);
+                              // Mutually exclusive clear with debounce
+                              if (manualFormDebounceTimer.current) clearTimeout(manualFormDebounceTimer.current);
+                              manualFormDebounceTimer.current = setTimeout(() => {
+                                if (val > 0) setDiscountAmount(0);
+                              }, 300);
                             }}
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                           />
@@ -1771,8 +1753,13 @@ export default function POSPage() {
                             value={discountAmount === 0 ? '' : discountAmount}
                             placeholder="0"
                             onChange={(e) => {
-                              setDiscountAmount(e.target.value === '' ? 0 : Number(e.target.value));
-                              setDiscountPercent(0);
+                              const val = e.target.value === '' ? 0 : Number(e.target.value);
+                              setDiscountAmount(val);
+                              // Mutually exclusive clear with debounce
+                              if (manualFormDebounceTimer.current) clearTimeout(manualFormDebounceTimer.current);
+                              manualFormDebounceTimer.current = setTimeout(() => {
+                                if (val > 0) setDiscountPercent(0);
+                              }, 300);
                             }}
                             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                           />
@@ -1931,7 +1918,7 @@ export default function POSPage() {
                   {/* Service selector hidden in frontend as requested */}
                   {/* Cart Table */}
                   <CartTable
-                    items={cart}
+                    items={totaledCart}
                     onRemoveItem={removeFromCart}
                     onUpdateQuantity={updateCartItemQuantity}
                     onUpdateDiscount={updateCartItemDiscount}

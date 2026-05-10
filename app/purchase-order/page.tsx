@@ -189,6 +189,13 @@ export default function PurchaseOrdersPage() {
   const [selectedPO, setSelectedPO] = useState<PurchaseOrder | null>(null);
   const [expandedPO, setExpandedPO] = useState<number | null>(null);
 
+  // Delete PO State
+  const [showDeleteConfirmModal, setShowDeleteConfirmModal] = useState(false);
+  const [poToDelete, setPoToDelete] = useState<PurchaseOrder | null>(null);
+  const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deletePassword, setDeletePassword] = useState('');
+
   // ✅ Barcode Center (Print ALL unit-level barcodes for a PO)
   const poBarcodeSources: BatchBarcodeSource[] = useMemo(() => {
     const items = (selectedPO?.items ?? []) as any[];
@@ -298,6 +305,29 @@ export default function PurchaseOrdersPage() {
     new_items: [],
   });
 
+  const computedTotals = useMemo(() => {
+    const parse = (v: any) => parseFloat(v) || 0;
+    
+    // Sum existing items
+    const itemsSubtotal = editForm.items.reduce((sum, it) => 
+      sum + (parse(it.unit_cost) * parse(it.quantity_ordered)), 0);
+    
+    // Sum new items
+    const newItemsSubtotal = editForm.new_items.reduce((sum, it) => 
+      sum + (parse(it.unit_cost) * parse(it.quantity_ordered)), 0);
+    
+    const subtotal = itemsSubtotal + newItemsSubtotal;
+    const tax = parse(editForm.tax_amount);
+    const discount = parse(editForm.discount_amount);
+    const shipping = parse(editForm.shipping_cost);
+    
+    // Note: In our system, item-level tax/discount are not editable in this UI,
+    // so we only account for PO-level adjustments here.
+    const total = subtotal + tax + shipping - discount;
+    
+    return { subtotal, total };
+  }, [editForm]);
+
   const [editBulkQty, setEditBulkQty] = useState('');
   const [editBulkCost, setEditBulkCost] = useState('');
   const [editBulkSell, setEditBulkSell] = useState('');
@@ -338,13 +368,7 @@ export default function PurchaseOrdersPage() {
   const [editProductSearch, setEditProductSearch] = useState('');
   const [expandedSkuGroups, setExpandedSkuGroups] = useState<Set<string>>(new Set());
 
-  const [editOriginal, setEditOriginal] = useState<{
-    tax_amount: number;
-    discount_amount: number;
-    shipping_cost: number;
-    notes: string;
-    items: Record<number, { quantity_ordered: number; unit_cost: number; unit_sell_price: number }>;
-  } | null>(null);
+
 
 
   useEffect(() => {
@@ -535,6 +559,27 @@ export default function PurchaseOrdersPage() {
     }
   };
 
+  const handleDeletePO = async () => {
+    if (!poToDelete || !deletePassword) return;
+
+    try {
+      setLoading(true);
+      await purchaseOrderService.delete(poToDelete.id, deletePassword);
+      showAlert('success', 'Purchase order permanently deleted');
+      setShowDeleteConfirmModal(false);
+      setPoToDelete(null);
+      setDeleteStep(1);
+      setDeleteConfirmText('');
+      setDeletePassword('');
+      loadPurchaseOrders();
+    } catch (error: any) {
+      console.error('Failed to delete PO:', error);
+      showAlert('error', error?.response?.data?.message || 'Failed to delete purchase order');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const openReceiveModal = async (po: PurchaseOrder) => {
     try {
       setLoading(true);
@@ -601,14 +646,6 @@ export default function PurchaseOrdersPage() {
         new_items: [],
       });
 
-      setEditOriginal({
-        tax_amount: Number((fullPO as any).tax_amount ?? 0),
-        discount_amount: Number((fullPO as any).discount_amount ?? 0),
-        shipping_cost: Number((fullPO as any).shipping_cost ?? 0),
-        notes: String((fullPO as any).notes ?? ''),
-        items: originalItems,
-      });
-
       setEditProductSearch('');
       setEditProductResults([]);
       setExpandedSkuGroups(new Set());
@@ -628,67 +665,41 @@ export default function PurchaseOrdersPage() {
 
   const handleSaveEditPO = async () => {
     if (!editPO) return;
-
+    setLoading(true);
     try {
-      setLoading(true);
+      const payload = {
+        tax_amount: parseFloat(editForm.tax_amount) || 0,
+        discount_amount: parseFloat(editForm.discount_amount) || 0,
+        shipping_cost: parseFloat(editForm.shipping_cost) || 0,
+        notes: editForm.notes,
+        terms_and_conditions: editForm.terms_and_conditions,
+        items: editForm.items.map(it => ({
+          id: it.id,
+          quantity_ordered: parseInt(it.quantity_ordered as any) || 0,
+          unit_cost: parseFloat(it.unit_cost as any) || 0,
+          unit_sell_price: parseFloat(it.unit_sell_price as any) || 0,
+        })),
+        new_items: (editForm.new_items || []).map(it => ({
+          product_id: it.product_id,
+          quantity_ordered: parseInt(it.quantity_ordered as any) || 0,
+          unit_cost: parseFloat(it.unit_cost as any) || 0,
+          unit_sell_price: parseFloat(it.unit_sell_price as any) || 0,
+        }))
+      };
 
-      const tax = parseFloat(editForm.tax_amount || '0') || 0;
-      const discount = parseFloat(editForm.discount_amount || '0') || 0;
-      const shipping = parseFloat(editForm.shipping_cost || '0') || 0;
-      const notes = String(editForm.notes || '');
-
-      await purchaseOrderService.update(editPO.id, {
-        tax_amount: tax,
-        discount_amount: discount,
-        shipping_cost: shipping,
-        notes,
-      });
-
-      if (editOriginal) {
-        for (const it of editForm.items) {
-          const qty = parseInt(it.quantity_ordered || '0', 10) || 0;
-          const cost = parseFloat(it.unit_cost || '0') || 0;
-          const sell = parseFloat(it.unit_sell_price || '0') || 0;
-          const orig = editOriginal.items[it.id];
-
-          if (!orig || orig.quantity_ordered !== qty || Number(orig.unit_cost) !== cost || Number(orig.unit_sell_price) !== sell) {
-            await purchaseOrderService.updateItem(editPO.id, it.id, {
-              quantity_ordered: qty,
-              unit_cost: cost,
-              unit_sell_price: sell,
-            });
-          }
-        }
+      const res = await purchaseOrderService.bulkUpdate(editPO.id, payload);
+      
+      if (res.success) {
+        showAlert('success', 'Purchase order updated successfully');
+        setShowEditModal(false);
+        setEditPO(null);
+        await loadPurchaseOrders();
+      } else {
+        showAlert('error', res.message || 'Failed to update purchase order');
       }
-
-      // Add any newly appended products
-      if (Array.isArray(editForm.new_items) && editForm.new_items.length > 0) {
-        for (const ni of editForm.new_items) {
-          const pid = Number(ni.product_id);
-          if (!pid) continue;
-
-          const qty = parseInt(ni.quantity_ordered || '0', 10) || 0;
-          if (qty <= 0) continue;
-
-          const cost = parseFloat(ni.unit_cost || '0') || 0;
-          const sell = parseFloat(ni.unit_sell_price || '0') || 0;
-
-          await purchaseOrderService.addItem(editPO.id, {
-            product_id: pid,
-            quantity_ordered: qty,
-            unit_cost: cost,
-            unit_sell_price: sell,
-          });
-        }
-      }
-
-      showAlert('success', 'Purchase order updated successfully');
-      setShowEditModal(false);
-      setEditPO(null);
-      await loadPurchaseOrders();
     } catch (error: any) {
       console.error('Error updating PO:', error);
-      showAlert('error', error?.response?.data?.message || 'Failed to update purchase order');
+      showAlert('error', error.response?.data?.message || 'Failed to update purchase order');
     } finally {
       setLoading(false);
     }
@@ -1069,6 +1080,22 @@ export default function PurchaseOrdersPage() {
                             Cancel
                           </button>
                         )}
+
+                        {po.payment_status === 'unpaid' && (
+                          <AccessControl roles={['super-admin', 'admin']}>
+                            <button
+                              onClick={() => {
+                                setPoToDelete(po);
+                                setShowDeleteConfirmModal(true);
+                              }}
+                              className="flex items-center gap-1 px-3 py-2 text-sm border border-red-600 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                              title="Delete PO"
+                            >
+                              <X className="w-4 h-4" />
+                              Delete
+                            </button>
+                          </AccessControl>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1171,8 +1198,8 @@ export default function PurchaseOrdersPage() {
                                   </td>
                                 </AccessControl>
                                 <AccessControl roles={['super-admin', 'admin']}>
-                                  <td className="px-4 py-2 text-right font-medium text-gray-900 dark:text-gray-100">
-                                    ৳{formatCurrency((item.quantity_ordered || 0) * (item.unit_cost || 0))}
+                                    <td className="px-4 py-2 text-right font-medium text-gray-900 dark:text-gray-100">
+                                    ৳{formatCurrency(item.total_cost ?? (Number(item.quantity_ordered || 0) * Number(item.unit_cost || 0)))}
                                   </td>
                                 </AccessControl>
                               </tr>
@@ -1227,6 +1254,96 @@ export default function PurchaseOrdersPage() {
           )}
         </main>
       </div>
+
+      {/* Delete PO Modal */}
+      <Modal
+        isOpen={showDeleteConfirmModal}
+        onClose={() => {
+          setShowDeleteConfirmModal(false);
+          setPoToDelete(null);
+          setDeleteStep(1);
+          setDeleteConfirmText('');
+          setDeletePassword('');
+        }}
+        title="Delete Purchase Order"
+        size="md"
+      >
+        <div className="space-y-4">
+          {deleteStep === 1 ? (
+            <>
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                Are you sure you want to delete this purchase order? This will permanently delete all associated batches and barcodes, and update inventory.
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Type "yes" to confirm
+                </label>
+                <input
+                  type="text"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  placeholder="yes"
+                />
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <button
+                  onClick={() => setShowDeleteConfirmModal(false)}
+                  className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 rounded-md"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    if (deleteConfirmText.toLowerCase() === 'yes') {
+                      setDeleteStep(2);
+                    } else {
+                      showAlert('error', 'Please type "yes" to confirm');
+                    }
+                  }}
+                  disabled={deleteConfirmText.toLowerCase() !== 'yes'}
+                  className="px-4 py-2 text-sm text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-md"
+                >
+                  Next
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-gray-700 dark:text-gray-300">
+                Please enter your account password to authorize this deletion.
+              </p>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Password
+                </label>
+                <input
+                  type="password"
+                  value={deletePassword}
+                  onChange={(e) => setDeletePassword(e.target.value)}
+                  className="w-full px-3 py-2 border rounded-md dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                />
+              </div>
+              <div className="flex justify-end gap-2 mt-4">
+                <button
+                  onClick={() => setDeleteStep(1)}
+                  className="px-4 py-2 text-sm text-gray-700 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300 rounded-md"
+                >
+                  Back
+                </button>
+                <button
+                  onClick={handleDeletePO}
+                  disabled={!deletePassword || loading}
+                  className="px-4 py-2 text-sm text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-md flex items-center gap-2"
+                >
+                  {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+                  Confirm Deletion
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
 
       {/* View Modal */}
       <Modal
@@ -1386,7 +1503,7 @@ export default function PurchaseOrdersPage() {
                   <div className="flex justify-between text-xl font-semibold">
                     <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
                     <span className="text-gray-900 dark:text-gray-100">
-                      ৳{formatCurrency(selectedPO.subtotal_amount)}
+                      ৳{formatCurrency(selectedPO.subtotal)}
                     </span>
                   </div>
                   <div className="flex justify-between text-xl font-semibold">
@@ -1850,6 +1967,19 @@ export default function PurchaseOrdersPage() {
                       ))}
                     </tbody>
                   </table>
+                </div>
+
+                <div className="p-4 bg-gray-50 dark:bg-gray-700/30 border-t border-gray-200 dark:border-gray-700">
+                  <div className="flex flex-col items-end gap-2 pr-12">
+                    <div className="flex gap-10 text-sm">
+                      <span className="text-gray-500 dark:text-gray-400">Subtotal:</span>
+                      <span className="font-semibold text-gray-900 dark:text-white">৳{formatCurrency(computedTotals.subtotal)}</span>
+                    </div>
+                    <div className="flex gap-10 text-lg font-bold">
+                      <span className="text-gray-700 dark:text-gray-200">Total Amount:</span>
+                      <span className="text-purple-600 dark:text-purple-400">৳{formatCurrency(computedTotals.total)}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

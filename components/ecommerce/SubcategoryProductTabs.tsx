@@ -51,6 +51,10 @@ interface SubcategoryProductTabsProps {
   subtitle?: string;
   /** If parent category isn't found, hide the whole section instead of falling back to random leaves. */
   hideIfNotFound?: boolean;
+  /** Explicit exact parent category ID (bypasses parentQueries) */
+  categoryId?: number;
+  /** Explicit subcategory IDs in desired order (bypasses auto-finding leaves) */
+  subcategoryIds?: number[];
 }
 
 
@@ -62,6 +66,8 @@ const SubcategoryProductTabs: React.FC<SubcategoryProductTabsProps> = ({
   title,
   subtitle,
   hideIfNotFound = true,
+  categoryId,
+  subcategoryIds,
 }) => {
   const router = useRouter();
   const { addToCart } = useCart();
@@ -125,29 +131,34 @@ const SubcategoryProductTabs: React.FC<SubcategoryProductTabsProps> = ({
 
         /**
          * "Shop by Subcategory" section:
-         * - Find a parent category by slug/name (parentQueries)
-         * - Show ALL subcategories under that parent
-         * - Top 3 (by product_count) appear as image banner cards
-         * - The rest appear as pill/capsule tabs
+         * - If categoryId is provided, use it. Otherwise, find by parentQueries.
+         * - If subcategoryIds are provided, strictly use them in that order.
+         * - Otherwise, auto-find leaves and sort by product_count.
          */
-        const parent = findParentNode(flat, parentQueries);
+        const parent = categoryId ? flat.find(c => Number(c.id) === Number(categoryId)) || null : findParentNode(flat, parentQueries);
+        
         if (alive) {
           setParentLabel(parent?.name || '');
           setParentNode(parent);
         }
+        
         let selected: CatalogCategory[] = [];
 
         if (parent) {
-          if (parent.children?.length) {
+          if (subcategoryIds && subcategoryIds.length > 0) {
+            // Strictly use provided subcategory IDs in the exact order they were provided
+            selected = subcategoryIds
+              .map(id => flat.find(c => Number(c.id) === Number(id)))
+              .filter(Boolean) as CatalogCategory[];
+          } else if (parent.children?.length) {
             const descendants = flattenAll(parent.children);
             let leaves = descendants.filter(c => c.name && !c.children?.length);
             if (!leaves.length) leaves = descendants.filter(c => c.name);
             selected = uniqById(leaves);
+            selected.sort((a, b) => Number(b.product_count || 0) - Number(a.product_count || 0));
           } else {
             selected = [parent];
           }
-
-          selected.sort((a, b) => Number(b.product_count || 0) - Number(a.product_count || 0));
         }
 
         if (!selected.length && !hideIfNotFound) {
@@ -315,7 +326,7 @@ const SubcategoryProductTabs: React.FC<SubcategoryProductTabsProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', marginBottom: '24px' }}>
           <div style={{ height: '1px', flex: 1, maxWidth: '80px', background: '#111111' }} />
           <h2 style={{
-            fontFamily: "'Jost', sans-serif",
+            fontFamily: "'Poppins', sans-serif",
             fontSize: '18px',
             fontWeight: 800,
             textTransform: 'uppercase',
@@ -340,7 +351,7 @@ const SubcategoryProductTabs: React.FC<SubcategoryProductTabsProps> = ({
                 ref={el => { tabRefs.current[cat.id] = el; }}
                 onClick={() => setActiveId(cat.id)}
                 style={{
-                  fontFamily: "'Jost', sans-serif",
+                  fontFamily: "'Poppins', sans-serif",
                   fontSize: '12px',
                   fontWeight: 700,
                   textTransform: 'uppercase',
@@ -408,7 +419,7 @@ const SubcategoryProductTabs: React.FC<SubcategoryProductTabsProps> = ({
                 borderRadius: '4px',
                 fontSize: '12px',
                 fontWeight: 700,
-                fontFamily: "'Jost', sans-serif",
+                fontFamily: "'Poppins', sans-serif",
                 textTransform: 'uppercase',
                 letterSpacing: '0.10em',
                 cursor: 'pointer',

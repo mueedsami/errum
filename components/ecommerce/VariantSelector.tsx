@@ -12,53 +12,16 @@ interface VariantSelectorProps {
 }
 
 const formatVariantLabelForCard = (v: ProductVariant) => {
-  // Use variation_suffix as the primary source of truth as it's more stable
+  // Use variation_suffix as the primary source of truth
   let source = v.variation_suffix || v.name || '';
 
-  // Basic cleanup: remove brackets and leading/trailing dashes
-  let clean = source.replace(/^\[|\]$/g, '').trim();
-  while (clean.startsWith('-')) clean = clean.substring(1);
-  while (clean.endsWith('-')) clean = clean.substring(0, clean.length - 1);
-
-  const parts = clean.split(/[-/]/).map(p => p.trim()).filter(p => {
-    const lp = p.toLowerCase();
-    return lp !== 'na' && lp !== 'not applicable' && lp !== 'none' && lp !== '';
-  });
-
-  // Specific conversion for "US X / EU Y" patterns
-  // Pattern: detects "us" followed by a number, and another numeric part for EU
-  let usIndex = -1;
-  let usVal = '';
-  let euVal = '';
-
-  for (let i = 0; i < parts.length; i++) {
-    const low = parts[i].toLowerCase();
-    if (low === 'us' && i + 1 < parts.length && !isNaN(Number(parts[i + 1]))) {
-      usIndex = i;
-      usVal = parts[i + 1];
-      break;
-    }
+  // Strip only leading dashes as requested
+  let clean = source.trim();
+  while (clean.startsWith('-')) {
+    clean = clean.substring(1).trim();
   }
-
-  if (usIndex !== -1) {
-    // We found a US size value. Look for another numeric part to assume as EU
-    for (let i = 0; i < parts.length; i++) {
-      if (i !== usIndex && i !== (usIndex + 1) && !isNaN(Number(parts[i]))) {
-        euVal = parts[i];
-        break;
-      }
-    }
-
-    if (usVal && euVal) {
-      // Reconstruct the remaining parts (e.g. Color)
-      const others = parts.filter((_, i) => i !== usIndex && i !== (usIndex + 1) && parts[i] !== euVal);
-      const sizeStr = `US ${usVal} / EU ${euVal}`;
-      return others.length > 0 ? `${sizeStr} - ${others.join(' - ')}` : sizeStr;
-    }
-  }
-
-  // Fallback: standard hyphenation for other patterns
-  return parts.join(' - ') || 'Standard';
+  
+  return clean || 'Standard';
 };
 
 const VariantSelector: React.FC<VariantSelectorProps> = ({
@@ -66,16 +29,23 @@ const VariantSelector: React.FC<VariantSelectorProps> = ({
   selectedVariant,
   onVariantChange,
 }) => {
+  const activeLabel = formatVariantLabelForCard(selectedVariant);
+  
+  // Check if variants are primarily numeric sizes to adjust label
+  const isSizeSet = variants.some(v => {
+    const l = formatVariantLabelForCard(v).toLowerCase();
+    return /\d/.test(l) || l.includes('us') || l.includes('eu') || l.includes('uk');
+  });
+
   return (
-    <div className="space-y-6">
-      <div className="space-y-4">
-        <div className="flex justify-between items-baseline mb-4">
-          <p className="text-[11px] font-bold tracking-[0.2em] uppercase text-[var(--text-muted)]"
-            style={{ fontFamily: "'DM Mono', monospace" }}>
-            Select Option
-          </p>
-          <span className="text-[10px] font-medium text-[var(--text-muted)] bg-[var(--bg-surface)] px-2.5 py-1 rounded-[var(--radius-sm)]">
-            {variants.length} variations
+    <div className="space-y-4">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center gap-2 mb-1">
+          <span className="text-[10px] font-bold tracking-widest text-gray-900 uppercase">
+            {isSizeSet ? 'Select Size' : 'Select Option'}:
+          </span>
+          <span className="text-[10px] font-semibold text-[#b83228] uppercase tracking-wider">
+            {activeLabel}
           </span>
         </div>
 
@@ -84,25 +54,27 @@ const VariantSelector: React.FC<VariantSelectorProps> = ({
             const isSelected = selectedVariant.id === v.id;
             const isAvailable = v.in_stock && (v.available_inventory ?? 0) > 0;
             const label = formatVariantLabelForCard(v);
+            
+            // Show full label as requested, no more stripping
+            const displayLabel = label;
 
             return (
               <button
                 key={v.id}
                 onClick={() => onVariantChange(v)}
-                className={`min-h-[44px] min-w-[70px] px-5 rounded-xl text-xs font-bold transition-all border flex items-center justify-center relative overflow-hidden ${
+                className={`group relative flex items-center justify-center h-11 min-w-[44px] px-4 rounded-lg border text-[11px] font-bold uppercase tracking-wider transition-all duration-300 active:scale-95 whitespace-nowrap flex-shrink-0 ${
                   isSelected
-                    ? 'bg-[var(--cyan-pale)] border-[var(--cyan)] text-[var(--cyan)] shadow-[0_4px_12px_rgba(34,211,238,0.1)] z-10'
+                    ? 'bg-black border-black text-white shadow-md'
                     : isAvailable
-                      ? 'bg-[var(--bg-surface-2)] border-[var(--border-default)] text-[var(--text-primary)] hover:border-[var(--cyan)] hover:text-[var(--cyan)]'
-                      : 'bg-[var(--bg-surface)] border-[var(--border-default)] text-[var(--text-muted)] opacity-35 cursor-not-allowed'
+                      ? 'bg-white border-gray-200 text-gray-900 hover:border-black'
+                      : 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
                 }`}
-                style={{ fontFamily: "'Jost', sans-serif" }}
               >
-                <span className="relative z-20 whitespace-nowrap">{label}</span>
-
+                <span className="relative z-10">{displayLabel}</span>
+                
                 {!isAvailable && (
-                  <div className="absolute inset-0 pointer-events-none overflow-hidden">
-                    <div className="absolute top-1/2 left-0 w-[150%] h-[1px] bg-[var(--text-muted)] -rotate-45 -translate-x-1/4" />
+                  <div className="absolute inset-0 flex items-center justify-center overflow-hidden pointer-events-none opacity-50">
+                    <div className="w-[150%] h-[1px] bg-current -rotate-45" />
                   </div>
                 )}
               </button>

@@ -82,9 +82,7 @@ interface PurchaseHistoryOrder {
 interface Store {
   id: number;
   name: string;
-  location?: string;
-  address?: string;
-  phone?: string;
+  location: string;
 }
 
 export default function PurchaseHistoryPage() {
@@ -106,27 +104,34 @@ export default function PurchaseHistoryPage() {
   const [userStoreId, setUserStoreId] = useState<string>('');
   const [activeMenu, setActiveMenu] = useState<number | null>(null);
   const [menuPosition, setMenuPosition] = useState<{ top: number; left: number } | null>(null);
-  
+
   // Modal states
   const [showReturnModal, setShowReturnModal] = useState(false);
   const [showExchangeModal, setShowExchangeModal] = useState(false);
   const [selectedOrderForAction, setSelectedOrderForAction] = useState<any | null>(null);
 
+  // Initialize roles and initial store selection
   useEffect(() => {
+    if (!user) return;
+
     const roleSlug = user?.role?.slug || '';
-    const storeId = scopedStoreId ? String(scopedStoreId) : (user?.store_id || '');
     setUserRole(roleSlug);
+
+    const storeId = scopedStoreId ? String(scopedStoreId) : (user?.store_id || '');
     setUserStoreId(storeId);
 
-    if (storeId && (roleSlug === 'branch-manager' || !canSelectStore)) {
-      if (selectedStore === '') {
-        setSelectedStore(storeId);
-      }
+    // Auto-select store if scoped (security requirement)
+    if (scopedStoreId) {
+      setSelectedStore(String(scopedStoreId));
     }
 
-    fetchOrders();
     fetchStores();
-  }, [user?.id, scopedStoreId, selectedStore]);
+  }, [user?.id, scopedStoreId]);
+
+  // Fetch orders when relevant filters change
+  useEffect(() => {
+    fetchOrders();
+  }, [selectedStore, startDate, endDate, searchTerm]);
 
   const fetchOrders = async () => {
     try {
@@ -135,17 +140,22 @@ export default function PurchaseHistoryPage() {
         order_type: 'counter',
         per_page: 50,
       };
-      // Enforce store scoping for branch/store roles
+
+      // Security: Always prioritize scopedStoreId (enforced for non-admins)
       if (scopedStoreId) {
         filters.store_id = scopedStoreId;
       } else if (selectedStore) {
-        // Admins can optionally filter by store from the dropdown
+        // Admins can filter by any store from the dropdown
         filters.store_id = Number(selectedStore);
       }
-      
+
+      if (searchTerm) filters.search = searchTerm;
+      if (startDate) filters.date_from = startDate;
+      if (endDate) filters.date_to = endDate;
+
       const result = await orderService.getAll(filters);
       setOrders(result.data);
-      
+
     } catch (error) {
       console.error('❌ Failed to fetch orders:', error);
       setOrders([]);
@@ -156,43 +166,35 @@ export default function PurchaseHistoryPage() {
 
   const fetchStores = async () => {
     try {
-      // If store-scoped, only show user's assigned store in dropdown.
-      if (scopedStoreId) {
-        try {
-          const res: any = await storeService.getStore(Number(scopedStoreId));
-          const storeObj = res?.data ?? res;
-          if (storeObj) {
-            setStores([
-              {
-                id: storeObj.id,
-                name: storeObj.name,
-                location: storeObj.address || storeObj.location || '',
-              },
-            ]);
-            return;
-          }
-        } catch {
-          // fallback below
+      // If store-scoped/restricted, only fetch user's assigned store details
+      if (!canSelectStore && (scopedStoreId || user?.store_id)) {
+        const targetId = scopedStoreId || user?.store_id;
+        const res: any = await storeService.getStore(Number(targetId));
+        const storeObj = res?.success && res.data ? res.data : (res?.data ?? res);
+        
+        if (storeObj) {
+          setStores([
+            {
+              id: storeObj.id,
+              name: storeObj.name,
+              location: storeObj.address || storeObj.location || '',
+            },
+          ]);
+          return;
         }
       }
 
-      // If user can't select stores, don't show any store dropdown options.
-      if (!canSelectStore) {
+      // If user has multi-store access (admin/moderator), fetch all stores for dropdown
+      if (canSelectStore) {
+        const storesData = await storeService.getAllStores();
+        setStores(storesData.map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          location: s.address || s.location || '',
+        })));
+      } else {
         setStores([]);
-        return;
       }
-
-      const response = await axiosInstance.get('/stores');
-      const result = response.data;
-
-      let storesData: Store[] = [];
-      if (result?.success && Array.isArray(result.data)) {
-        storesData = result.data;
-      } else if (Array.isArray(result)) {
-        storesData = result;
-      }
-
-      setStores(storesData);
     } catch (error) {
       console.error('Failed to fetch stores:', error);
       setStores([]);
@@ -207,14 +209,14 @@ export default function PurchaseHistoryPage() {
 
     setExpandedOrder(orderId);
     const order = orders.find(o => o.id === orderId);
-    
+
     if (order?.items && order.items.length > 0) {
       return;
     }
 
     setLoadingDetails(orderId);
     setErrorDetails(prev => ({ ...prev, [orderId]: '' }));
-    
+
     try {
       const fullOrder = await orderService.getById(orderId);
       setOrders(orders.map(o => o.id === orderId ? fullOrder : o));
@@ -228,7 +230,7 @@ export default function PurchaseHistoryPage() {
 
   const handleDelete = async (orderId: number) => {
     if (!confirm('Are you sure you want to delete this order?')) return;
-    
+
     try {
       await orderService.cancel(orderId, 'Deleted by user');
       setOrders(orders.filter(o => o.id !== orderId));
@@ -240,7 +242,7 @@ export default function PurchaseHistoryPage() {
 
   const handleReturn = async (order: PurchaseHistoryOrder) => {
     setActiveMenu(null);
-    
+
     if (!order.items || order.items.length === 0) {
       try {
         const fullOrder = await orderService.getById(order.id);
@@ -253,13 +255,13 @@ export default function PurchaseHistoryPage() {
     } else {
       setSelectedOrderForAction(order);
     }
-    
+
     setShowReturnModal(true);
   };
 
   const handleExchange = async (order: PurchaseHistoryOrder) => {
     setActiveMenu(null);
-    
+
     if (!order.items || order.items.length === 0) {
       try {
         const fullOrder = await orderService.getById(order.id);
@@ -272,58 +274,8 @@ export default function PurchaseHistoryPage() {
     } else {
       setSelectedOrderForAction(order);
     }
-    
+
     setShowExchangeModal(true);
-  };
-
-  const buildPrintableOrderWithStore = async (order: any) => {
-    const storeId = Number(order?.store?.id || order?.store_id || selectedStore || scopedStoreId || 0);
-
-    let storeDetails: any = stores.find((s) => Number(s.id) === storeId);
-
-    if ((!storeDetails?.address || !storeDetails?.phone) && storeId) {
-      try {
-        const res: any = await storeService.getStore(storeId);
-        storeDetails = res?.data ?? res ?? storeDetails;
-      } catch (err) {
-        console.warn('Failed to fetch full store details for receipt:', err);
-      }
-    }
-
-    return {
-      ...order,
-      store: {
-        ...(typeof order?.store === 'object' ? order.store : {}),
-        id: storeId || order?.store?.id,
-        name:
-          order?.store?.name ||
-          order?.store_name ||
-          storeDetails?.name ||
-          '',
-        address:
-          order?.store?.address ||
-          order?.store_address ||
-          storeDetails?.address ||
-          storeDetails?.location ||
-          '',
-        phone:
-          order?.store?.phone ||
-          order?.store_phone ||
-          storeDetails?.phone ||
-          '',
-      },
-      store_address:
-        order?.store_address ||
-        order?.store?.address ||
-        storeDetails?.address ||
-        storeDetails?.location ||
-        '',
-      store_phone:
-        order?.store_phone ||
-        order?.store?.phone ||
-        storeDetails?.phone ||
-        '',
-    };
   };
 
   const handlePrint = async (order: PurchaseHistoryOrder) => {
@@ -336,9 +288,8 @@ export default function PurchaseHistoryPage() {
       }
 
       const fullOrder = await orderService.getById(order.id);
-      const printableOrder = await buildPrintableOrderWithStore(fullOrder);
-      await printReceipt(printableOrder, undefined, { template: 'pos_receipt' });
-      alert(`✅ Receipt printed for order #${printableOrder.order_number || printableOrder.id}`);
+      await printReceipt(fullOrder, undefined, { template: 'pos_receipt' });
+      alert(`✅ Receipt printed for order #${fullOrder.order_number || fullOrder.id}`);
     } catch (error: any) {
       console.error('Print receipt error:', error);
       alert(`Failed to print receipt: ${error?.message || 'Unknown error'}`);
@@ -346,8 +297,8 @@ export default function PurchaseHistoryPage() {
   };
 
   const handleReturnSubmit = async (returnData: {
-    selectedProducts: Array<{ 
-      order_item_id: number; 
+    selectedProducts: Array<{
+      order_item_id: number;
       quantity: number;
       product_barcode_id?: number;
     }>;
@@ -431,7 +382,7 @@ export default function PurchaseHistoryPage() {
 
       console.log('🔄 Refreshing order list...');
       await fetchOrders();
-      
+
       alert('✅ Return processed successfully!');
       setShowReturnModal(false);
       setSelectedOrderForAction(null);
@@ -490,7 +441,7 @@ export default function PurchaseHistoryPage() {
       console.log(`✅ Return created: #${returnNumber} (ID: ${returnId})`);
 
       console.log('\n⚙️ STEP 2: Auto-approving and processing return...');
-      
+
       await productReturnService.update(returnId, {
         quality_check_passed: true,
         quality_check_notes: 'Exchange - Auto-approved via POS',
@@ -524,22 +475,14 @@ export default function PurchaseHistoryPage() {
 
       await refundService.process(refundId);
       console.log('✅ Refund processed');
-      
+
       await refundService.complete(refundId, {
         transaction_reference: `EXCHANGE-REFUND-${Date.now()}`,
       });
       console.log('✅ Refund completed - Customer has full refund amount');
 
       console.log('\n🛒 STEP 4: Creating new order for replacement products...');
-      
-      const newOrderTotal = exchangeData.replacementProducts.reduce(
-        (sum, p) => sum + (p.unit_price * p.quantity), 
-        0
-      );
-      console.log(`New order total: ৳${newOrderTotal.toLocaleString()}`);
 
-      // ✅ Per guidelines: New order payment = full new order amount
-      // Customer has full refund, uses it to "pay" for new items
       const newOrderData = {
         order_type: 'counter' as const,
         store_id: selectedOrderForAction.store.id,
@@ -552,28 +495,50 @@ export default function PurchaseHistoryPage() {
           barcode: p.barcode,
           barcode_id: p.barcode_id,
         })),
-        payment: {
-          payment_method_id: 1, // Cash
-          amount: newOrderTotal, // Full amount of new items
-          payment_type: 'full' as const,
-        },
         notes: `Exchange from order #${selectedOrderForAction.order_number} | Return: #${returnNumber}`,
       };
 
-      console.log(`📝 Order includes payment: ৳${newOrderTotal.toLocaleString()} (customer "pays" with refund)`);
-      console.log('Creating new order with data:', newOrderData);
+      console.log('Creating new order (no payment yet)...');
       const newOrder = await orderService.create(newOrderData);
       console.log(`✅ New order created: #${newOrder.order_number} (ID: ${newOrder.id})`);
+
+      // STEP 4a: Link the return and the new order for accounting/exchange history
+      console.log('\n🔗 STEP 4a: Linking return to replacement order...');
+      try {
+        await axiosInstance.post(`/returns/${returnId}/exchange`, {
+          new_order_id: newOrder.id,
+          notes: `Automatic link from exchange flow. Original: #${selectedOrderForAction.order_number}`
+        });
+        console.log('✅ Exchange link established');
+      } catch (linkErr) {
+        console.warn('⚠️ Link failed (non-critical):', linkErr);
+      }
+
+      // STEP 4b: Explicitly create + auto-complete the payment so the order is marked "paid"
+      // We use the backend-calculated total_amount to ensure it perfectly covers VAT/taxes.
+      const rawTotal = String(newOrder.total_amount).replace(/[^0-9.]/g, '');
+      const backendTotal = parseFloat(rawTotal) || 0;
+      
+      console.log(`\n💳 STEP 4b: Completing payment of ৳${backendTotal} for order #${newOrder.order_number}...`);
+      await axiosInstance.post(`/orders/${newOrder.id}/payments/simple`, {
+        payment_method_id: 1, // Cash
+        amount: backendTotal,
+        payment_type: 'full',
+        auto_complete: true,
+        notes: `Exchange payment - Original Order: #${selectedOrderForAction.order_number}`,
+      });
+      console.log(`✅ Payment completed for order #${newOrder.order_number} — order is now PAID`);
+
 
       // Log what happens with the money difference
       if (exchangeData.paymentRefund.type === 'payment') {
         console.log(`\n💳 Financial settlement: Customer collects ADDITIONAL ৳${exchangeData.paymentRefund.total.toLocaleString()}`);
-        console.log(`   (New items ৳${newOrderTotal} > Refund received, customer pays extra)`);
+        console.log(`   (New items ৳${backendTotal} > Refund received, customer pays extra)`);
       } else if (exchangeData.paymentRefund.type === 'refund') {
         console.log(`\n💵 Financial settlement: Cashier gives back ৳${exchangeData.paymentRefund.total.toLocaleString()}`);
-        console.log(`   (Refund received > New items ৳${newOrderTotal}, customer gets difference)`);
+        console.log(`   (Refund received > New items ৳${backendTotal}, customer gets difference)`);
       } else {
-        console.log(`\n📊 Financial settlement: Even exchange (Refund = New items ৳${newOrderTotal})`);
+        console.log(`\n📊 Financial settlement: Even exchange (Refund = New items ৳${backendTotal})`);
       }
 
       console.log('\n🏁 STEP 5: Completing new order...');
@@ -582,7 +547,7 @@ export default function PurchaseHistoryPage() {
 
       console.log('\n🔄 STEP 6: Refreshing order list...');
       await fetchOrders();
-      
+
       console.log('\n✅ ========================================');
       console.log('✅ EXCHANGE COMPLETED SUCCESSFULLY!');
       console.log('✅ ========================================');
@@ -590,37 +555,22 @@ export default function PurchaseHistoryPage() {
       console.log(`Return: #${returnNumber}`);
       console.log(`New Order: #${newOrder.order_number}`);
       console.log(`New Order Payment Status: PAID ✅`);
-      
+
       // Build success message based on exchange type
-      const baseMessage = `✅ Exchange processed successfully!\n\n📦 Return: #${returnNumber}\n🛒 New Order: #${newOrder.order_number}\n💰 New Order Status: PAID\n\n`;
-      
-      let financialMessage = '';
-      if (exchangeData.paymentRefund.type === 'payment') {
-        console.log(`Financial: Customer paid additional ৳${exchangeData.paymentRefund.total.toLocaleString()}`);
-        financialMessage = `💳 Customer paid additional:\n   ৳${exchangeData.paymentRefund.total.toLocaleString()}\n\n✅ Payment collected successfully`;
-      } else if (exchangeData.paymentRefund.type === 'refund') {
-        console.log(`Financial: Customer gets back ৳${exchangeData.paymentRefund.total.toLocaleString()}`);
-        financialMessage = `💵 GIVE CUSTOMER:\n   ৳${exchangeData.paymentRefund.total.toLocaleString()}\n\n(Old items cost more than new items)`;
-      } else {
-        console.log(`Financial: Even exchange`);
-        financialMessage = `📊 Even exchange\nNo additional payment needed`;
-      }
-      
       console.log('✅ ========================================\n');
-      
-      alert(baseMessage + financialMessage);
-      
+
+
       console.log('\n✅ ========================================');
       console.log('✅ EXCHANGE COMPLETED SUCCESSFULLY!');
       console.log('✅ ========================================');
       console.log(`Old Order: #${selectedOrderForAction.order_number}`);
       console.log(`Return: #${returnNumber}`);
       console.log(`New Order: #${newOrder.order_number}`);
-      
+
       let successMessage = `✅ Exchange processed successfully!\n\n`;
       successMessage += `Return: #${returnNumber}\n`;
       successMessage += `New Order: #${newOrder.order_number}\n\n`;
-      
+
       if (exchangeData.paymentRefund.type === 'payment') {
         console.log(`Payment Type: Additional payment from customer`);
         console.log(`Amount Collected: ৳${exchangeData.paymentRefund.total.toLocaleString()}`);
@@ -636,11 +586,11 @@ export default function PurchaseHistoryPage() {
         console.log(`Payment Type: Even exchange`);
         successMessage += `Even exchange - no payment difference`;
       }
-      
+
       console.log('✅ ========================================\n');
-      
+
       alert(successMessage);
-      
+
       setShowExchangeModal(false);
       setSelectedOrderForAction(null);
     } catch (error: any) {
@@ -650,7 +600,7 @@ export default function PurchaseHistoryPage() {
       console.error('Error details:', error);
       console.error('Error response:', error.response?.data);
       console.error('❌ ========================================\n');
-      
+
       const errorMsg = error.response?.data?.message || error.message || 'Failed to process exchange';
       alert(`❌ Exchange failed: ${errorMsg}\n\nPlease check the console for details.`);
     }
@@ -662,17 +612,17 @@ export default function PurchaseHistoryPage() {
   };
 
   const filteredOrders = orders.filter(order => {
-    const matchesSearch = 
+    const matchesSearch =
       order.order_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.customer?.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.customer?.phone?.includes(searchTerm);
-    
+
     const matchesStore = !selectedStore || order.store.id === parseInt(selectedStore);
-    
+
     const orderDate = new Date(order.created_at);
     const matchesStartDate = !startDate || orderDate >= new Date(startDate);
     const matchesEndDate = !endDate || orderDate <= new Date(endDate);
-    
+
     return matchesSearch && matchesStore && matchesStartDate && matchesEndDate;
   });
 
@@ -680,9 +630,9 @@ export default function PurchaseHistoryPage() {
     const amount = parseFloat(order.total_amount.replace(/,/g, ''));
     return sum + (isNaN(amount) ? 0 : amount);
   }, 0);
-  
+
   const totalOrders = filteredOrders.length;
-  
+
   const totalDue = filteredOrders.reduce((sum, order) => {
     const amount = parseFloat(order.outstanding_amount.replace(/,/g, ''));
     return sum + (isNaN(amount) ? 0 : amount);
@@ -702,8 +652,8 @@ export default function PurchaseHistoryPage() {
                   Purchase History
                 </h1>
                 <p className="text-sm text-gray-600 dark:text-gray-400">
-                  {userRole === 'store_manager' 
-                    ? 'View and manage your store counter sales' 
+                  {userRole === 'branch-manager'
+                    ? 'View and manage your store counter sales'
                     : 'View and manage all counter sales transactions'}
                 </p>
               </div>
@@ -729,56 +679,73 @@ export default function PurchaseHistoryPage() {
 
               <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 mb-6">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase px-1">Search</label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <input
+                        type="text"
+                        placeholder="Order#, customer, phone..."
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  {!canSelectStore && scopedStoreId ? (
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase px-1">Store</label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          readOnly
+                          value={
+                            stores.find((s) => String(s.id) === String(selectedStore))
+                              ? `${stores.find((s) => String(s.id) === String(selectedStore))?.name ?? ''} - ${stores.find((s) => String(s.id) === String(selectedStore))?.location ?? ''}`
+                              : 'Loading Store...'
+                          }
+                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white text-sm cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[10px] font-bold text-gray-500 uppercase px-1">Store</label>
+                      <select
+                        value={selectedStore}
+                        onChange={(e) => setSelectedStore(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                      >
+                        <option value="">All Stores</option>
+                        {stores.map((store) => (
+                          <option key={store.id} value={store.id}>
+                            {store.name} - {store.location}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase px-1">From</label>
                     <input
-                      type="text"
-                      placeholder="Search by order#, customer, phone..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
-                  
-                  {!canSelectStore && userRole !== 'branch-manager' && scopedStoreId ? (
+
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[10px] font-bold text-gray-500 uppercase px-1">To</label>
                     <input
-                      type="text"
-                      readOnly
-                      value={
-                        stores.find((s) => String(s.id) === String(selectedStore))
-                          ? `${stores.find((s) => String(s.id) === String(selectedStore))?.name ?? ''} - ${stores.find((s) => String(s.id) === String(selectedStore))?.location ?? ''}`
-                          : 'My Store'
-                      }
-                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white text-sm"
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
-                  ) : (
-                    <select
-                      value={selectedStore}
-                      onChange={(e) => setSelectedStore(e.target.value)}
-                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    >
-                      <option value="">All Stores</option>
-                      {stores.map((store) => (
-                        <option key={store.id} value={store.id}>
-                          {store.name} - {store.location}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  
-                  <input
-                    type="date"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                  
-                  <input
-                    type="date"
-                    value={endDate}
-                    onChange={(e) => setEndDate(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
+                  </div>
                 </div>
               </div>
 
@@ -804,23 +771,21 @@ export default function PurchaseHistoryPage() {
                               <span className="text-xs font-mono bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded text-blue-700 dark:text-blue-400">
                                 {order.order_number}
                               </span>
-                              <span className={`text-xs px-2 py-1 rounded ${
-                                order.payment_status === 'paid'
+                              <span className={`text-xs px-2 py-1 rounded ${order.payment_status === 'paid'
                                   ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
                                   : order.payment_status === 'partial'
-                                  ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
-                                  : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                              }`}>
-                                {order.payment_status === 'paid' ? 'Paid' : 
-                                 order.payment_status === 'partial' ? 'Partial' : 'Pending'}
+                                    ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400'
+                                    : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                                }`}>
+                                {order.payment_status === 'paid' ? 'Paid' :
+                                  order.payment_status === 'partial' ? 'Partial' : 'Pending'}
                               </span>
-                              <span className={`text-xs px-2 py-1 rounded ${
-                                order.status === 'confirmed'
+                              <span className={`text-xs px-2 py-1 rounded ${order.status === 'confirmed'
                                   ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
                                   : order.status === 'cancelled'
-                                  ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-400'
-                                  : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
-                              }`}>
+                                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-400'
+                                    : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                                }`}>
                                 {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
                               </span>
                             </div>
@@ -852,12 +817,12 @@ export default function PurchaseHistoryPage() {
                               <div>
                                 <span className="text-gray-600 dark:text-gray-400">Date: </span>
                                 <span className="text-gray-900 dark:text-white">
-                                  {new Date(order.created_at).toLocaleDateString()}
+                                  {new Date(order.created_at).toLocaleDateString('en-GB')} {new Date(order.created_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false })}
                                 </span>
                               </div>
                             </div>
                           </div>
-                          
+
                           <div className="flex items-center gap-2">
                             <div className="text-right mr-4">
                               <div className="text-xs text-gray-600 dark:text-gray-400">Total</div>
@@ -870,7 +835,7 @@ export default function PurchaseHistoryPage() {
                                 </div>
                               )}
                             </div>
-                            
+
                             <div className="relative">
                               <button
                                 type="button"
@@ -887,14 +852,14 @@ export default function PurchaseHistoryPage() {
                               >
                                 <MoreVertical className="w-5 h-5 text-gray-600 dark:text-gray-400" />
                               </button>
-                              
+
                               {activeMenu === order.id && menuPosition && (
                                 <div className="fixed w-48 bg-white dark:bg-gray-800 rounded-lg shadow-2xl border-2 border-gray-300 dark:border-gray-600 z-50" style={{ top: menuPosition.top, left: menuPosition.left }}>
                                   <button
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                       handlePrint(order);
+                                      handlePrint(order);
                                     }}
                                     className="w-full px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-3 rounded-t-lg transition-colors"
                                   >
@@ -906,7 +871,7 @@ export default function PurchaseHistoryPage() {
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                       handleExchange(order);
+                                      handleExchange(order);
                                     }}
                                     className="w-full px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-3 transition-colors"
                                   >
@@ -918,7 +883,7 @@ export default function PurchaseHistoryPage() {
                                     type="button"
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                       handleReturn(order);
+                                      handleReturn(order);
                                     }}
                                     className="w-full px-4 py-3 text-left text-sm font-medium text-gray-900 dark:text-white hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-3 rounded-b-lg transition-colors"
                                   >
@@ -928,7 +893,7 @@ export default function PurchaseHistoryPage() {
                                 </div>
                               )}
                             </div>
-                            
+
                             <button
                               onClick={() => handleExpandOrder(order.id)}
                               className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-md transition-colors"

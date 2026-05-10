@@ -4,96 +4,163 @@ import React, { useEffect, useState } from 'react';
 import Navigation from '@/components/ecommerce/Navigation';
 import HeroSection from '@/components/ecommerce/HeroSection';
 import dynamic from 'next/dynamic';
+import AnnouncementTicker from '@/components/ecommerce/AnnouncementTicker';
+import { 
+  TickerSkeleton, 
+  HeroSkeleton, 
+  CollectionsSkeleton, 
+  SectionSkeleton,
+  ShowcaseSkeleton
+} from '@/components/ecommerce/HomepageSkeletons';
 
 const CollectionTiles = dynamic(() => import('@/components/ecommerce/CollectionTiles'), {
-  loading: () => <div style={{ minHeight: '400px', margin: '40px 0' }} className="w-full bg-[var(--bg-surface-2)] animate-pulse rounded-2xl" />
+  loading: () => <CollectionsSkeleton />
 });
 const NewArrivals = dynamic(() => import('@/components/ecommerce/NewArrivals'), {
-  loading: () => <div style={{ minHeight: '600px', margin: '40px 0' }} className="w-full bg-[var(--bg-surface-2)] animate-pulse rounded-2xl" />
+  loading: () => <SectionSkeleton height="600px" />
 });
 const SubcategoryProductTabs = dynamic(() => import('@/components/ecommerce/SubcategoryProductTabs'), {
-  loading: () => <div style={{ minHeight: '800px', margin: '40px 0' }} className="w-full bg-[var(--bg-surface-2)] animate-pulse rounded-2xl" />
+  loading: () => <ShowcaseSkeleton />
 });
-const InstagramReelViewer = dynamic(() => import('@/components/ecommerce/InstagramReelViewer'), {
-  ssr: false,
-  loading: () => <div style={{ minHeight: '760px', margin: '40px 0' }} className="w-full bg-[var(--bg-surface-2)] animate-pulse rounded-2xl" />
-});
+
 import SectionReveal from '@/components/ecommerce/SectionReveal';
 import catalogService, { CatalogCategory } from '@/services/catalogService';
-
-const CUSTOM_SECTIONS: Record<string, { eyebrow: string; subtitle: string; queries: string[] }> = {
-  'sneakers': {
-    eyebrow: "Sneakers",
-    subtitle: "Explore sneaker collections—highs, lows, and everything in between.",
-    queries: ['sneakers', 'sneaker']
-  },
-  'clothing': {
-    eyebrow: "Clothing",
-    subtitle: "Browse tees, hoodies, jackets and more.",
-    queries: ['clothing', 'apparel']
-  },
-  'backpacks': {
-    eyebrow: "Backpacks",
-    subtitle: "From daily carry to travel-ready packs.",
-    queries: ['backpack', 'backpacks', 'bagpack', 'bagpacks']
-  },
-  'fashion-accessories': {
-    eyebrow: "Fashion Accessories",
-    subtitle: "Caps, socks, belts, and the finishing touches.",
-    queries: ['fashion accessories', 'fashion accessory', 'fashion-accessories']
-  }
-};
+import settingsService, { HomepageSettings } from '@/services/settingsService';
+import { toAbsoluteAssetUrl } from '@/lib/urlUtils';
 
 export default function HomePage() {
   const [categories, setCategories] = useState<CatalogCategory[]>([]);
+  const [heroData, setHeroData] = useState<{ ticker: any; hero: any } | null>(null);
+  const [collections, setCollections] = useState<any[] | null>(null);
+  const [newArrivals, setNewArrivals] = useState<any | null>(null);
+  const [showcase, setShowcase] = useState<any[] | null>(null);
+  
+  // Track individual loading states for granular control
+  const [loadingHero, setLoadingHero] = useState(true);
 
   useEffect(() => {
-    catalogService.getCategories()
-      .then(tree => {
-        const top = tree.filter(c => !c.parent_id);
-        setCategories(top.sort((a, b) => (b.product_count || 0) - (a.product_count || 0)));
-      })
-      .catch(console.error);
+    // 1. Fetch Categories (For Fallback Showcase)
+    catalogService.getCategories().then(catTree => {
+      const top = catTree.filter(c => !c.parent_id);
+      setCategories(top.sort((a, b) => (b.product_count || 0) - (a.product_count || 0)));
+    }).catch(err => console.error('Failed to load categories:', err));
+
+    // 2. Fetch Hero & Ticker (Priority 1)
+    settingsService.getHomepageSettings('hero').then(data => {
+      setHeroData({ ticker: data.ticker, hero: data.hero });
+      setLoadingHero(false);
+    }).catch(err => {
+      console.error('Failed to load hero settings:', err);
+      setLoadingHero(false);
+    });
+
+    // 3. Fetch Collections (Priority 2)
+    settingsService.getHomepageSettings('collections').then(data => {
+      setCollections(data.collections || []);
+    }).catch(err => console.error('Failed to load collections:', err));
+
+    // 4. Fetch New Arrivals (Priority 2)
+    settingsService.getHomepageSettings('new_arrivals').then(data => {
+      setNewArrivals(data.new_arrivals || { enabled: false, products: [] });
+    }).catch(err => console.error('Failed to load new arrivals:', err));
+
+    // 5. Fetch Showcase (Priority 3)
+    settingsService.getHomepageSettings('showcase').then(data => {
+      setShowcase(data.showcase || []);
+    }).catch(err => console.error('Failed to load showcase:', err));
   }, []);
 
   return (
     <div className="ec-root min-h-screen" style={{ background: '#ffffff' }}>
+      {/* 0. Ticker */}
+      {loadingHero ? (
+        <TickerSkeleton />
+      ) : (
+        heroData?.ticker?.enabled && (
+          <AnnouncementTicker 
+            phrases={heroData.ticker.phrases} 
+            mode={heroData.ticker.mode}
+            backgroundColor={heroData.ticker.background_color}
+            textColor={heroData.ticker.text_color}
+            speed={heroData.ticker.speed}
+          />
+        )
+      )}
+
       <Navigation />
 
       {/* 1. Hero section */}
-      <HeroSection />
+      {loadingHero ? (
+        <HeroSkeleton />
+      ) : (
+        <HeroSection 
+          images={heroData?.hero?.images ? heroData.hero.images.map((img: any) => ({ ...img, url: toAbsoluteAssetUrl(img.url) })) : []} 
+          title={heroData?.hero?.title}
+          showTitle={heroData?.hero?.show_title}
+          slideshowEnabled={heroData?.hero?.slideshow_enabled}
+          autoplaySpeed={heroData?.hero?.autoplay_speed}
+          textPosition={heroData?.hero?.text_position}
+          textColor={heroData?.hero?.text_color}
+          fontSize={heroData?.hero?.font_size}
+          transitionType={heroData?.hero?.transition_type}
+        />
+      )}
 
       {/* 2. Collection Tiles */}
-      <SectionReveal>
-        <CollectionTiles />
-      </SectionReveal>
-
-      {/* 3. Instagram Reels Feed */}
-      <SectionReveal threshold={0.05}>
-        <InstagramReelViewer />
-      </SectionReveal>
+      {collections === null ? (
+        <CollectionsSkeleton />
+      ) : (
+        collections.length > 0 && (
+          <SectionReveal>
+            <CollectionTiles collections={collections.map((c: any) => ({ ...c, image: toAbsoluteAssetUrl(c.image) })) as any} />
+          </SectionReveal>
+        )
+      )}
 
       {/* 4. New Arrivals */}
-      <SectionReveal>
-        <NewArrivals limit={40} />
-      </SectionReveal>
+      {newArrivals === null ? (
+        <SectionSkeleton height="600px" />
+      ) : (
+        <SectionReveal>
+          <NewArrivals limit={12} customProducts={newArrivals.products} />
+        </SectionReveal>
+      )}
 
-      {/* 5. Dynamic Shop by Subcategory sections (categories wise) */}
-      {categories.map((cat) => {
-        const slug = (cat.slug || cat.name).toLowerCase();
-        const custom = CUSTOM_SECTIONS[slug] ||
-          Object.values(CUSTOM_SECTIONS).find(s => s.queries.includes(slug));
-
-        return (
-          <SectionReveal key={cat.id} threshold={0.1}>
+      {/* 5. Showcase Categories (Configured via Settings) */}
+      {showcase === null ? (
+        <div className="flex flex-col gap-20 py-10">
+          <ShowcaseSkeleton />
+          <ShowcaseSkeleton />
+        </div>
+      ) : (
+        showcase.map((item: any, idx: number) => (
+          <SectionReveal key={`showcase-${item.category_id}-${idx}`} threshold={0.1}>
             <SubcategoryProductTabs
-              parentQueries={custom ? custom.queries : [slug]}
-              eyebrow={custom ? custom.eyebrow : cat.name}
-              subtitle={custom ? custom.subtitle : `Explore our curated selection of quality ${cat.name} essentials.`}
+              categoryId={item.category_id}
+              subcategoryIds={item.subcategories}
             />
           </SectionReveal>
-        );
-      })}
+        ))
+      )}
+
+      {/* Fallback loop: if no showcase is configured, show top categories as default behavior */}
+      {showcase !== null && showcase.length === 0 && (
+        categories.length === 0 ? (
+          <div className="flex flex-col gap-20 py-10">
+            <ShowcaseSkeleton />
+            <ShowcaseSkeleton />
+            <ShowcaseSkeleton />
+          </div>
+        ) : categories.map((item: any) => (
+          <SectionReveal key={`cat-${item.id}`} threshold={0.1}>
+            <SubcategoryProductTabs
+              categoryId={item.id}
+              eyebrow={item.name}
+              subtitle={`Explore our curated selection of quality ${item.name} essentials.`}
+            />
+          </SectionReveal>
+        ))
+      )}
     </div>
   );
 }

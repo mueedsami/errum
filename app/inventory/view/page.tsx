@@ -8,9 +8,11 @@ import Sidebar from '@/components/Sidebar';
 import Header from '@/components/Header';
 import inventoryService, { GlobalInventoryItem, Store as StoreBreakdown } from '@/services/inventoryService';
 import productService from '@/services/productService';
-import categoryService from '@/services/groupInventory';
+import categoryService from '@/services/categoryService';
 import productImageService from '@/services/productImageService';
 import defectiveProductService, { type DefectiveProduct } from '@/services/defectiveProductService';
+import ExportInventoryButton from '@/components/inventory/ExportInventoryButton';
+import CategoryTreeSelector from '@/components/product/CategoryTreeSelector';
 
 interface Category {
   id: number;
@@ -22,6 +24,10 @@ interface Category {
 
 interface ProductVariation {
   productId: number;
+  category_id?: number;
+  category_name?: string;
+  subcategory_name?: string;
+  variation_suffix?: string;
   quantity: number;
   availableQuantity: number;
   reservedQuantity: number;
@@ -62,6 +68,50 @@ function ViewInventoryPageContent() {
   const [groupedProducts, setGroupedProducts] = useState<GroupedProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [visibleCount, setVisibleCount] = useState(50);
+  const [viewMode, setViewMode] = useState<'all' | 'category'>('all');
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
+
+  const getFlatCategories = (cats: any[]) => {
+    const flat: any[] = [];
+    const flatten = (items: any[]) => {
+      items.forEach(item => {
+        if (!flat.some(f => f.id === item.id)) {
+          flat.push(item);
+        }
+        if (item.children && Array.isArray(item.children)) {
+          flatten(item.children);
+        }
+      });
+    };
+    
+    // First flatten based on children arrays if they exist (Tree mode)
+    if (cats.some(c => c.children && c.children.length > 0)) {
+       flatten(cats);
+    } else {
+       // Fallback for flat list mode: manually build tree relationships
+       const roots = cats.filter(c => !c.parent_id);
+       roots.forEach(root => {
+         flat.push(root);
+         const addChildren = (parentId: number) => {
+           cats.filter(c => c.parent_id === parentId).forEach(child => {
+             if (!flat.some(f => f.id === child.id)) {
+               flat.push(child);
+               addChildren(child.id);
+             }
+           });
+         };
+         addChildren(root.id);
+       });
+       // Catch any orphans
+       cats.forEach(c => {
+         if (!flat.some(f => f.id === c.id)) flat.push(c);
+       });
+    }
+    
+    return flat;
+  };
+
+  const flatCategories = useMemo(() => getFlatCategories(categories), [categories]);
 
   // product meta + image caches (loaded lazily for visible items)
   const [productMetaById, setProductMetaById] = useState<Record<number, any>>({});
@@ -69,6 +119,9 @@ function ViewInventoryPageContent() {
 
   // extra stock counts (defective/used)
   const [extraMap, setExtraMap] = useState<Map<number, ExtraCounts>>(new Map());
+
+  // Store names for dynamic columns
+  const [allStores, setAllStores] = useState<{ id: number; name: string }[]>([]);
 
   // rate limit banner
   const [rateLimit, setRateLimit] = useState<RateLimitState>({ active: false });
@@ -118,9 +171,9 @@ function ViewInventoryPageContent() {
   }, [searchParams]);
 
   useEffect(() => {
-    fetchInitialData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    fetchInventory();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, selectedCategoryId]);
 
   // --- Same approach as GalleryPage: normalize image paths to absolute URLs ---
   const getBaseUrl = () => {
@@ -148,12 +201,12 @@ function ViewInventoryPageContent() {
     return `${baseUrl}/storage/product-images/${url}`;
   };
 
-  const getCategoryName = (categoryId: number, cats: Category[]): string => {
-    const category = cats.find(c => c.id === categoryId);
+  const getCategoryName = (categoryId: number, catsToSearch: Category[]): string => {
+    const category = catsToSearch.find(c => c.id === categoryId);
     if (!category) return 'Uncategorized';
 
     if (category.parent_id) {
-      const parent = cats.find(c => c.id === category.parent_id);
+      const parent = catsToSearch.find(c => c.id === category.parent_id);
       return parent ? `${parent.title} / ${category.title}` : category.title;
     }
 
@@ -259,6 +312,30 @@ function ViewInventoryPageContent() {
     };
   };
 
+  const getCategoryPaths = (categoryId: number | undefined, catsToSearch: Category[]): { category: string; subcategory: string } => {
+    if (!categoryId) return { category: 'Uncategorized', subcategory: '-' };
+    const cat = catsToSearch.find(c => c.id === categoryId);
+    if (!cat) return { category: 'Uncategorized', subcategory: '-' };
+
+    if (cat.parent_id) {
+      const parent = catsToSearch.find(c => c.id === cat.parent_id);
+      return {
+        category: parent ? parent.title : cat.title,
+        subcategory: parent ? cat.title : '-',
+      };
+    }
+
+    return { category: cat.title, subcategory: '-' };
+  };
+
+  const getVariationSuffix = (productId: number) => {
+    const { color, size } = getColorSizeForProductId(productId);
+    const parts = [];
+    if (color) parts.push(color);
+    if (size) parts.push(size);
+    return parts.join(' / ') || 'Default';
+  };
+
   const getImageForProductId = (productId: number) => {
     const meta = metaCacheRef.current[productId];
 
@@ -274,7 +351,7 @@ function ViewInventoryPageContent() {
   const getCategoryForGroup = (g: GroupedProduct) => {
     for (const pid of g.productIds) {
       const meta = metaCacheRef.current[pid];
-      if (meta?.category_id) return getCategoryName(meta.category_id, categories);
+      if (meta?.category_id) return getCategoryName(meta.category_id, flatCategories);
     }
     return 'Uncategorized';
   };
@@ -402,7 +479,7 @@ function ViewInventoryPageContent() {
       const qty = Number(item.total_quantity || 0);
       const avail = Number(item.available_quantity || 0);
       const res = Number(item.reserved_quantity || 0);
-      
+
       g.totalStock += qty;
       g.totalAvailable += avail;
       g.totalReserved += res;
@@ -415,6 +492,10 @@ function ViewInventoryPageContent() {
       if (!existing) {
         g.variations.push({
           productId: item.product_id,
+          category_id: item.category_id,
+          category_name: item.category_name,
+          subcategory_name: item.subcategory_name,
+          variation_suffix: item.variation_suffix,
           quantity: qty,
           availableQuantity: avail,
           reservedQuantity: res,
@@ -443,19 +524,45 @@ function ViewInventoryPageContent() {
     });
   };
 
-  const fetchInitialData = async () => {
+  const fetchInventory = async () => {
     try {
       setLoading(true);
 
-      const [categoriesResponse, inventoryResponse] = await Promise.all([
-        categoryService.getCategories(),
-        inventoryService.getGlobalInventory({ skipStoreScope: true }),
+      const [categoriesData, inventoryResponse] = await Promise.all([
+        categoryService.getTree(true),
+        inventoryService.getGlobalInventory({ 
+          skipStoreScope: true,
+          category_id: viewMode === 'category' ? (selectedCategoryId || undefined) : undefined
+        }),
       ]);
 
-      const categoriesData = (categoriesResponse as any)?.data?.data || (categoriesResponse as any)?.data || [];
-      setCategories(categoriesData);
+      // Handle tree response or fallback to flat list
+      let parsedCategories = [];
+      if (Array.isArray(categoriesData)) {
+        parsedCategories = categoriesData;
+      } else if ((categoriesData as any)?.data) {
+        parsedCategories = (categoriesData as any).data;
+      }
+      
+      setCategories(parsedCategories);
 
       const inventoryData = (inventoryResponse as any)?.data || [];
+
+      // Extract unique stores for table headers
+      const storeMap = new Map<number, string>();
+      inventoryData.forEach((item: any) => {
+        if (Array.isArray(item.stores)) {
+          item.stores.forEach((s: any) => {
+            if (s.store_id && s.store_name) {
+              storeMap.set(s.store_id, s.store_name);
+            }
+          });
+        }
+      });
+      const storesList = Array.from(storeMap.entries())
+        .map(([id, name]) => ({ id, name }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setAllStores(storesList);
 
       // ✅ Build groups ONLY from inventory endpoint (no product list fetch)
       const grouped = buildGroupsFromInventory(inventoryData);
@@ -615,13 +722,53 @@ function ViewInventoryPageContent() {
           />
 
           <main className="flex-1 overflow-auto p-6">
-            <div className="mb-6">
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-                Inventory Overview
-              </h1>
-              <p className="text-gray-600 dark:text-gray-400">
-                View all products and their stock levels across outlets
-              </p>
+            <div className="flex justify-between items-start mb-6 text-base">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                  Inventory Overview
+                </h1>
+                <p className="text-gray-600 dark:text-gray-400">
+                  View all products and their stock levels across outlets
+                </p>
+              </div>
+              <ExportInventoryButton 
+                categories={flatCategories} 
+                allStores={allStores} 
+                selectedCategoryId={viewMode === 'category' ? selectedCategoryId : null}
+              />
+            </div>
+
+            <div className="flex flex-wrap gap-4 mb-4">
+              <div className="flex flex-col gap-1.5 flex-1 min-w-[200px]">
+                <label className="text-xs font-bold text-gray-500 uppercase px-1">View Mode</label>
+                <select
+                  value={viewMode}
+                  onChange={(e) => {
+                    setViewMode(e.target.value as 'all' | 'category');
+                    if (e.target.value === 'all') setSelectedCategoryId(null);
+                  }}
+                  className="w-full p-2.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-semibold text-gray-900 dark:text-white focus:ring-2 focus:ring-emerald-500 transition-all outline-none"
+                >
+                  <option value="all" className="bg-white dark:bg-gray-800 text-gray-900 dark:text-white">Current Stock (All Products)</option>
+                  <option value="category" className="bg-white dark:bg-gray-800 text-gray-900 dark:text-white">Category-wise Stock</option>
+                </select>
+              </div>
+
+              {viewMode === 'category' && (
+                <div className="flex-1 min-w-[300px]">
+                  <CategoryTreeSelector
+                    categories={categories as any}
+                    selectedCategoryId={selectedCategoryId ? String(selectedCategoryId) : ''}
+                    onSelect={(id) => setSelectedCategoryId(id ? Number(id) : null)}
+                    label="Filter by Category"
+                    required={false}
+                    placeholder="-- All Categories --"
+                    showSelectedInfo={false}
+                    allowClear={true}
+                    clearText="-- All Categories --"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4 mb-4">
@@ -658,222 +805,131 @@ function ViewInventoryPageContent() {
                   <p className="text-gray-600 dark:text-gray-400">No inventory items found</p>
                 </div>
               ) : (
-                <>
-                  {visibleProducts.map((item) => {
-                    const categoryLabel = getCategoryForGroup(item);
-                    const heroImg = getHeroImageForGroup(item);
+                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden shadow-sm">
+                  <div className="overflow-x-auto max-h-[calc(100vh-320px)] scrollbar-thin">
+                    <table className="w-full border-collapse border border-gray-200 dark:border-gray-700 text-base font-medium">
+                      <thead className="bg-gray-50 dark:bg-gray-900 sticky top-0 z-20">
+                        <tr className="border-b border-gray-200 dark:border-gray-700">
+                          <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 sticky left-0 bg-gray-50 dark:bg-gray-900 z-30 border-r border-gray-200 dark:border-gray-700">SKU</th>
+                          <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 min-w-[250px] border-r border-gray-200 dark:border-gray-700">Product Name</th>
+                          <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 border-r border-gray-200 dark:border-gray-700">Category</th>
+                          <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 border-r border-gray-200 dark:border-gray-700">Subcategory</th>
+                          <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300 border-r border-gray-200 dark:border-gray-700">Variation</th>
+                          
+                          {allStores.map(store => (
+                            <th key={store.id} className="p-3 text-center font-bold text-gray-700 dark:text-gray-300 whitespace-normal break-words max-w-[100px] leading-tight border-r border-gray-200 dark:border-gray-700">
+                              {store.name}
+                            </th>
+                          ))}
+                          
+                          <th className="p-3 text-center font-bold text-blue-700 dark:text-blue-300 bg-blue-50/50 dark:bg-blue-900/20 border-r border-gray-200 dark:border-gray-700">Available</th>
+                          <th className="p-3 text-center font-bold text-gray-700 dark:text-gray-300 border-r border-gray-200 dark:border-gray-700">Physical</th>
+                          <th className="p-3 text-center font-bold text-gray-700 dark:text-gray-300 border-r border-gray-200 dark:border-gray-700">Reserved</th>
+                          <th className="p-3 text-center font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50/50 dark:bg-emerald-900/20 border-r border-gray-200 dark:border-gray-700">SKU Total</th>
+                          <th className="p-3 text-left font-bold text-gray-700 dark:text-gray-300">Defective or Used</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white dark:bg-gray-800">
+                        {visibleProducts.map((group) => (
+                          group.variations.map((variation, vIdx) => {
+                            const pid = variation.productId;
+                            const paths = getCategoryPaths(variation.category_id, flatCategories);
+                            const category = variation.category_name || paths.category;
+                            const subcategory = variation.subcategory_name || paths.subcategory;
+                            const suffix = variation.variation_suffix || getVariationSuffix(pid);
+                            const extra = extraMap?.get(pid);
+                            const rowSpan = group.variations.length;
 
-                    return (
-                      <div
-                        key={item.groupKey}
-                        className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden"
-                      >
-                        <div className="p-4">
-                          <div className="flex items-start gap-4">
-                            <div className="w-20 h-20 flex-shrink-0 bg-gray-100 dark:bg-gray-700 rounded-lg overflow-hidden">
-                              <img
-                                src={heroImg}
-                                alt={item.productName}
-                                className="w-full h-full object-cover"
-                                onError={(e) => {
-                                  const img = e.currentTarget;
-                                  if ((img as any).dataset.fallbackApplied) return;
-                                  (img as any).dataset.fallbackApplied = '1';
-                                  img.src = '/placeholder-image.jpg';
-                                }}
-                              />
-                            </div>
-
-                            <div className="flex-1 min-w-0">
-                              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-1">
-                                {item.productName}
-                              </h3>
-                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-gray-600 dark:text-gray-400">
-                                <span className="flex items-center gap-1">
-                                  <span className="font-medium">SKU:</span>
-                                  <span className="font-mono">{item.sku}</span>
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <span className="font-medium">Category:</span>
-                                  <span>{categoryLabel}</span>
-                                </span>
-                                <span className="flex items-center gap-1">
-                                  <span className="font-medium">Items:</span>
-                                  <span>{item.variations.length}</span>
-                                </span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-6">
-                              <div className="text-right">
-                                <p className="text-sm text-gray-600 dark:text-gray-400">Total Stock</p>
-                                <p className="text-2xl font-semibold text-gray-900 dark:text-white">
-                                  {item.totalAvailable}
-                                </p>
-                                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-1 uppercase tracking-wider font-bold">
-                                  {item.totalStock} Physical
-                                </p>
-                                {item.totalReserved > 0 && (
-                                  <p className="text-[10px] text-blue-500 dark:text-blue-400 font-bold">
-                                    {item.totalReserved} Reserved
-                                  </p>
-                                )}
-
-                                {(item.extraDefective > 0 || item.extraUsed > 0) && (
-                                  <div className="mt-2 flex flex-col items-end gap-1">
-                                    {item.extraDefective > 0 && (
-                                      <span className="inline-flex items-center px-2 py-1 text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300 rounded">
-                                        Def: {item.extraDefective}
-                                      </span>
-                                    )}
-                                    {item.extraUsed > 0 && (
-                                      <span className="inline-flex items-center px-2 py-1 text-xs font-medium bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 rounded">
-                                        Used: {item.extraUsed}
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-
-                              <button
-                                onClick={() => toggleExpand(item.groupKey)}
-                                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                            return (
+                              <tr
+                                key={pid}
+                                className="border-b border-gray-200 dark:border-gray-700 hover:bg-gray-50/50 dark:hover:bg-gray-700/30 transition-colors"
                               >
-                                {item.expanded ? (
-                                  <ChevronUp className="w-5 h-5 text-gray-600 dark:text-gray-400" />
-                                ) : (
-                                  <ChevronDown className="w-5 h-5 text-gray-600 dark:text-gray-400" />
+                                {vIdx === 0 && (
+                                  <>
+                                    <td rowSpan={rowSpan} className="p-3 font-bold text-gray-900 dark:text-white sticky left-0 bg-white dark:bg-gray-800 z-10 border-r border-gray-200 dark:border-gray-700 align-top">
+                                      {group.sku}
+                                    </td>
+                                    <td rowSpan={rowSpan} className="p-3 text-gray-900 dark:text-white border-r border-gray-200 dark:border-gray-700 align-top whitespace-normal break-words max-w-[200px] leading-tight">
+                                      {group.productName}
+                                    </td>
+                                    <td rowSpan={rowSpan} className="p-3 text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700 align-top">
+                                      {category}
+                                    </td>
+                                    <td rowSpan={rowSpan} className="p-3 text-gray-600 dark:text-gray-400 border-r border-gray-200 dark:border-gray-700 align-top">
+                                      {subcategory}
+                                    </td>
+                                  </>
                                 )}
-                              </button>
-                            </div>
-                          </div>
-                        </div>
+                                
+                                <td className="p-3 border-r border-gray-200 dark:border-gray-700">
+                                  <span className="inline-flex items-center px-2 py-1 rounded bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 font-bold">
+                                    {suffix}
+                                  </span>
+                                </td>
 
-                        {item.expanded && (
-                          <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
-                            <div className="p-4">
-                              <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-                                Items & Stock Distribution
-                              </h4>
-                              <div className="space-y-4">
-                                {item.variations.map((variation) => {
-                                  const pid = variation.productId;
-                                  const img = getImageForProductId(pid);
-                                  const { color, size } = getColorSizeForProductId(pid);
-
+                                {allStores.map(store => {
+                                  const storeStock = variation.stores.find(s => s.store_id === store.id);
                                   return (
-                                    <div
-                                      key={pid}
-                                      className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4"
-                                    >
-                                      <div className="flex items-center gap-4 mb-3">
-                                        <div className="w-16 h-16 flex-shrink-0 bg-gray-100 dark:bg-gray-700 rounded overflow-hidden">
-                                          <img
-                                            src={img}
-                                            alt={color ? `Color ${color}` : `Product ${pid}`}
-                                            className="w-full h-full object-cover"
-                                            onError={(e) => {
-                                              const imgEl = e.currentTarget;
-                                              if ((imgEl as any).dataset.fallbackApplied) return;
-                                              (imgEl as any).dataset.fallbackApplied = '1';
-                                              imgEl.src = '/placeholder-image.jpg';
-                                            }}
-                                          />
-                                        </div>
-                                        <div className="flex-1">
-                                          <div className="flex flex-wrap items-center gap-2 mb-1">
-                                            {color ? (
-                                              <span className="px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 text-xs font-medium rounded-full">
-                                                Color: {color}
-                                              </span>
-                                            ) : null}
-                                            {size ? (
-                                              <span className="px-3 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300 text-xs font-medium rounded-full">
-                                                Size: {size}
-                                              </span>
-                                            ) : null}
-                                            {!color && !size ? (
-                                              <span className="px-3 py-1 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-xs font-medium rounded-full">
-                                                Product ID: {pid}
-                                              </span>
-                                            ) : null}
-                                          </div>
-                                            <p className="text-sm text-gray-600 dark:text-gray-400">
-                                              Available:{' '}
-                                              <span className="font-bold text-blue-600 dark:text-blue-400">
-                                                {variation.availableQuantity}
-                                              </span>{' '}
-                                              / {variation.quantity} Physical
-                                            </p>
-                                            {variation.reservedQuantity > 0 && (
-                                              <p className="text-xs text-amber-600 dark:text-amber-500 font-medium">
-                                                {variation.reservedQuantity} reserved units
-                                              </p>
-                                            )}
-                                        </div>
-                                      </div>
-
-                                      {variation.stores.length > 0 && (
-                                        <div className="overflow-x-auto">
-                                          <table className="w-full">
-                                            <thead>
-                                              <tr className="border-b border-gray-200 dark:border-gray-700">
-                                                <th className="text-left py-2 px-3 text-xs font-semibold text-gray-600 dark:text-gray-400">
-                                                  Store
-                                                </th>
-                                                <th className="text-center py-2 px-3 text-xs font-semibold text-gray-600 dark:text-gray-400">
-                                                  Quantity
-                                                </th>
-                                                <th className="text-center py-2 px-3 text-xs font-semibold text-gray-600 dark:text-gray-400">
-                                                  Batches
-                                                </th>
-                                              </tr>
-                                            </thead>
-                                            <tbody>
-                                              {variation.stores.map((store, storeIdx) => (
-                                                <tr
-                                                  key={storeIdx}
-                                                  className="border-b border-gray-200 dark:border-gray-700 last:border-0"
-                                                >
-                                                  <td className="py-2 px-3 text-sm text-gray-900 dark:text-white font-medium">
-                                                    {store.store_name}
-                                                  </td>
-                                                  <td className="py-2 px-3 text-center">
-                                                    <span className="inline-flex items-center justify-center px-2 py-1 text-xs font-medium bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300 rounded">
-                                                      {store.quantity}
-                                                    </span>
-                                                  </td>
-                                                  <td className="py-2 px-3 text-center text-sm text-gray-600 dark:text-gray-400">
-                                                    {store.batches_count}
-                                                  </td>
-                                                </tr>
-                                              ))}
-                                            </tbody>
-                                          </table>
-                                        </div>
+                                    <td key={store.id} className="p-3 text-center border-r border-gray-200 dark:border-gray-700">
+                                      {storeStock ? (
+                                        <span className="font-bold text-gray-900 dark:text-white">{storeStock.quantity}</span>
+                                      ) : (
+                                        <span className="text-gray-300 dark:text-gray-600">-</span>
                                       )}
-                                    </div>
+                                    </td>
                                   );
                                 })}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
 
-                  {filteredProducts.length > visibleCount && (
-                    <div className="flex justify-center pt-2">
-                      <button
-                        onClick={handleLoadMore}
-                        className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                      >
-                        Load more ({Math.min(50, filteredProducts.length - visibleCount)} more)
-                      </button>
-                    </div>
-                  )}
-                </>
+                                <td className="p-3 text-center bg-blue-50/20 dark:bg-blue-900/5 border-r border-gray-200 dark:border-gray-700">
+                                  <span className="font-bold text-blue-600 dark:text-blue-400">
+                                    {variation.availableQuantity}
+                                  </span>
+                                </td>
+                                <td className="p-3 text-center font-bold text-gray-900 dark:text-white border-r border-gray-200 dark:border-gray-700">
+                                  {variation.quantity}
+                                </td>
+                                <td className="p-3 text-center text-amber-600 dark:text-amber-500 border-r border-gray-200 dark:border-gray-700">
+                                  {variation.reservedQuantity > 0 ? variation.reservedQuantity : '-'}
+                                </td>
+
+                                {vIdx === 0 && (
+                                  <td rowSpan={rowSpan} className="p-3 text-center bg-emerald-50/20 dark:bg-emerald-900/5 border-r border-gray-200 dark:border-gray-700 align-middle">
+                                    <span className="font-black text-emerald-600 dark:text-emerald-400">{group.totalStock}</span>
+                                  </td>
+                                )}
+
+                                <td className="p-3 border-r border-gray-200 dark:border-gray-700">
+                                  {extra ? (
+                                    <div className="flex flex-col gap-1 min-w-[100px]">
+                                      {extra.defective > 0 && (
+                                        <span className="text-xs font-black text-red-600 bg-red-50 dark:bg-red-900/20 px-2 py-0.5 rounded uppercase">Def: {extra.defective}</span>
+                                      )}
+                                      {extra.used > 0 && (
+                                        <span className="text-xs font-black text-purple-600 bg-purple-50 dark:bg-purple-900/20 px-2 py-0.5 rounded uppercase">Used: {extra.used}</span>
+                                      )}
+                                    </div>
+                                  ) : '-'}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {filteredProducts.length > visibleCount && (
+                <div className="flex justify-center pt-2">
+                  <button
+                    onClick={handleLoadMore}
+                    className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    Load more ({Math.min(50, filteredProducts.length - visibleCount)} more)
+                  </button>
+                </div>
               )}
             </div>
           </main>

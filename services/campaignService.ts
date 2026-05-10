@@ -38,6 +38,7 @@ export interface CampaignFormData {
   is_active: boolean;
   is_automatic: boolean;
   is_public: boolean;
+  code?: string;
 }
 
 /** A public promotion as returned from GET /promotions/active-public */

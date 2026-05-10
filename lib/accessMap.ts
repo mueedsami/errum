@@ -22,7 +22,9 @@ export const PAGE_ACCESS: Record<string, RoleSlug[]> = {
   // Basic Setup
   '/store': ['super-admin', 'admin'],
   '/store-assingment': ['super-admin', 'admin', 'online-moderator'],
-  '/category': ['super-admin', 'admin'],
+  '/category': ['super-admin', 'admin', 'online-moderator'],
+  '/collections': ['super-admin', 'admin', 'online-moderator'],
+  '/collections/create': ['super-admin', 'admin', 'online-moderator'],
   '/gallery': ['super-admin', 'admin'],
 
   // Products
@@ -36,7 +38,7 @@ export const PAGE_ACCESS: Record<string, RoleSlug[]> = {
   '/inventory': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman', 'employee'],
   '/inventory/manage_stock': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman'],
   '/inventory/view': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman'],
-  '/inventory/batch-price-update': ['super-admin', 'admin', 'branch-manager'],
+  '/inventory/batch-price-update': ['super-admin', 'admin'],
   '/inventory/outlet-stock': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman', 'employee'],
   '/inventory/reports': ['super-admin', 'admin'],
   '/inventory/intelligence': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman', 'employee'],
@@ -47,6 +49,7 @@ export const PAGE_ACCESS: Record<string, RoleSlug[]> = {
   '/social-commerce': ['super-admin', 'admin', 'online-moderator'],
   '/social-commerce/package': ['super-admin', 'admin', 'branch-manager', 'pos-salesman'],
   '/social-commerce/amount-details': ['super-admin', 'admin', 'online-moderator'],
+  '/social-commerce/text-import': ['super-admin', 'admin', 'online-moderator'],
   '/orders': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
   '/preorders': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
   '/returns': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman'],
@@ -66,6 +69,7 @@ export const PAGE_ACCESS: Record<string, RoleSlug[]> = {
   '/accounting': ['super-admin', 'admin'],
   '/employees': ['super-admin', 'admin'],
   '/settings': ['super-admin', 'admin'],
+  '/settings/homepage': ['super-admin', 'admin', 'online-moderator'],
   '/hrm/my': ['super-admin', 'admin', 'branch-manager', 'online-moderator', 'pos-salesman', 'employee'],
   '/hrm/branch': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],
   '/hrm/attendance': ['super-admin', 'admin', 'branch-manager', 'online-moderator'],

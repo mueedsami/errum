@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 
 interface Category {
@@ -23,6 +24,7 @@ interface CategorySidebarProps {
   onSortChange?: (sort: any) => void;
   searchQuery?: string;
   onSearchChange?: (q: string) => void;
+  searchInputRef?: React.RefObject<HTMLInputElement | null>;
   useIdForRouting?: boolean;
 }
 
@@ -39,13 +41,17 @@ export default function CategorySidebar({
   activeCategory,
   onCategoryChange,
   selectedPriceRange,
+  onPriceRangeChange,
+  selectedStock,
   onStockChange,
   selectedSort,
   onSortChange,
   searchQuery,
   onSearchChange,
+  searchInputRef,
   useIdForRouting = false,
 }: CategorySidebarProps) {
+  const router = useRouter();
   const [expandedCategories, setExpandedCategories] = useState<Set<number>>(new Set());
 
   const toggleCategory = (categoryId: number) => {
@@ -86,7 +92,11 @@ export default function CategorySidebar({
           style={{ paddingLeft: `${8 + level * 16}px` }}
         >
           <span
-            onClick={() => onCategoryChange(categoryRouteValue(category))}
+            onClick={() => {
+              const slug = slugify(category.name);
+              router.push(`/e-commerce/${encodeURIComponent(slug)}`);
+              onCategoryChange(categoryRouteValue(category));
+            }}
             className="flex-1"
           >
             {category.name}
@@ -113,9 +123,10 @@ export default function CategorySidebar({
     <div className="space-y-6">
       {onSearchChange && (
         <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-[var(--radius-lg)] p-4">
-          <h3 className="font-semibold text-[var(--text-primary)] mb-3" style={{ fontFamily: "'Jost', sans-serif" }}>Search</h3>
+          <h3 className="font-semibold text-[var(--text-primary)] mb-3" style={{ fontFamily: "'Poppins', sans-serif" }}>Search</h3>
           <div className="relative">
             <input 
+              ref={searchInputRef}
               type="text" 
               placeholder="Size, color, fabric..."
               value={searchQuery || ''}
@@ -128,7 +139,7 @@ export default function CategorySidebar({
 
       {onSortChange && (
         <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-[var(--radius-lg)] p-4">
-          <h3 className="font-semibold text-[var(--text-primary)] mb-4" style={{ fontFamily: "'Jost', sans-serif" }}>Sort By</h3>
+          <h3 className="font-semibold text-[var(--text-primary)] mb-4" style={{ fontFamily: "'Poppins', sans-serif" }}>Sort By</h3>
           <div className="space-y-2">
             {[
               { id: 'newest', label: 'Newest Arrivals' },
@@ -154,14 +165,17 @@ export default function CategorySidebar({
       )}
 
       <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-[var(--radius-lg)] p-4">
-        <h3 className="font-semibold text-[var(--text-primary)] mb-4" style={{ fontFamily: "'Jost', sans-serif" }}>Categories</h3>
+        <h3 className="font-semibold text-[var(--text-primary)] mb-4" style={{ fontFamily: "'Poppins', sans-serif" }}>Categories</h3>
         <div className="space-y-1 max-h-[400px] overflow-y-auto pr-1 ec-scrollbar">
           <div
             className={`p-2 rounded cursor-pointer transition-colors ${activeCategory === 'all'
                 ? 'bg-[var(--cyan-pale)] text-[var(--cyan)] font-medium border border-[var(--cyan-border)]'
                 : 'hover:bg-[var(--ivory-ghost)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
               }`}
-            onClick={() => onCategoryChange('all')}
+            onClick={() => {
+              router.push('/e-commerce/products');
+              onCategoryChange('all');
+            }}
           >
             All Categories
           </div>
@@ -170,7 +184,7 @@ export default function CategorySidebar({
       </div>
 
       <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-[var(--radius-lg)] p-4">
-        <h3 className="font-semibold text-[var(--text-primary)] mb-4" style={{ fontFamily: "'Jost', sans-serif" }}>Price Range</h3>
+        <h3 className="font-semibold text-[var(--text-primary)] mb-4" style={{ fontFamily: "'Poppins', sans-serif" }}>Price Range</h3>
         <div className="space-y-2">
           {[
             { value: 'all', label: 'All Prices' },

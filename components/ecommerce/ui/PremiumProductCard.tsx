@@ -17,7 +17,7 @@ interface PremiumProductCardProps {
   animDelay?: number;
 }
 
-const PremiumProductCard: React.FC<PremiumProductCardProps> = ({
+const PremiumProductCard: React.FC<PremiumProductCardProps> = React.memo(({
   product, imageErrored = false, onImageError, onOpen, onAddToCart, compact = false, animDelay = 0,
 }) => {
   const { getApplicablePromotion } = usePromotion();
@@ -88,6 +88,7 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = ({
           src={imageUrl}
           alt={product.display_name || product.base_name || product.name}
           fill
+          sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
           className={`object-cover object-top transition-all duration-500`}
           style={{ transform: isHovered && secondaryImage ? 'opacity: 0' : 'opacity: 1' }}
           onLoad={() => setIsLoaded(true)}
@@ -100,6 +101,7 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = ({
             src={secondaryImage}
             alt={`${product.name} - alternate view`}
             fill
+            sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
             className="object-cover object-top"
             style={{ position: 'absolute', inset: 0 }}
           />
@@ -108,17 +110,17 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = ({
         {/* Badges */}
         <div style={{ position: 'absolute', top: '8px', left: '8px', display: 'flex', flexDirection: 'column', gap: '4px', zIndex: 10 }}>
           {isNew && (
-            <span style={{ background: '#111111', color: '#ffffff', fontSize: '10px', fontWeight: 700, padding: '3px 8px', letterSpacing: '0.05em', fontFamily: "'Jost', sans-serif" }}>
+            <span style={{ background: '#111111', color: '#ffffff', fontSize: '10px', fontWeight: 700, padding: '3px 8px', letterSpacing: '0.05em', fontFamily: "'Poppins', sans-serif" }}>
               NEW
             </span>
           )}
           {salePromo && salePercent > 0 && (
-            <span style={{ background: '#e02020', color: '#ffffff', fontSize: '10px', fontWeight: 700, padding: '3px 8px', fontFamily: "'Jost', sans-serif" }}>
+            <span style={{ background: '#e02020', color: '#ffffff', fontSize: '10px', fontWeight: 700, padding: '3px 8px', fontFamily: "'Poppins', sans-serif" }}>
               -{salePercent}%
             </span>
           )}
           {!hasStock && (
-            <span style={{ background: '#f0f0f0', color: '#555555', fontSize: '10px', fontWeight: 700, padding: '3px 8px', fontFamily: "'Jost', sans-serif" }}>
+            <span style={{ background: '#f0f0f0', color: '#555555', fontSize: '10px', fontWeight: 700, padding: '3px 8px', fontFamily: "'Poppins', sans-serif" }}>
               SOLD OUT
             </span>
           )}
@@ -139,7 +141,7 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = ({
               padding: '12px',
               fontSize: '11px',
               fontWeight: 700,
-              fontFamily: "'Jost', sans-serif",
+              fontFamily: "'Poppins', sans-serif",
               textTransform: 'uppercase',
               letterSpacing: '0.10em',
               cursor: 'pointer',
@@ -160,13 +162,13 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = ({
       {/* Info */}
       <div style={{ padding: '10px 0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
         {categoryName && (
-          <p style={{ fontSize: '10px', color: '#999999', fontFamily: "'Jost', sans-serif", fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
+          <p style={{ fontSize: '10px', color: '#999999', fontFamily: "'Poppins', sans-serif", fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>
             {categoryName}
           </p>
         )}
         <h3 style={{
           fontSize: compact ? '14px' : '16px',
-          fontFamily: "'Jost', sans-serif",
+          fontFamily: "'Poppins', sans-serif",
           color: '#111111',
           lineHeight: 1.3,
           fontWeight: 600,
@@ -184,20 +186,20 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
           {salePromo && salePrice !== null ? (
             <>
-              <span style={{ fontSize: '14px', fontWeight: 700, color: '#e02020', fontFamily: "'Jost', sans-serif" }}>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#e02020', fontFamily: "'Poppins', sans-serif" }}>
                 ৳{salePrice.toFixed(0)}
               </span>
-              <span style={{ fontSize: '12px', color: '#999999', textDecoration: 'line-through', fontFamily: "'Jost', sans-serif" }}>
+              <span style={{ fontSize: '12px', color: '#999999', textDecoration: 'line-through', fontFamily: "'Poppins', sans-serif" }}>
                 ৳{originalPrice.toFixed(0)}
               </span>
             </>
           ) : (
             <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-              <span style={{ fontSize: '14px', fontWeight: 700, color: '#111111', fontFamily: "'Jost', sans-serif" }}>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#111111', fontFamily: "'Poppins', sans-serif" }}>
                 ৳{minPrice.toLocaleString()}
               </span>
               {hasPriceRange && (
-                <span style={{ fontSize: '12px', color: '#555555', fontFamily: "'Jost', sans-serif" }}>
+                <span style={{ fontSize: '12px', color: '#555555', fontFamily: "'Poppins', sans-serif" }}>
                   – ৳{maxPrice.toLocaleString()}
                 </span>
               )}
@@ -207,6 +209,6 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = ({
       </div>
     </article>
   );
-};
+});
 
 export default PremiumProductCard;

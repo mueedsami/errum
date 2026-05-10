@@ -28,6 +28,7 @@ export default function EcommerceLayout({ children }: { children: React.ReactNod
             position: 'relative',
           }}
         >
+
           {/* All page content */}
           <div style={{ position: 'relative', zIndex: 10 }}>
             {children}

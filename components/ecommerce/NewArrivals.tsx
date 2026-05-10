@@ -12,6 +12,7 @@ import { fireToast } from '@/lib/globalToast';
 interface NewArrivalsProps {
   categoryId?: number;
   limit?: number;
+  customProducts?: SimpleProduct[];
 }
 
 /* Parse a date string → ms timestamp, returns 0 if unparseable */
@@ -41,17 +42,22 @@ const getCreatedMs = (product: SimpleProduct): number => {
   return best;
 };
 
-const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8 }) => {
+const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8, customProducts }) => {
   const router = useRouter();
-  const [products, setProducts] = useState<SimpleProduct[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [products, setProducts] = useState<SimpleProduct[]>(customProducts || []);
+  const [isLoading, setIsLoading] = useState(!customProducts);
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
   const { addToCart } = useCart();
 
   useEffect(() => {
+    if (customProducts) {
+      setProducts(customProducts);
+      setIsLoading(false);
+      return;
+    }
     fetchNewArrivals();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryId, limit]);
+  }, [categoryId, limit, customProducts]);
 
   const fetchNewArrivals = async () => {
     setIsLoading(true);
@@ -145,7 +151,7 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8 }) => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <div style={{ height: '1px', flex: 1, maxWidth: '40px', background: '#111111' }} />
             <h2 style={{
-              fontFamily: "'Jost', sans-serif",
+              fontFamily: "'Poppins', sans-serif",
               fontSize: '18px',
               fontWeight: 800,
               textTransform: 'uppercase',
@@ -160,7 +166,7 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8 }) => {
           <button
             onClick={() => router.push('/e-commerce/products')}
             style={{
-              fontFamily: "'Jost', sans-serif",
+              fontFamily: "'Poppins', sans-serif",
               fontSize: '12px',
               fontWeight: 700,
               textTransform: 'uppercase',

@@ -678,106 +678,7 @@ export default function OrdersDashboard() {
     return '';
   };
 
-  const extractAddressFromNotes = (notes: any): string => {
-    const text = cleanText(notes);
-    if (!text) return '';
 
-    const match = text.match(/(?:^|[\n|])\s*Address:\s*(.+?)(?=(?:,\s*Change Given:|[\n|]|$))/i);
-    return cleanText(match?.[1] || '');
-  };
-
-  const sanitizeReceiptNotes = (notes: any): string => {
-    let text = cleanText(notes);
-    if (!text) return '';
-
-    text = text.replace(/(?:^|[\n|])\s*Address:\s*(.+?)(?=(?:,\s*Change Given:|[\n|]|$))/ig, '');
-    text = text.replace(/^[\s|,;-]+|[\s|,;-]+$/g, '');
-    text = text.replace(/\s{2,}/g, ' ');
-
-    return text.trim();
-  };
-
-  const buildPrintableOrderWithStore = async (order: any, summaryOrder?: Order): Promise<any> => {
-    const storeId = Number(
-      order?.store?.id ||
-      order?.store_id ||
-      order?.storeId ||
-      summaryOrder?.storeId ||
-      0
-    );
-
-    let storeDetails: any =
-      stores.find((s) => Number(s.id) === storeId) ||
-      (storeId ? null : null);
-
-    if ((!storeDetails?.address || !storeDetails?.phone) && storeId) {
-      try {
-        const res: any = await storeService.getStore(storeId);
-        storeDetails = res?.data ?? res ?? storeDetails;
-      } catch (err) {
-        console.warn('Failed to fetch full store details for receipt:', err);
-      }
-    }
-
-    const summaryAddress = cleanText(summaryOrder?.customer?.address);
-    const addressFromShipping = cleanText(
-      order?.customer_address ||
-      formatShippingAddress(order?.shipping_address) ||
-      formatShippingAddress(order?.shippingAddress)
-    );
-    const addressFromNotes = extractAddressFromNotes(order?.notes);
-    const customerAddress = summaryAddress || addressFromShipping || addressFromNotes;
-
-    const rawShipping =
-      (order?.shipping_address && typeof order.shipping_address === 'object' ? order.shipping_address : null) ||
-      (order?.shippingAddress && typeof order.shippingAddress === 'object' ? order.shippingAddress : null) ||
-      null;
-
-    const shippingAddress = rawShipping
-      ? {
-        ...rawShipping,
-        address:
-          rawShipping.address ||
-          rawShipping.address_line1 ||
-          rawShipping.address_line_1 ||
-          rawShipping.street ||
-          customerAddress ||
-          '',
-      }
-      : customerAddress
-        ? {
-          address: customerAddress,
-          address_line1: customerAddress,
-          street: customerAddress,
-          name: order?.customer?.name || order?.customer_name || summaryOrder?.customer?.name || '',
-          phone: order?.customer?.phone || order?.customer_phone || summaryOrder?.customer?.phone || '',
-        }
-        : order?.shipping_address || order?.shippingAddress || null;
-
-    return {
-      ...order,
-      notes: sanitizeReceiptNotes(order?.notes),
-      customer_address: customerAddress || order?.customer_address || '',
-      shipping_address: shippingAddress,
-      shippingAddress,
-      customer: {
-        ...(typeof order?.customer === 'object' && order?.customer ? order.customer : {}),
-        name: order?.customer?.name || order?.customer_name || summaryOrder?.customer?.name || '',
-        phone: order?.customer?.phone || order?.customer_phone || summaryOrder?.customer?.phone || '',
-        email: order?.customer?.email || order?.customer_email || summaryOrder?.customer?.email || '',
-        address: customerAddress || order?.customer?.address || summaryAddress || '',
-      },
-      store: {
-        ...(typeof order?.store === 'object' && order?.store ? order.store : {}),
-        id: storeId || order?.store?.id,
-        name: order?.store?.name || order?.store_name || summaryOrder?.store || storeDetails?.name || '',
-        address: order?.store?.address || order?.store_address || storeDetails?.address || '',
-        phone: order?.store?.phone || order?.store_phone || storeDetails?.phone || '',
-      },
-      store_address: order?.store_address || order?.store?.address || storeDetails?.address || '',
-      store_phone: order?.store_phone || order?.store?.phone || storeDetails?.phone || '',
-    };
-  };
 
   // ✅ Pathao lookup helpers (for editing Social Commerce address)
   const fetchPathaoCities = async () => {
@@ -1655,25 +1556,78 @@ export default function OrdersDashboard() {
   const handleEditOrder = async (order: Order) => {
     setActiveMenu(null);
     setIsLoadingDetails(true);
-    setShowEditModal(true);
 
     try {
       const fullOrder = await orderService.getById(order.id);
-      setSelectedBackendOrder(fullOrder);
-      const transformedOrder = transformOrder(fullOrder);
 
-      setSelectedOrder(transformedOrder);
-      setEditableOrder(transformedOrder);
-      setServicesTouched(false);
-      ensureProductThumbs((fullOrder.items ?? []).map((it: any) => it?.product_id));
-      if (fullOrder.store?.id) {
-        setPickerStoreId(fullOrder.store.id);
-      }
+      const shippingAddress = (fullOrder as any).shipping_address || (fullOrder as any).delivery_address || {};
+      const normalisedShippingAddress = shippingAddress && typeof shippingAddress === 'object' ? shippingAddress : {};
+      const countryRaw = String(normalisedShippingAddress.country || '').trim();
+      const isInternational = Boolean(countryRaw && countryRaw.toLowerCase() !== 'bangladesh');
+
+      const streetAddress =
+        normalisedShippingAddress.address ||
+        normalisedShippingAddress.street ||
+        normalisedShippingAddress.address_line_1 ||
+        normalisedShippingAddress.address_line1 ||
+        normalisedShippingAddress.address_line_2 ||
+        normalisedShippingAddress.address_line2 ||
+        '';
+
+      // Errum historically used orders.discount_amount for both order-level and
+      // item-level discounts in different places. If it equals the sum of item
+      // discounts, treat it as legacy item discount so Amount Details does not
+      // subtract it twice as a global discount.
+      const itemDiscountTotal = (fullOrder.items || []).reduce((sum: number, item: any) => {
+        return sum + (Number(item.discount_amount || 0) || 0);
+      }, 0);
+      const rawOrderDiscount = Number(fullOrder.discount_amount || 0) || 0;
+      const safeOrderDiscount = Math.abs(rawOrderDiscount - itemDiscountTotal) < 0.01 ? 0 : rawOrderDiscount;
+
+      const prefillPayload = {
+        editOrderId: fullOrder.id,
+        editOrderNumber: fullOrder.order_number,
+        orderType: fullOrder.order_type,
+        storeId: fullOrder.store?.id ? String(fullOrder.store.id) : '',
+        userName: fullOrder.customer?.name || '',
+        userPhone: fullOrder.customer?.phone || '',
+        userEmail: fullOrder.customer?.email || '',
+        socialId: (fullOrder.customer as any)?.social_id || '',
+        orderNotes: fullOrder.notes || '',
+        isInternational,
+        streetAddress,
+        postalCode: normalisedShippingAddress.postal_code || normalisedShippingAddress.postalCode || '',
+        country: normalisedShippingAddress.country || '',
+        state: normalisedShippingAddress.state || '',
+        internationalCity: normalisedShippingAddress.city || '',
+        internationalPostalCode: normalisedShippingAddress.postal_code || normalisedShippingAddress.postalCode || '',
+        deliveryAddress: normalisedShippingAddress.address || normalisedShippingAddress.street || streetAddress,
+        cart: [
+          ...(fullOrder.items || []).map((item: any) => ({
+            ...item,
+            id: item.id || item.order_item_id,
+            product_id: item.product_id || item.product?.id,
+            batch_id: item.batch_id || item.product_batch_id || item.batch?.id || null,
+            productName: item.product_name || item.product?.name || item.name,
+            sku: item.product_sku || item.product?.sku || item.sku || '',
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            discount_amount: item.discount_amount,
+            amount: item.total_amount,
+          })),
+        ],
+        paidAmount: Number(fullOrder.paid_amount || 0),
+        totalAmount: Number(fullOrder.total_amount || 0),
+        outstandingAmount: Number(fullOrder.outstanding_amount || 0),
+        discountAmount: safeOrderDiscount,
+        shippingAmount: Number(fullOrder.shipping_amount || 0),
+      };
+
+      sessionStorage.setItem('socialCommerceEditPrefillV1', JSON.stringify(prefillPayload));
+      window.location.href = '/social-commerce';
     } catch (error: any) {
-      console.error('Failed to load order details:', error);
-      alert('Failed to load order details: ' + error.message);
-      setShowEditModal(false);
-      setEditableOrder(null);
+      console.error('Failed to prepare order editing:', error);
+      alert('Failed to prepare order editing: ' + (error?.message || 'Unknown error'));
     } finally {
       setIsLoadingDetails(false);
     }
@@ -1695,47 +1649,17 @@ export default function OrdersDashboard() {
 
   const canReturnOrExchange = (statusRaw: any) => {
     const s = normalize(statusRaw);
-    return s === 'delivered' || s === 'completed';
+    return Boolean(s) && !['pending', 'assigned_to_store', 'pending_assignment'].includes(s);
   };
 
-  const openReturnModal = async (order: Order) => {
+  const openReturnModal = async (_order: Order) => {
     setActiveMenu(null);
-    try {
-      const fullOrder = await orderService.getById(order.id);
-
-      if (!canReturnOrExchange(fullOrder.status)) {
-        alert(
-          `Return is available only for delivered/completed orders.\n\nOrder: ${fullOrder.order_number}\nCurrent status: ${fullOrder.status}`
-        );
-        return;
-      }
-
-      setSelectedOrderForAction(fullOrder);
-      setShowReturnModal(true);
-    } catch (error: any) {
-      console.error('Failed to load order for return:', error);
-      alert('Failed to load order details for return. Please try again.');
-    }
+    alert('Return is now handled only from the Lookup section. Please open Lookup, search the order, and use Return there.');
   };
 
-  const openExchangeModal = async (order: Order) => {
+  const openExchangeModal = async (_order: Order) => {
     setActiveMenu(null);
-    try {
-      const fullOrder = await orderService.getById(order.id);
-
-      if (!canReturnOrExchange(fullOrder.status)) {
-        alert(
-          `Exchange is available only for delivered/completed orders.\n\nOrder: ${fullOrder.order_number}\nCurrent status: ${fullOrder.status}`
-        );
-        return;
-      }
-
-      setSelectedOrderForAction(fullOrder);
-      setShowExchangeModal(true);
-    } catch (error: any) {
-      console.error('Failed to load order for exchange:', error);
-      alert('Failed to load order details for exchange. Please try again.');
-    }
+    alert('Exchange is now handled only from the Lookup section. Please open Lookup, search the order, and use Exchange there.');
   };
 
   const handleReturnSubmit = async (returnData: {
@@ -2155,7 +2079,9 @@ export default function OrdersDashboard() {
       alert('Please select at least one order to send to Pathao.');
       return;
     }
-    if (!confirm(`Send ${selectedOrders.size} order(s) to Pathao?`)) return;
+    
+    // Add informative direction about the 19 per 60 sec rate limit
+    if (!confirm(`Send ${selectedOrders.size} order(s) to Pathao?\n\nNote: Pathao API limits us to 19 orders per minute. This process will run in the background and evenly spread out the requests to avoid rate limits.`)) return;
 
     const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -2176,108 +2102,21 @@ export default function OrdersDashboard() {
 
     try {
       const selectedOrdersList = orders.filter((o) => selectedOrders.has(o.id));
-      const shipmentIdsToSend: number[] = [];
+      const orderIdsToSend = selectedOrdersList.map(o => Number(o.id)).filter(id => !isNaN(id) && id > 0);
       const detailsBuffer: Array<{ orderId?: number; orderNumber?: string; status: 'success' | 'failed'; message: string }> = [];
 
-      for (let idx = 0; idx < selectedOrdersList.length; idx++) {
-        const order = selectedOrdersList[idx];
-        setPathaoProgress((prev) => ({ ...prev, current: idx + 1 }));
+      // Pass all order IDs directly to backend for queue processing
+      const started = await shipmentService.bulkSendOrdersToPathao(orderIdsToSend);
 
-        try {
-          let existingShipment: any = null;
-          try {
-            existingShipment = await shipmentService.getByOrderId(order.id);
-          } catch {
-            existingShipment = null;
-          }
-
-          if (existingShipment) {
-            if (existingShipment.pathao_consignment_id) {
-              failedCount++;
-              detailsBuffer.push({ orderId: order.id, orderNumber: order.orderNumber, status: 'failed', message: 'Already sent to Pathao' });
-              setPathaoProgress((prev) => ({ ...prev, failed: failedCount, details: [...prev.details, detailsBuffer[detailsBuffer.length - 1]] }));
-              continue;
-            }
-            shipmentIdsToSend.push(existingShipment.id);
-          } else {
-            const newShipment = await shipmentService.create({
-              order_id: order.id,
-              delivery_type: 'home_delivery',
-              package_weight: 1.0,
-              send_to_pathao: false,
-            });
-            shipmentIdsToSend.push(newShipment.id);
-          }
-        } catch (error: any) {
-          failedCount++;
-          const item = {
-            orderId: order.id,
-            orderNumber: order.orderNumber,
-            status: 'failed' as const,
-            message: error?.response?.data?.message || error.message || 'Failed',
-          };
-          detailsBuffer.push(item);
-          setPathaoProgress((prev) => ({ ...prev, failed: failedCount, details: [...prev.details, item] }));
-        }
-
-        await wait(250);
-      }
-
-      if (shipmentIdsToSend.length === 0) {
-        setPathaoProgress((prev) => ({
-          ...prev,
-          current: prev.total,
-          success: successCount,
-          failed: failedCount,
-          batchStatus: 'completed',
-        }));
-
-        alert(`Bulk Send to Pathao Completed!\n\nSuccess: ${successCount}\nFailed: ${failedCount}`);
-        setSelectedOrders(new Set());
-        await loadOrders();
-        return;
-      }
-
-      // Start queue batch send (default async mode)
-      const started = await shipmentService.startBulkSendToPathao(shipmentIdsToSend);
-
-      // Backward compatible handling if server responds in sync mode
-      if ('success' in started && 'failed' in started) {
-        for (const item of started.success || []) {
-          successCount++;
-          detailsBuffer.push({
-            orderNumber: item.shipment_number,
-            status: 'success',
-            message: `Consignment ID: ${item.pathao_consignment_id}`,
-          });
-        }
-
-        for (const item of started.failed || []) {
-          failedCount++;
-          detailsBuffer.push({
-            orderNumber: item.shipment_number,
-            status: 'failed',
-            message: item.reason,
-          });
-        }
-
-        setPathaoProgress((prev) => ({
-          ...prev,
-          current: prev.total,
-          success: successCount,
-          failed: failedCount,
-          batchStatus: 'completed',
-          details: detailsBuffer,
-        }));
-      } else {
+      if ('batch_code' in started && started.batch_code) {
         const batchCode = started.batch_code;
         const immediateFailures = Array.isArray(started.immediate_failures) ? started.immediate_failures : [];
 
         if (immediateFailures.length > 0) {
           failedCount += immediateFailures.length;
-          immediateFailures.forEach((f) => {
+          immediateFailures.forEach((f: any) => {
             detailsBuffer.push({
-              orderNumber: f.shipment_number,
+              orderNumber: f.order_number || f.shipment_number,
               status: 'failed',
               message: f.reason,
             });
@@ -2294,6 +2133,7 @@ export default function OrdersDashboard() {
 
         let summary = await shipmentService.getBulkStatus(batchCode);
 
+        // Keep polling until the batch is complete
         while (summary.status === 'pending' || summary.status === 'processing') {
           successCount = summary.success;
           const queuedFailed = summary.failed;
@@ -2308,7 +2148,12 @@ export default function OrdersDashboard() {
             failed: failedCount + queuedFailed,
           }));
 
-          await wait(2000);
+          // Trigger background queue worker just in case cron isn't running
+          try {
+             await axios.post('/shipments/pathao-queue-tick', { max_jobs: 5, max_time: 15 });
+          } catch (e) {}
+
+          await wait(2500); // Poll every 2.5 seconds
           summary = await shipmentService.getBulkStatus(batchCode);
         }
 
@@ -2341,39 +2186,47 @@ export default function OrdersDashboard() {
           failed: failedCount,
           details: detailsBuffer,
         }));
+      } else if ('success' in started && 'failed' in started) {
+        // Sync response mode fallback
+        for (const item of started.success || []) {
+          successCount++;
+          detailsBuffer.push({
+            orderNumber: item.shipment_number,
+            status: 'success',
+            message: `Consignment ID: ${item.pathao_consignment_id}`,
+          });
+        }
+
+        for (const item of started.failed || []) {
+          failedCount++;
+          detailsBuffer.push({
+            orderNumber: item.shipment_number,
+            status: 'failed',
+            message: item.reason,
+          });
+        }
+
+        setPathaoProgress((prev) => ({
+          ...prev,
+          current: prev.total,
+          success: successCount,
+          failed: failedCount,
+          batchStatus: 'completed',
+          details: detailsBuffer,
+        }));
       }
 
       alert(`Bulk Send to Pathao Completed!\n\nSuccess: ${successCount}\nFailed: ${failedCount}`);
       setSelectedOrders(new Set());
-      // Set courier marker to Pathao in DB (persists after reload + can be filtered)
+      
+      // Update intended courier to Pathao optimistically
       try {
-        const ids = selectedOrdersList
-          .map((o) => Number(o?.id))
-          .filter((id) => Number.isFinite(id) && id > 0);
-
-        if (ids.length > 0) {
-          const idSet = new Set<number>(ids);
-          const concurrency = Math.min(5, ids.length);
-          let idx = 0;
-
-          const worker = async () => {
-            while (idx < ids.length) {
-              const current = ids[idx++];
-              try {
-                await orderService.setIntendedCourier(current, 'pathao');
-              } catch {
-                // ignore per-order failures
-              }
-            }
-          };
-
-          await Promise.all(Array.from({ length: concurrency }, () => worker()));
-
-          // optimistic UI update
+        if (orderIdsToSend.length > 0) {
+          const idSet = new Set<number>(orderIdsToSend);
           setOrders((prev) => prev.map((o) => (idSet.has(o.id) ? { ...o, intendedCourier: 'pathao' } : o)));
         }
       } catch (e) {
-        console.warn('Failed to set intended courier for bulk Pathao send:', e);
+        console.warn('Failed to set intended courier:', e);
       }
 
       await loadOrders();
@@ -2393,7 +2246,7 @@ export default function OrdersDashboard() {
           batchStatus: 'preparing',
           details: [],
         });
-      }, 2500);
+      }, 5000);
     }
   };
 
@@ -2444,8 +2297,7 @@ export default function OrdersDashboard() {
 
         try {
           const fullOrder = await orderService.getById(o.id);
-          const printableOrder = await buildPrintableOrderWithStore(fullOrder, o);
-          fullOrders.push(printableOrder);
+          fullOrders.push(fullOrder);
         } catch (e) {
           console.error('Failed to fetch order for invoice:', o.id, e);
           setBulkPrintProgress((prev) => ({ ...prev, failed: prev.failed + 1 }));
@@ -2541,8 +2393,7 @@ export default function OrdersDashboard() {
 
         try {
           const fullOrder = await orderService.getById(o.id);
-          const printableOrder = await buildPrintableOrderWithStore(fullOrder, o);
-          fullOrders.push(printableOrder);
+          fullOrders.push(fullOrder);
         } catch (e) {
           console.error('Failed to fetch order for receipt:', o.id, e);
           setBulkPrintProgress((prev) => ({ ...prev, failed: prev.failed + 1 }));
@@ -2587,46 +2438,50 @@ export default function OrdersDashboard() {
     }
   };
 
-  // ✅ Single: Send one order to Pathao
+  // ✅ Single: Send one order to Pathao (using the queue-based batch system for reliability)
   const handleSingleSendToPathao = async (order: Order) => {
-    if (!confirm(`Send order ${order.orderNumber} to Pathao?`)) return;
+    if (!confirm(`Send order ${order.orderNumber} to Pathao?\n\nThis will safely queue the order and create the shipment in the background.`)) return;
 
     setSingleActionLoading({ orderId: order.id, action: 'pathao' });
     setActiveMenu(null);
 
+    const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
     try {
-      let shipment: any = null;
-      try {
-        shipment = await shipmentService.getByOrderId(order.id);
-      } catch {
-        shipment = null;
-      }
+      // Create a batch of 1 order directly
+      const started = await shipmentService.bulkSendOrdersToPathao([order.id]);
 
-      if (shipment?.pathao_consignment_id) {
-        alert(`Already sent to Pathao.\nConsignment ID: ${shipment.pathao_consignment_id}`);
-        return;
-      }
+      if ('batch_code' in started && started.batch_code) {
+        const batchCode = started.batch_code;
+        let summary = await shipmentService.getBulkStatus(batchCode);
 
-      if (!shipment?.id) {
-        shipment = await shipmentService.create({
-          order_id: order.id,
-          delivery_type: 'home_delivery',
-          package_weight: 1.0,
-          send_to_pathao: false,
-        });
-      }
+        // Keep polling until the batch is complete
+        while (summary.status === 'pending' || summary.status === 'processing') {
+          // Trigger background queue worker
+          try {
+             await axios.post('/shipments/pathao-queue-tick', { max_jobs: 2, max_time: 10 });
+          } catch (e) {}
 
-      const shipmentId = shipment?.id;
-      if (!shipmentId) {
-        alert('Failed to create/get shipment ID for this order.');
-        return;
-      }
+          await wait(2000);
+          summary = await shipmentService.getBulkStatus(batchCode);
+        }
 
-      const sent = await shipmentService.sendToPathao(shipmentId);
-      alert(
-        `✅ Sent to Pathao successfully!\n\nShipment: ${sent?.shipment_number ?? shipment?.shipment_number ?? ''}\nConsignment ID: ${sent?.pathao_consignment_id ?? ''
-        }`
-      );
+        const finalDetails = await shipmentService.getBulkStatusDetails(batchCode);
+        const result = finalDetails.results?.[0];
+
+        if (result && result.success) {
+          alert(`✅ Sent to Pathao successfully!\n\nConsignment ID: ${result.consignment_id}`);
+        } else {
+          alert(`Failed to send to Pathao: ${result?.message || 'Unknown error'}`);
+        }
+      } else if ('success' in started && 'failed' in started) {
+        // Sync response fallback
+        if (started.success.length > 0) {
+          alert(`✅ Sent to Pathao successfully!\n\nConsignment ID: ${started.success[0].pathao_consignment_id}`);
+        } else if (started.failed.length > 0) {
+          alert(`Failed to send to Pathao: ${started.failed[0].reason}`);
+        }
+      }
 
       // Set courier marker to Pathao in DB (persists after reload)
       try {
@@ -2678,8 +2533,7 @@ export default function OrdersDashboard() {
       }
 
       const fullOrder = await orderService.getById(order.id);
-      const printableOrder = await buildPrintableOrderWithStore(fullOrder, order);
-      await printReceipt(printableOrder as any, status.connected ? selectedPrinter : undefined);
+      await printReceipt(fullOrder as any, status.connected ? selectedPrinter : undefined);
 
       alert('✅ Receipt ready (printed or opened in preview)!');
     } catch (error: any) {
@@ -2718,8 +2572,7 @@ export default function OrdersDashboard() {
       }
 
       const fullOrder = await orderService.getById(order.id);
-      const printableOrder = await buildPrintableOrderWithStore(fullOrder, order);
-      await printReceipt(printableOrder as any, status.connected ? selectedPrinter : undefined, {
+      await printReceipt(fullOrder as any, status.connected ? selectedPrinter : undefined, {
         template: 'pos_receipt',
         title: 'Invoice',
       });
@@ -4795,8 +4648,8 @@ export default function OrdersDashboard() {
         </div>
       )}
 
-      {/* Edit Order Modal */}
-      {showEditModal && (
+      {/* Legacy Edit Order Modal removed from the active flow. Orders now edit through /social-commerce. */}
+      {false && showEditModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-900 rounded-xl max-w-4xl w-full max-h-[90vh] overflow-auto border border-gray-200 dark:border-gray-800">
             <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between z-10">

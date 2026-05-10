@@ -46,6 +46,8 @@ interface ExchangeProductModalProps {
     removedProducts: Array<{
       order_item_id: number;
       quantity: number;
+      unit_price: number;
+      total_price: number;
       product_barcode_id?: number;
     }>;
     replacementProducts: Array<{
@@ -53,6 +55,8 @@ interface ExchangeProductModalProps {
       batch_id: number;
       quantity: number;
       unit_price: number;
+      total_price?: number;
+      discount_amount?: number;
       barcode?: string;
       barcode_id?: number;
     }>;
@@ -66,6 +70,11 @@ interface ExchangeProductModalProps {
     };
     exchangeAtStoreId: number; // ✅ NEW FIELD
   }) => Promise<void>;
+}
+
+interface ReturnedBarcode {
+  barcode: string;
+  barcode_id?: number;
 }
 
 interface ReplacementProduct {
@@ -85,12 +94,13 @@ interface ReplacementProduct {
 export default function ExchangeProductModal({ order, onClose, onExchange }: ExchangeProductModalProps) {
   const [selectedProducts, setSelectedProducts] = useState<number[]>([]);
   const [exchangeQuantities, setExchangeQuantities] = useState<{ [key: number]: number }>({});
+  const [returnedBarcodes, setReturnedBarcodes] = useState<{ [key: number]: ReturnedBarcode[] }>({});
   const [replacementProducts, setReplacementProducts] = useState<ReplacementProduct[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-
+  const [soldAtPrices, setSoldAtPrices] = useState<{ [key: number]: string }>({});
   // ✅ NEW: Store selection
   const [stores, setStores] = useState<Store[]>([]);
-  const [exchangeAtStoreId, setExchangeAtStoreId] = useState<number>(order.store.id);
+  const [exchangeAtStoreId, setExchangeAtStoreId] = useState<number>(order.store?.id || 0);
   const [inventoryWarnings, setInventoryWarnings] = useState<{ [key: number]: string }>({});
   const [isCheckingInventory, setIsCheckingInventory] = useState(false);
 
@@ -131,7 +141,7 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
     try {
       const response = await storeService.getStores({ is_active: true });
       console.log('🏪 Store service response:', response);
-      
+
       let storesData: Store[] = [];
       if (response?.success && response?.data) {
         if (Array.isArray(response.data.data)) {
@@ -144,12 +154,15 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
       } else if (Array.isArray(response)) {
         storesData = response;
       }
-      
+
       console.log('✅ Parsed stores:', storesData);
       setStores(storesData);
-      
+
       if (storesData.length === 0) {
         console.warn('⚠️ No stores available');
+      } else if (exchangeAtStoreId === 0) {
+        // ✅ NEW: Auto-select first store if none assigned
+        setExchangeAtStoreId(storesData[0].id);
       }
     } catch (error) {
       console.error('❌ Failed to fetch stores:', error);
@@ -167,11 +180,11 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
     try {
       // Here you would call your inventory service to check availability
       // For now, we'll show a placeholder implementation
-      
+
       for (const itemId of selectedProducts) {
         const item = order.items.find(i => i.id === itemId);
         const exchangeQty = exchangeQuantities[itemId] || 0;
-        
+
         if (!item || exchangeQty === 0) continue;
 
         // TODO: Replace with actual API call to check inventory
@@ -182,7 +195,7 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
         // });
 
         // Placeholder: If exchange is at a different store, show warning
-        if (exchangeAtStoreId !== order.store.id) {
+        if (order.store && exchangeAtStoreId !== order.store.id) {
           warnings[itemId] = `⚠️ Please verify inventory at ${stores.find(s => s.id === exchangeAtStoreId)?.name || 'selected store'}`;
         }
       }
@@ -195,8 +208,98 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
     }
   };
 
-  // Handle barcode scanned
-  const handleProductScanned = (scannedProduct: ScannedProduct) => {
+  // Handle barcode scanned.
+  // Scanner mode is explicit so a same-product replacement does not get mistaken as a returned item.
+  const handleProductScanned = (scannedProduct: ScannedProduct, scanPurpose: 'return' | 'replacement' = 'replacement') => {
+    if (scanPurpose === 'return') {
+      // 1. Check if it's a return (part of the original order)
+      // We match by product_id or barcode/SKU.
+      const matchingOrderItems = order.items.filter(item =>
+        item.product_id === scannedProduct.productId ||
+        item.barcode === scannedProduct.barcode ||
+        item.product_sku === scannedProduct.barcode // Some scanners return SKU as barcode
+      );
+
+      let targetItem = null;
+      if (matchingOrderItems.length > 0) {
+        // Try to find one where the barcode matches exactly
+        targetItem = matchingOrderItems.find(item => item.barcode === scannedProduct.barcode);
+        // Fallback to any item of the same product that isn't fully "scanned" yet
+        if (!targetItem) {
+          targetItem = matchingOrderItems.find(item => (exchangeQuantities[item.id] || 0) < item.quantity);
+        }
+      }
+
+      if (!targetItem) {
+        alert('Product not found in this order. Replacement products must be scanned from the replacement scanner section.');
+        return;
+      }
+      const currentQty = exchangeQuantities[targetItem.id] || 0;
+      const currentBarcodes = returnedBarcodes[targetItem.id] || [];
+      const scannedCode = String(scannedProduct.barcode || '').trim();
+      const targetHasTrackedBarcode = Boolean(targetItem.barcode_id || targetItem.barcode);
+      const shouldRecordBarcode = Boolean(
+        scannedProduct.barcodeId ||
+        (targetHasTrackedBarcode && scannedCode && scannedCode === String(targetItem.barcode || '').trim())
+      );
+
+      // Prevent duplicate barcode scan for the same tracked return item.
+      // Non-tracked counter items are quantity-based and should not store SKU as barcode.
+      if (shouldRecordBarcode && currentBarcodes.some(b => b.barcode === scannedCode)) {
+        alert('This barcode has already been scanned for this return item.');
+        return;
+      }
+
+      const addQuantity = () => {
+        if (currentQty >= targetItem.quantity) {
+          alert('This product is already fully selected for return.');
+          return false;
+        }
+        setExchangeQuantities(prev => ({ ...prev, [targetItem.id]: currentQty + 1 }));
+        return true;
+      };
+
+      if (shouldRecordBarcode) {
+        const newBarcode: ReturnedBarcode = {
+          barcode: scannedCode,
+          barcode_id: scannedProduct.barcodeId || targetItem.barcode_id
+        };
+
+        if (currentQty === 1 && currentBarcodes.length === 0) {
+          setReturnedBarcodes(prev => ({
+            ...prev,
+            [targetItem.id]: [newBarcode]
+          }));
+        } else if (addQuantity()) {
+          setReturnedBarcodes(prev => ({
+            ...prev,
+            [targetItem.id]: [...(prev[targetItem.id] || []), newBarcode]
+          }));
+        } else {
+          return;
+        }
+      } else if (!addQuantity()) {
+        return;
+      }
+
+      if (!selectedProducts.includes(targetItem.id)) {
+        setSelectedProducts(prev => [...prev, targetItem.id]);
+      }
+
+      // Auto-fill sold at price if not set
+      if (!soldAtPrices[targetItem.id]) {
+        setSoldAtPrices(prev => ({ ...prev, [targetItem.id]: targetItem.unit_price }));
+      }
+      return;
+    }
+
+    // 2. Replacement product scanner path
+    // Prevent duplicate barcode in replacement
+    if (replacementProducts.some(p => p.barcode === scannedProduct.barcode)) {
+      alert('This barcode is already added as a replacement.');
+      return;
+    }
+
     const newItem: ReplacementProduct = {
       id: Date.now() + Math.random(),
       product_id: scannedProduct.productId,
@@ -208,21 +311,51 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
       amount: scannedProduct.price,
       available: scannedProduct.availableQty,
       barcode: scannedProduct.barcode,
-      // barcode_id will be handled by backend or can be omitted if not available
+      barcode_id: scannedProduct.barcodeId,
     };
 
     setReplacementProducts(prev => [...prev, newItem]);
   };
 
+  const handleRemoveReturnBarcode = (itemId: number, barcode: string) => {
+    setReturnedBarcodes(prev => {
+      const filtered = (prev[itemId] || []).filter(b => b.barcode !== barcode);
+      return { ...prev, [itemId]: filtered };
+    });
+    setExchangeQuantities(prev => {
+      const newQty = (prev[itemId] || 1) - 1;
+      if (newQty <= 0) {
+        const next = { ...prev };
+        delete next[itemId];
+        // Also deselect if no barcodes left
+        setSelectedProducts(p => p.filter(id => id !== itemId));
+        return next;
+      }
+      return { ...prev, [itemId]: newQty };
+    });
+  };
+
   const handleProductCheckbox = (itemId: number) => {
     setSelectedProducts(prev => {
-      if (prev.includes(itemId)) {
+      const isSelected = prev.includes(itemId);
+      if (isSelected) {
         const newSelected = prev.filter(id => id !== itemId);
         const newQuantities = { ...exchangeQuantities };
         delete newQuantities[itemId];
         setExchangeQuantities(newQuantities);
+
+        const newReturnedBarcodes = { ...returnedBarcodes };
+        delete newReturnedBarcodes[itemId];
+        setReturnedBarcodes(newReturnedBarcodes);
+
         return newSelected;
       } else {
+        const item = order.items.find(i => i.id === itemId);
+        if (item) {
+          // Initialize values so manual edits work immediately
+          setSoldAtPrices(prevPrices => ({ ...prevPrices, [itemId]: item.unit_price }));
+          setExchangeQuantities(prevQty => ({ ...prevQty, [itemId]: Math.max(prevQty[itemId] || 0, 1) }));
+        }
         return [...prev, itemId];
       }
     });
@@ -231,6 +364,10 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
   const handleQuantityChange = (itemId: number, qty: number, maxQty: number) => {
     if (qty < 1 || qty > maxQty) return;
     setExchangeQuantities(prev => ({ ...prev, [itemId]: qty }));
+  };
+
+  const handleSoldAtChange = (itemId: number, price: string) => {
+    setSoldAtPrices(prev => ({ ...prev, [itemId]: price }));
   };
 
   const handleRemoveReplacement = (id: number | string) => {
@@ -267,13 +404,16 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
     return isNaN(n) ? 0 : n;
   };
 
+  const outstandingAmount = parsePrice(order.total_amount) - parsePrice(order.paid_amount);
+  const isFullyPaid = Math.abs(outstandingAmount) < 0.01;
+
   const calculateTotals = () => {
     // Calculate original amount for exchanged items
     const originalAmount = selectedProducts.reduce((sum, itemId) => {
       const item = order.items.find(i => i.id === itemId);
       if (!item) return sum;
       const qty = exchangeQuantities[itemId] || 0;
-      const price = parsePrice(item.unit_price);
+      const price = parsePrice(soldAtPrices[itemId] || 0);
       return sum + (price * qty);
     }, 0);
 
@@ -302,19 +442,24 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
 
   const totals = calculateTotals();
 
-  const cashFromNotes = 
-    (note1000 * 1000) + (note500 * 500) + (note200 * 200) + 
-    (note100 * 100) + (note50 * 50) + (note20 * 20) + 
+  const cashFromNotes =
+    (note1000 * 1000) + (note500 * 500) + (note200 * 200) +
+    (note100 * 100) + (note50 * 50) + (note20 * 20) +
     (note10 * 10) + (note5 * 5) + (note2 * 2) + (note1 * 1);
 
   const effectiveCash = cashFromNotes > 0 ? cashFromNotes : cashAmount;
   const totalPaymentRefund = effectiveCash + cardAmount + bkashAmount + nagadAmount;
-  
-  const due = totals.difference > 0 
+
+  const due = totals.difference > 0
     ? Math.max(0, totals.difference - totalPaymentRefund)
     : Math.max(0, Math.abs(totals.difference) - totalPaymentRefund);
 
   const handleProcessExchange = async () => {
+    if (!isFullyPaid) {
+      alert(`This order has an outstanding balance of ৳${outstandingAmount.toFixed(2)}. It must be fully paid before an exchange can be processed.`);
+      return;
+    }
+
     if (selectedProducts.length === 0) {
       alert('Please select at least one product to exchange');
       return;
@@ -332,6 +477,24 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
 
     if (hasInvalidQuantities) {
       alert('Please set valid quantities for all selected products');
+      return;
+    }
+
+    const hasMissingPrices = selectedProducts.some(id => {
+      const price = soldAtPrices[id];
+      return !price || parseFloat(price) < 0;
+    });
+
+    if (hasMissingPrices) {
+      alert('Please enter the manual "Sold At" price for all items being exchanged as per the historical record.');
+      return;
+    }
+
+    // 🚫 Block partial payments/refunds (Frontend enforcement)
+    if (due > 0.01) {
+      const actionType = totals.difference > 0 ? 'payment' : 'refund';
+      const requiredAmount = Math.abs(totals.difference).toFixed(2);
+      alert(`Full ${actionType} required. Please ${actionType === 'payment' ? 'collect' : 'process'} exactly ৳${requiredAmount} to complete this exchange.`);
       return;
     }
 
@@ -375,19 +538,42 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
     setIsProcessing(true);
     try {
       const exchangeData = {
-        removedProducts: selectedProducts.map(itemId => {
+        removedProducts: selectedProducts.flatMap(itemId => {
           const item = order.items.find(i => i.id === itemId);
-          return {
-            order_item_id: itemId,
-            quantity: exchangeQuantities[itemId],
-            product_barcode_id: item?.barcode_id,
-          };
+          const unitPrice = parsePrice(soldAtPrices[itemId]);
+          const barcodes = returnedBarcodes[itemId] || [];
+
+          if (barcodes.length > 0) {
+            // Send one entry per tracked barcode
+            return barcodes.map(bc => ({
+              order_item_id: itemId,
+              quantity: 1,
+              unit_price: unitPrice,
+              total_price: unitPrice,
+              barcode: bc.barcode,
+              product_barcode_id: bc.barcode_id || item?.barcode_id,
+              barcode_id: bc.barcode_id || item?.barcode_id,
+            }));
+          } else {
+            // Quantity-based/non-tracked item. Do not send SKU as barcode.
+            const quantity = exchangeQuantities[itemId] || 0;
+            return [{
+              order_item_id: itemId,
+              quantity: quantity,
+              unit_price: unitPrice,
+              total_price: unitPrice * quantity,
+              product_barcode_id: item?.barcode_id,
+              barcode_id: item?.barcode_id,
+            }];
+          }
         }),
         replacementProducts: replacementProducts.map(p => ({
           product_id: p.product_id,
           batch_id: p.batch_id,
           quantity: p.quantity,
           unit_price: p.price,
+          total_price: p.amount,
+          discount_amount: 0,
           barcode: p.barcode,
           barcode_id: p.barcode_id,
         })),
@@ -403,7 +589,7 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
       };
 
       await onExchange(exchangeData);
-        
+
     } catch (error: any) {
       console.error('Exchange failed:', error);
       alert(error.message || 'Failed to process exchange');
@@ -483,7 +669,7 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
                       Select the store where this exchange will be processed. Items must be available at the selected location.
                     </p>
-                    
+
                     {stores.length === 0 ? (
                       <div className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
                         Loading stores...
@@ -497,16 +683,16 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
                         {stores.map(store => (
                           <option key={store.id} value={store.id}>
                             {store.name} {store.is_warehouse ? '(Warehouse)' : '(Store)'}
-                            {store.id === order.store.id ? ' - Original Order Location' : ''}
+                            {order.store && store.id === order.store.id ? ' - Original Order Location' : ''}
                           </option>
                         ))}
                       </select>
                     )}
-                    
+
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                      {stores.length} store(s) available • Original order location: {order.store.name}
+                      {stores.length} store(s) available • Original order location: {order.store?.name || 'Unknown'}
                     </p>
-                    
+
                     {isCheckingInventory && (
                       <div className="flex items-center gap-2 mt-2 text-sm text-blue-600 dark:text-blue-400">
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -517,6 +703,19 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
                 </div>
               </div>
 
+              {!isFullyPaid && (
+                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4 flex items-start gap-3 mt-4 mb-4">
+                  <AlertCircle className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-bold text-amber-900 dark:text-amber-200">Payment Required</p>
+                    <p className="text-xs text-amber-800 dark:text-amber-300">
+                      This order has an outstanding balance of ৳{outstandingAmount.toFixed(2)}. 
+                      Exchanges can only be processed for fully paid orders.
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Select Items to Exchange */}
               <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700">
                 <h3 className="font-semibold text-gray-900 dark:text-white text-lg mb-4">
@@ -524,99 +723,163 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
                 </h3>
 
                 {order.items && order.items.length > 0 ? (
-                  <div className="space-y-3">
-                    {order.items.map((item) => {
-                      const hasWarning = inventoryWarnings[item.id];
-                      
+                  <div className="space-y-4">
+                    {/* Grouping items by product to show a "Product Card" with multiple barcodes */}
+                    {Object.values(order.items.reduce((acc, item) => {
+                      const key = `${item.product_id}-${item.batch_id}-${item.unit_price}`;
+                      if (!acc[key]) {
+                        acc[key] = {
+                          product_id: item.product_id,
+                          product_name: item.product_name,
+                          product_sku: item.product_sku,
+                          unit_price: item.unit_price,
+                          batch_number: item.batch_number,
+                          items: [] as OrderItem[],
+                        };
+                      }
+                      acc[key].items.push(item);
+                      return acc;
+                    }, {} as Record<string, any>)).map((group: any) => {
+                      const groupPrice = parsePrice(group.unit_price);
+                      const groupTotalQty = group.items.reduce((sum: number, it: any) => sum + it.quantity, 0);
+
                       return (
                         <div
-                          key={item.id}
-                          className={`bg-white dark:bg-gray-900 rounded-lg p-4 border ${
-                            hasWarning 
-                              ? 'border-orange-300 dark:border-orange-700' 
-                              : 'border-gray-200 dark:border-gray-700'
-                          }`}
+                          key={`${group.product_id}-${group.batch_number}`}
+                          className="bg-white dark:bg-gray-900 rounded-xl p-4 border border-gray-200 dark:border-gray-700 shadow-sm"
                         >
-                          <div className="flex items-start gap-3">
-                            <input
-                              type="checkbox"
-                              checked={selectedProducts.includes(item.id)}
-                              onChange={() => handleProductCheckbox(item.id)}
-                              className="mt-1 w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                            />
+                          <div className="flex items-start gap-4">
                             <div className="flex-1">
                               <div className="flex items-center justify-between mb-2">
                                 <div>
-                                  <p className="font-medium text-gray-900 dark:text-white">
-                                    {item.product_name}
+                                  <p className="font-bold text-gray-900 dark:text-white text-base">
+                                    {group.product_name}
                                   </p>
                                   <div className="flex items-center gap-3 mt-1">
-                                    <span className="text-xs text-gray-500 dark:text-gray-400 font-mono">
-                                      SKU: {item.product_sku}
+                                    <span className="text-xs text-gray-500 dark:text-gray-400 font-mono bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded">
+                                      SKU: {group.product_sku}
                                     </span>
-                                    {item.batch_number && (
+                                    {group.batch_number && (
                                       <span className="text-xs text-gray-500 dark:text-gray-400">
-                                        Batch: {item.batch_number}
-                                      </span>
-                                    )}
-                                    {item.barcode && (
-                                      <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded font-mono">
-                                        🏷️ {item.barcode}
+                                        Batch: {group.batch_number}
                                       </span>
                                     )}
                                   </div>
                                 </div>
-                                <p className="font-bold text-gray-900 dark:text-white">
-                                  ৳{(parsePrice(item.unit_price) * item.quantity).toFixed(2)}
-                                </p>
+                                <div className="text-right">
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">Unit Price</p>
+                                  <p className="font-bold text-gray-900 dark:text-white">
+                                    ৳{groupPrice.toFixed(2)}
+                                  </p>
+                                </div>
                               </div>
-                              <p className="text-xs text-gray-600 dark:text-gray-400 mb-3">
-                                Price: ৳{parsePrice(item.unit_price).toFixed(2)} × Qty: {item.quantity}
-                              </p>
 
-                              {/* ✅ NEW: Show inventory warning */}
-                              {hasWarning && selectedProducts.includes(item.id) && (
-                                <div className="mb-3 p-2 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-700 rounded-lg">
-                                  <div className="flex items-start gap-2">
-                                    <AlertCircle className="w-4 h-4 text-orange-600 dark:text-orange-400 mt-0.5 flex-shrink-0" />
-                                    <p className="text-xs text-orange-700 dark:text-orange-300">
-                                      {hasWarning}
-                                    </p>
-                                  </div>
+                              <div className="mt-4">
+                                <label className="block text-[10px] uppercase tracking-wider font-bold text-gray-400 mb-2">
+                                  Available Barcodes / Units (Click to select)
+                                </label>
+                                <div className="flex flex-wrap gap-2">
+                                  {group.items.map((item: OrderItem) => {
+                                    // If an item has Qty > 1 (non-tracked), we show it as one clickable unit
+                                    // But usually we expect Qty 1 for individually tracked items.
+                                    const isItemSelected = selectedProducts.includes(item.id);
+                                    const qtyReturned = exchangeQuantities[item.id] || 0;
+                                    const isFullyReturned = qtyReturned >= item.quantity;
+
+                                    return (
+                                      <button
+                                        key={item.id}
+                                        onClick={() => {
+                                          if (isFullyReturned) {
+                                            // Handle removal or just scan again?
+                                            // Clicking an already fully selected one should probably not do anything 
+                                            // or toggle selection if it was a manual click.
+                                            // For now, let's allow "scanning" it again which will alert.
+                                          }
+                                          handleProductScanned({
+                                            productId: item.product_id,
+                                            productName: item.product_name,
+                                            batchId: item.batch_id,
+                                            batchNumber: item.batch_number || '',
+                                            price: parsePrice(item.unit_price),
+                                            availableQty: item.quantity,
+                                            barcode: item.barcode_id && item.barcode ? item.barcode : '',
+                                            barcodeId: item.barcode_id
+                                          }, 'return');
+                                        }}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all flex items-center gap-2 border-2 ${isItemSelected
+                                            ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-500 text-blue-700 dark:text-blue-300 shadow-sm'
+                                            : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:border-gray-400'
+                                          }`}
+                                      >
+                                        <div className={`w-2 h-2 rounded-full ${isItemSelected ? 'bg-blue-500 animate-pulse' : 'bg-gray-300 dark:bg-gray-600'}`} />
+                                        {item.barcode || 'Select Item'}
+                                        {item.quantity > 1 && (
+                                          <span className="bg-gray-200 dark:bg-gray-700 px-1.5 rounded text-[10px]">
+                                            {qtyReturned}/{item.quantity}
+                                          </span>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
                                 </div>
-                              )}
+                              </div>
 
-                              {selectedProducts.includes(item.id) && (
-                                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                                  <div className="grid grid-cols-2 gap-3">
-                                    <div>
-                                      <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                                        Available Qty
-                                      </label>
-                                      <input
-                                        type="number"
-                                        value={item.quantity}
-                                        readOnly
-                                        className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white"
-                                      />
+                              {group.items.some((it: any) => selectedProducts.includes(it.id)) && (
+                                <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  {group.items.filter((it: any) => selectedProducts.includes(it.id)).map((item: OrderItem) => (
+                                    <div key={item.id} className="space-y-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-700/50">
+                                      <div className="flex justify-between items-center">
+                                        <span className="text-[10px] font-bold text-gray-500 uppercase">Unit: {item.barcode || item.id}</span>
+                                        <button
+                                          onClick={() => handleProductCheckbox(item.id)}
+                                          className="text-red-500 hover:text-red-700"
+                                        >
+                                          <X size={14} />
+                                        </button>
+                                      </div>
+
+                                      <div className="flex gap-4">
+                                        <div className="flex-1">
+                                          <label className="block text-[10px] uppercase font-bold text-orange-600 dark:text-orange-400 mb-1">
+                                            Sold At Price *
+                                          </label>
+                                          <div className="relative">
+                                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">৳</span>
+                                            <input
+                                              type="number"
+                                              min="0"
+                                              step="0.01"
+                                              value={soldAtPrices[item.id] || ''}
+                                              onChange={(e) => handleSoldAtChange(item.id, e.target.value)}
+                                              className="w-full pl-6 pr-2 py-1.5 text-sm border border-orange-200 dark:border-orange-900/30 rounded-lg bg-white dark:bg-gray-950 text-gray-900 dark:text-white focus:ring-2 focus:ring-orange-500/20 outline-none font-bold transition-all"
+                                              placeholder="0.00"
+                                            />
+                                          </div>
+                                        </div>
+                                        <div className="text-right">
+                                          <span className="block text-[10px] uppercase font-bold text-gray-500 mb-1">Value</span>
+                                          <span className="text-sm font-black text-gray-900 dark:text-white">
+                                            ৳{((exchangeQuantities[item.id] || 0) * parsePrice(soldAtPrices[item.id])).toFixed(2)}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      <div className="space-y-1">
+                                        {(returnedBarcodes[item.id] || []).map((bc, idx) => (
+                                          <div key={idx} className="flex items-center justify-between bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded text-[10px] border border-blue-100 dark:border-blue-800/50">
+                                            <span className="font-mono text-blue-700 dark:text-blue-300">{bc.barcode}</span>
+                                            <button
+                                              onClick={() => handleRemoveReturnBarcode(item.id, bc.barcode)}
+                                              className="text-red-500 hover:text-red-700"
+                                            >
+                                              <X size={12} />
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
                                     </div>
-                                    <div>
-                                      <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                                        Exchange Qty *
-                                      </label>
-                                      <input
-                                        type="number"
-                                        min="1"
-                                        max={item.quantity}
-                                        value={exchangeQuantities[item.id] || ''}
-                                        onChange={(e) =>
-                                          handleQuantityChange(item.id, parseInt(e.target.value) || 0, item.quantity)
-                                        }
-                                        className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
-                                        placeholder="Enter qty"
-                                      />
-                                    </div>
-                                  </div>
+                                  ))}
                                 </div>
                               )}
                             </div>
@@ -626,8 +889,8 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
                     })}
                   </div>
                 ) : (
-                  <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                    No items in this order
+                  <div className="text-center py-12 bg-white dark:bg-gray-900 rounded-xl border border-dashed border-gray-300 dark:border-gray-700">
+                    <p className="text-gray-500 dark:text-gray-400">No items available for exchange</p>
                   </div>
                 )}
               </div>
@@ -673,30 +936,21 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
                                 )}
                               </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <button
-                                onClick={() => handleUpdateReplacementQty(product.id, product.quantity - 1)}
-                                className="w-7 h-7 flex items-center justify-center border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                              >
-                                −
-                              </button>
-                              <span className="w-8 text-center text-sm font-semibold text-gray-900 dark:text-white">
-                                {product.quantity}
-                              </span>
-                              <button
-                                onClick={() => handleUpdateReplacementQty(product.id, product.quantity + 1)}
-                                className="w-7 h-7 flex items-center justify-center border border-gray-300 dark:border-gray-600 rounded bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700"
-                              >
-                                +
-                              </button>
-                              <p className="font-bold text-gray-900 dark:text-white min-w-[80px] text-right">
-                                ৳{product.amount.toLocaleString()}
-                              </p>
+                            <div className="flex items-center gap-4">
+                              <div className="text-right">
+                                <p className="text-sm font-bold text-gray-900 dark:text-white">
+                                  ৳{product.amount.toLocaleString()}
+                                </p>
+                                <p className="text-[10px] text-gray-500">
+                                  Qty: {product.quantity}
+                                </p>
+                              </div>
                               <button
                                 onClick={() => handleRemoveReplacement(product.id)}
-                                className="text-red-600 hover:text-red-700"
+                                className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                title="Remove item"
                               >
-                                <X size={18} />
+                                <X size={20} />
                               </button>
                             </div>
                           </div>
@@ -771,13 +1025,12 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
                       <div className="flex justify-between items-center">
                         <span className="font-semibold text-gray-900 dark:text-white">Difference:</span>
                         <span
-                          className={`font-bold text-lg ${
-                            totals.difference > 0
+                          className={`font-bold text-lg ${totals.difference > 0
                               ? 'text-orange-600 dark:text-orange-400'
                               : totals.difference < 0
-                              ? 'text-green-600 dark:text-green-400'
-                              : 'text-gray-900 dark:text-white'
-                          }`}
+                                ? 'text-green-600 dark:text-green-400'
+                                : 'text-gray-900 dark:text-white'
+                            }`}
                         >
                           {totals.difference > 0 ? '+' : ''}৳{totals.difference.toLocaleString()}
                         </span>
@@ -919,21 +1172,20 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
                           {totals.difference > 0 ? 'Outstanding' : 'Remaining Refund'}
                         </span>
                         <span
-                          className={`font-bold ${
-                            due > 0
+                          className={`font-bold ${due > 0
                               ? 'text-orange-600 dark:text-orange-400'
                               : 'text-green-600 dark:text-green-400'
-                          }`}
+                            }`}
                         >
                           ৳{due.toFixed(2)}
                         </span>
                       </div>
-                      {due > 0 && (
-                        <p className="text-xs text-orange-600 dark:text-orange-400 mt-1">
-                          Can {totals.difference > 0 ? 'pay' : 'refund'} later
+                      {due > 0.01 && (
+                        <p className="text-xs font-bold text-red-600 dark:text-red-400 mt-1 animate-pulse">
+                          ⚠️ Full {totals.difference > 0 ? 'payment' : 'refund'} required to proceed
                         </p>
                       )}
-                      {due === 0 && totalPaymentRefund > 0 && (
+                      {due <= 0.01 && totalPaymentRefund > 0 && (
                         <p className="text-xs text-green-600 dark:text-green-400 mt-1">
                           ✓ Fully {totals.difference > 0 ? 'paid' : 'refunded'}
                         </p>
@@ -956,7 +1208,7 @@ export default function ExchangeProductModal({ order, onClose, onExchange }: Exc
                 <button
                   type="button"
                   onClick={handleProcessExchange}
-                  disabled={isProcessing || selectedProducts.length === 0 || replacementProducts.length === 0}
+                  disabled={isProcessing || selectedProducts.length === 0 || replacementProducts.length === 0 || due > 0.01}
                   className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
                 >
                   {isProcessing ? (

@@ -30,6 +30,7 @@ interface ImageGalleryManagerProps {
   onImagesChange?: (images: ImageItem[]) => void;
   maxImages?: number;
   allowReorder?: boolean;
+  disableAutoUpload?: boolean;
 }
 
 export default function ImageGalleryManager({
@@ -38,11 +39,13 @@ export default function ImageGalleryManager({
   onImagesChange,
   maxImages = 10,
   allowReorder = true,
+  disableAutoUpload = false,
 }: ImageGalleryManagerProps) {
   const [images, setImages] = useState<ImageItem[]>([]);
   
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [reordering, setReordering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoadingImages, setIsLoadingImages] = useState(false);
 
@@ -169,14 +172,18 @@ export default function ImageGalleryManager({
       uploaded: false,
     }));
 
-    // If productId exists, upload immediately
-    if (productId) {
+    // If productId exists and auto-upload is not disabled, upload immediately
+    if (productId && !disableAutoUpload) {
       setUploading(true);
-      try {
-        const uploadedImages: ImageItem[] = [];
+      
+      // Add placeholders to the UI immediately so user sees progress
+      notifyChange([...images, ...newImages]);
 
-        for (const imageItem of newImages) {
-          if (imageItem.file) {
+      try {
+        const uploadPromises = newImages.map(async (imageItem) => {
+          if (!imageItem.file) return null;
+          
+          try {
             const uploadedImage = await productImageService.uploadImage(
               productId,
               imageItem.file,
@@ -202,18 +209,34 @@ export default function ImageGalleryManager({
               }
             }
 
-            uploadedImages.push({
+            return {
               id: uploadedImage.id,
               preview: fullUrl,
               alt_text: uploadedImage.alt_text || '',
               is_primary: uploadedImage.is_primary,
               sort_order: uploadedImage.sort_order,
               uploaded: true,
-            });
+            };
+          } catch (err) {
+            console.error(`Failed to upload ${imageItem.file.name}:`, err);
+            return null;
           }
-        }
+        });
 
-        notifyChange([...images, ...uploadedImages]);
+        const results = await Promise.all(uploadPromises);
+        const successfulUploads = results.filter((img): img is ImageItem => img !== null);
+
+        // Update with final results (replacing placeholders)
+        // Note: This logic is slightly simplified; in a production app we'd match 
+        // placeholders by preview URL to replace them accurately.
+        // For now, we'll just refresh the whole list by removing failed placeholders.
+        const currentImages = images; // Images that were already there
+        const finalImages = [...currentImages, ...successfulUploads];
+        notifyChange(finalImages);
+        
+        if (successfulUploads.length < newImages.length) {
+          setError(`Failed to upload ${newImages.length - successfulUploads.length} image(s)`);
+        }
       } catch (err: any) {
         setError(err.message || 'Failed to upload images');
       } finally {
@@ -336,6 +359,7 @@ export default function ImageGalleryManager({
     // If uploaded, sync with server
     if (productId && reorderedImages.some((img) => img.uploaded)) {
       try {
+        setReordering(true);
         const imageOrders = reorderedImages
           .filter((img) => img.id)
           .map((img) => ({
@@ -346,6 +370,8 @@ export default function ImageGalleryManager({
         await productImageService.reorderImages(productId, imageOrders);
       } catch (err: any) {
         setError(err.message || 'Failed to reorder images');
+      } finally {
+        setReordering(false);
       }
     }
 
@@ -474,10 +500,12 @@ export default function ImageGalleryManager({
                   </div>
                 )}
 
-                {/* Uploading Overlay */}
-                {!image.uploaded && (
-                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                    <Loader2 className="w-6 h-6 text-white animate-spin" />
+                {/* Uploading/Reordering Overlay */}
+                {((!image.uploaded && uploading) || reordering) && (
+                  <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center z-20">
+                    <div className="bg-white/20 p-2 rounded-full backdrop-blur-md">
+                      <Loader2 className="w-6 h-6 text-white animate-spin" />
+                    </div>
                   </div>
                 )}
 

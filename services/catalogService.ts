@@ -2,6 +2,7 @@ import api from '@/lib/axios';
 import axios from 'axios';
 import { getBaseProductName, getColorLabel, getSizeLabel } from '@/lib/productNameUtils';
 import inventoryService from './inventoryService';
+import { toAbsoluteAssetUrl } from '@/lib/urlUtils';
 
 /**
  * -----------------------------
@@ -21,6 +22,7 @@ export interface ProductCategory {
   name: string;
   description?: string;
   image_url?: string;
+  banner_url?: string;
   product_count?: number;
   parent_id?: number | null;
   slug?: string;
@@ -212,6 +214,8 @@ export interface Category {
   description?: string;
   image?: string;
   image_url?: string;
+  banner?: string;
+  banner_url?: string;
   color?: string;
   icon?: string;
   product_count?: number;
@@ -235,6 +239,8 @@ export interface CatalogCategory {
   description?: string;
   image?: string;
   image_url?: string;
+  banner?: string;
+  banner_url?: string;
   color?: string;
   icon?: string;
   parent_id?: number | null;
@@ -278,46 +284,6 @@ const normalizeBoolean = (value: any, fallback = false): boolean => {
 };
 
 
-const toAbsoluteAssetUrl = (value: any): string => {
-  const raw = normalizeString(value || '');
-  if (!raw) return '';
-
-  // Already absolute URL (http://, https://, protocol-relative, data URI)
-  if (/^(https?:)?\/\//i.test(raw) || /^data:/i.test(raw)) {
-    return raw;
-  }
-
-  // Keep only known frontend-local placeholder assets untouched.
-  // IMPORTANT: real product images can also arrive as `/images/...` from backend,
-  // so we must not treat every `/images/*` path as local.
-  const isFrontendPlaceholder =
-    /^\/(?:images\/)?placeholder-product\.(?:png|jpe?g|webp|svg)$/i.test(raw) ||
-    /^\/placeholder-product\.(?:png|jpe?g|webp|svg)$/i.test(raw);
-
-  if (isFrontendPlaceholder) {
-    return raw;
-  }
-
-  // Legacy category image paths: `category/...` should resolve from `/storage/category/...`.
-  // This is important for the e-commerce homepage/category sections.
-  let normalizedRaw = raw;
-  if (/^\/?category\//i.test(normalizedRaw) && !/\/storage\/category\//i.test(normalizedRaw)) {
-    normalizedRaw = normalizedRaw.replace(/^\/?category\//i, '/storage/category/');
-  }
-
-  const apiBase = normalizeString(process.env.NEXT_PUBLIC_API_URL || '').replace(/\/$/, '');
-  const appBase = normalizeString(process.env.NEXT_PUBLIC_BASE_URL || '').replace(/\/$/, '');
-
-  const backendBase =
-    (apiBase ? apiBase.replace(/\/api(?:\/v\d+)?$/i, '') : '') ||
-    appBase ||
-    '';
-
-  if (!backendBase) return normalizedRaw;
-
-  const path = normalizedRaw.startsWith('/') ? normalizedRaw : `/${normalizedRaw}`;
-  return `${backendBase}${path}`;
-};
 
 const normalizeImage = (image: any, index = 0): ProductImage | null => {
   if (!image) return null;
@@ -477,6 +443,7 @@ const normalizeCategory = (category: any): ProductCategory | null => {
     name,
     description: normalizeString(category.description || ''),
     image_url: toAbsoluteAssetUrl(category.image_url || category.image || undefined),
+    banner_url: toAbsoluteAssetUrl(category.banner_url || category.banner || undefined),
     product_count: toNumber(category.product_count, 0),
     parent_id: category.parent_id ?? null,
     slug: category.slug || name.toLowerCase().replace(/\s+/g, '-'),
@@ -909,6 +876,20 @@ const normalizeCatalogCategoryTree = (raw: any): CatalogCategory | null => {
       (raw.media && (raw.media.url || raw.media.path)) ||
       undefined
     ) || undefined,
+    banner: toAbsoluteAssetUrl(
+      raw.banner ||
+      raw.banner_url ||
+      raw.banner_path ||
+      raw.category_banner ||
+      undefined
+    ) || undefined,
+    banner_url: toAbsoluteAssetUrl(
+      raw.banner_url ||
+      raw.banner ||
+      raw.banner_path ||
+      raw.category_banner ||
+      undefined
+    ) || undefined,
     color: normalizeString(raw.color || '') || undefined,
     icon: normalizeString(raw.icon || '') || undefined,
     parent_id: raw.parent_id ?? null,
@@ -1291,6 +1272,41 @@ const catalogService = {
     } catch (error) {
       console.error('Error fetching branch stock:', error);
       return [];
+    }
+  },
+
+  async getCollection(slug: string, params: { page?: number } = {}): Promise<any> {
+    try {
+      const response = await api.get(`/catalog/collections/${slug}`, { params });
+      const payload = response.data?.data;
+      
+      if (response.data.success && payload) {
+        // Use the existing parseProductsPayload to handle the products and pagination
+        const parsed = parseProductsPayload(payload);
+        
+        const rawCollection = payload.collection;
+        const normalizedCollection = {
+          ...rawCollection,
+          image_url: toAbsoluteAssetUrl(rawCollection?.image_url || rawCollection?.image || undefined),
+          banner_url: toAbsoluteAssetUrl(rawCollection?.banner_url || rawCollection?.banner || rawCollection?.banner_path || undefined),
+        };
+
+        return {
+          success: true,
+          collection: normalizedCollection,
+          products: {
+            data: parsed.products,
+            current_page: parsed.pagination.current_page,
+            last_page: parsed.pagination.last_page,
+            total: parsed.pagination.total,
+          }
+        };
+      }
+      
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching collection:', error);
+      throw error;
     }
   },
 };

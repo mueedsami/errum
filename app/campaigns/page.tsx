@@ -88,7 +88,7 @@ const EMPTY_FORM: CampaignFormData = {
   name: '', description: '', type: 'percentage', discount_value: 0,
   maximum_discount: undefined, applicable_products: [], applicable_categories: [],
   start_date: new Date().toISOString().slice(0, 16), end_date: '',
-  is_active: true, is_automatic: true, is_public: true,
+  is_active: true, is_automatic: true, is_public: true, code: '',
 };
 
 /* ─────────────────────────────────────────────────────────
@@ -117,7 +117,7 @@ export default function CampaignsPage() {
   const [selectedProducts, setSelectedProducts] = useState<Product[]>([]);
   const [showProductDropdown, setShowProductDropdown] = useState(false);
   const productRef = useRef<HTMLDivElement>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   // category tree
   const [categoryTree, setCategoryTree] = useState<CategoryTree[]>([]);
@@ -136,7 +136,8 @@ export default function CampaignsPage() {
       const params: any = {};
       if (filterAutomatic !== null) params.is_automatic = filterAutomatic;
       if (filterActive !== null) params.is_active = filterActive;
-      const list = await campaignService.getCampaigns({ ...params, search: search.trim() || undefined });
+      const res = await campaignService.getCampaigns({ ...params, search: search.trim() || undefined });
+      const list = Array.isArray(res) ? res : (res?.data?.data || res?.data || []);
       setCampaigns(Array.isArray(list) ? list : []);
     } catch (err: any) {
       setError(err?.response?.data?.message || 'Failed to load campaigns');
@@ -201,6 +202,7 @@ export default function CampaignsPage() {
       applicable_categories: c.applicable_categories || [],
       start_date: c.start_date?.slice(0, 16) || '', end_date: c.end_date?.slice(0, 16) || '',
       is_active: c.is_active, is_automatic: c.is_automatic, is_public: c.is_public,
+      code: c.code || '',
     });
     // Placeholder products — will show ID until user re-searches
     setSelectedProducts((c.applicable_products || []).map(id => (
@@ -307,7 +309,7 @@ export default function CampaignsPage() {
       <div className="flex h-screen overflow-hidden">
         <Sidebar isOpen={sidebarOpen} setIsOpen={setSidebarOpen} />
         <div className="flex-1 flex flex-col overflow-hidden">
-          <Header sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} darkMode={darkMode} setDarkMode={setDarkMode} />
+          <Header toggleSidebar={() => setSidebarOpen(!sidebarOpen)} darkMode={darkMode} setDarkMode={setDarkMode} />
           <main className="flex-1 overflow-y-auto p-6">
 
             {/* header */}
@@ -467,8 +469,23 @@ export default function CampaignsPage() {
                   <input value={formData.name} onChange={e => setFormData(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Summer Sale 20%" className="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white" />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-1.5">Description</label>
-                  <input value={formData.description || ''} onChange={e => setFormData(f => ({ ...f, description: e.target.value }))} placeholder="Optional description" className="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white" />
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-1.5 flex items-center justify-between">
+                    <span>Coupon Code {formData.is_automatic && <span className="text-gray-400 font-normal normal-case ml-1">(Optional/System-gen)</span>}</span>
+                    {!formData.is_automatic && <span className="text-[10px] text-indigo-500 font-normal lowercase">Required for manual entry</span>}
+                  </label>
+                  <div className="relative">
+                    <input
+                      value={formData.code}
+                      onChange={e => setFormData(f => ({ ...f, code: e.target.value.toUpperCase().replace(/\s/g, '') }))}
+                      placeholder={formData.is_automatic ? "Leave blank to auto-generate" : "e.g. WELCOME10"}
+                      className="w-full px-3 py-2.5 border border-gray-200 dark:border-gray-600 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    />
+                    {!formData.code && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] text-gray-400 pointer-events-none">
+                        <Zap className="w-3 h-3" /> Auto
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
 

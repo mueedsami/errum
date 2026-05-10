@@ -27,7 +27,6 @@ import { useCart } from '@/app/e-commerce/CartContext';
 import Navigation from '@/components/ecommerce/Navigation';
 import { getBaseProductName, getColorLabel, getSizeLabel } from '@/lib/productNameUtils';
 import { adaptCatalogGroupedProducts, groupProductsByMother } from '@/lib/ecommerceProductGrouping';
-import CartSidebar from '@/components/ecommerce/cart/CartSidebar';
 import catalogService, {
   Product,
   ProductCategory,
@@ -175,7 +174,10 @@ const parseVariationSuffix = (suffix?: string | null): { color?: string; size?: 
   if (!raw) return {};
 
   const marketPairsFromRaw = parseMarketSizePairs(raw);
-  const trimmed = raw.startsWith('-') ? raw.slice(1) : raw;
+  let trimmed = raw;
+  while (trimmed.startsWith('-')) {
+    trimmed = trimmed.substring(1).trim();
+  }
   const tokens = trimmed.split('-').map((t) => normalizeVariantText(t)).filter(Boolean);
   if (!tokens.length) {
     const sizeOnly = normalizeSizeDescriptor(raw);
@@ -289,15 +291,21 @@ const getVariationDisplayLabel = (variant: ProductVariant, index: number): strin
   const explicit = normalizeVariantText(variant.option_label || '');
   if (explicit) return explicit;
 
+  // Use the suffix if available, as it's the most reliable source for "40 (US 7)" etc.
+  if (variant.variation_suffix) {
+    let clean = normalizeVariantText(variant.variation_suffix);
+    while (clean.startsWith('-')) {
+      clean = clean.substring(1).trim();
+    }
+    if (clean) return clean;
+  }
+
   const parts = [normalizeVariantText(variant.color || ''), normalizeVariantText(variant.size || '')]
     .filter(Boolean);
 
   if (parts.length > 0) {
     return parts.join(' / ');
   }
-
-  const fromSuffix = parseVariationSuffix(variant.variation_suffix).label;
-  if (fromSuffix) return normalizeVariantText(fromSuffix);
 
   if (variant.sku) return `SKU ${variant.sku}`;
   return `Option ${index + 1}`;
@@ -341,7 +349,7 @@ export default function ProductDetailPage() {
   const router = useRouter();
   const productId = params?.id ? parseInt(params.id as string) : null;
 
-  const { refreshCart } = useCart();
+  const { refreshCart, addToCart, setIsCartOpen } = useCart();
   const { getApplicablePromotion } = usePromotion();
 
   // State
@@ -354,7 +362,6 @@ export default function ProductDetailPage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [cartSidebarOpen, setCartSidebarOpen] = useState(false);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [quantity, setQuantity] = useState(1);
   const [isAdding, setIsAdding] = useState(false);
@@ -400,6 +407,25 @@ export default function ProductDetailPage() {
       setRecentlyViewed(updated.filter(p => p.id !== product.id));
     }
   }, [product, selectedVariant]);
+
+  // 3.9 — Preload variant images for instant switching
+  useEffect(() => {
+    if (productVariants.length > 0) {
+      const urls = new Set<string>();
+      productVariants.forEach(v => {
+        if (Array.isArray(v.images)) {
+          v.images.forEach(img => {
+            if (img.url && !urls.has(img.url)) {
+              urls.add(img.url);
+              // Background preloading
+              const i = new Image();
+              i.src = img.url;
+            }
+          });
+        }
+      });
+    }
+  }, [productVariants]);
 
   // Sticky Bar Observer
   useEffect(() => {
@@ -688,7 +714,7 @@ export default function ProductDetailPage() {
     setQuantity(1);
 
     // 3.5 — No page reload
-    window.history.pushState(null, '', `/e-commerce/product/${variant.id}`);
+    window.history.replaceState(null, '', `/e-commerce/product/${variant.id}`);
 
     // Background fetch for FULL details (including all images)
     try {
@@ -702,6 +728,18 @@ export default function ProductDetailPage() {
       }
     } catch (err) {
       console.warn('Failed to fetch full variant details in background:', err);
+    }
+  };
+
+  // Helper for navigating to other products (Related / Recently Viewed)
+  const handleProductNavigation = (p: SimpleProduct | Product) => {
+    // Check if the target product is actually a variant of the current one
+    const variantMatch = productVariants.find(v => v.id === p.id);
+    if (variantMatch) {
+      handleVariantChange(variantMatch);
+      // Optional: scroll to top if needed, but variants usually want to stay in context
+    } else {
+      router.push(`/e-commerce/product/${p.id}`);
     }
   };
 
@@ -749,7 +787,7 @@ export default function ProductDetailPage() {
       setTimeout(() => {
         setIsAdding(false);
         setCartStatus('idle');
-        setCartSidebarOpen(true);
+        setIsCartOpen(true);
       }, 2000);
 
     } catch (error: any) {
@@ -823,7 +861,7 @@ export default function ProductDetailPage() {
       });
 
       await refreshCart();
-      setCartSidebarOpen(true);
+      setIsCartOpen(true);
 
     } catch (error: any) {
       console.error('Error adding to cart:', error);
@@ -962,7 +1000,6 @@ export default function ProductDetailPage() {
   return (
     <div className="bg-[var(--bg-root)] min-h-screen text-[var(--text-primary)]">
       <Navigation />
-      <CartSidebar isOpen={cartSidebarOpen} onClose={() => setCartSidebarOpen(false)} />
 
       {/* Breadcrumb & Navigation */}
       <div className="border-b border-gray-100">
@@ -1004,7 +1041,7 @@ export default function ProductDetailPage() {
           />
 
           {/* ── Buy Column ── */}
-          <div className="lg:sticky lg:top-24 space-y-4">
+          <div className="lg:sticky lg:top-24 space-y-4 font-[var(--font-poppins)]">
             <div className="space-y-4">
               {/* Product Info */}
               <div className="space-y-4">
@@ -1018,16 +1055,16 @@ export default function ProductDetailPage() {
                   </button>
                 </div>
 
-                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight leading-tight uppercase">
+                <h1 className="text-3xl sm:text-4xl font-semibold text-gray-900 tracking-tight leading-tight uppercase font-[var(--font-poppins)]">
                   {baseName}
                 </h1>
 
                 <div className="flex items-baseline gap-4 pt-2">
-                  <span className="text-2xl font-bold text-gray-900">
+                  <span className="text-3xl font-semibold text-gray-900 font-[var(--font-libre)]">
                     {formatBDT(sellingPrice)}
                   </span>
                   {(costPrice > sellingPrice || salePromo) && originalSellingPrice > 0 && (
-                    <span className="text-lg line-through text-gray-400 font-medium">
+                    <span className="text-xl line-through text-gray-400 font-semibold font-[var(--font-libre)]">
                       {formatBDT(salePromo ? originalSellingPrice : Math.max(costPrice, originalSellingPrice))}
                     </span>
                   )}
@@ -1044,7 +1081,7 @@ export default function ProductDetailPage() {
 
                 {/* Stock Progress Bar */}
                 <div className="space-y-2 p-3 bg-gray-50/50 rounded-xl border border-gray-100">
-                  <div className="flex justify-between items-center text-[10px] font-bold uppercase tracking-widest">
+                  <div className="flex justify-between items-center text-[15px] font-bold uppercase tracking-widest">
                     <span className={availableInventory <= 5 ? 'text-[#b83228]' : 'text-gray-600'}>
                       {availableInventory <= 0 ? 'Out of stock' :
                         availableInventory <= 8 ? `HURRY! ONLY ${availableInventory} LEFT IN STOCK.` :
@@ -1092,11 +1129,11 @@ export default function ProductDetailPage() {
                     ref={mainCtaRef}
                     onClick={handleAddToCart}
                     disabled={!selectedVariant.in_stock || isAdding || availableInventory <= 0}
-                    className={`flex-1 h-[52px] rounded-lg font-bold uppercase tracking-wider text-[11px] flex items-center justify-center gap-3 transition-all active:scale-95 disabled:bg-gray-100 disabled:text-gray-400 ${
+                    className={`flex-1 h-[52px] rounded-lg font-bold uppercase tracking-wider text-[16.5px] flex items-center justify-center gap-3 transition-all active:scale-95 disabled:bg-gray-100 disabled:text-gray-400 ${
                       cartStatus === 'success' ? 'bg-[#1a9456] text-white' : 'bg-black text-white hover:bg-gray-800'
                     }`}
                   >
-                    {cartStatus === 'idle' && <ShoppingCart size={16} />}
+                    {cartStatus === 'idle' && <ShoppingCart size={22} />}
                     {cartStatus === 'loading' && <div className="h-5 w-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />}
                     {cartStatus === 'success' && <span>✓ Added!</span>}
                     {cartStatus === 'idle' && (availableInventory <= 0 ? 'SOLD OUT' : 'ADD TO CART')}
@@ -1106,7 +1143,7 @@ export default function ProductDetailPage() {
                 <button
                   onClick={handleBuyItNow}
                   disabled={!selectedVariant.in_stock || isAdding || availableInventory <= 0}
-                  className="w-full h-[52px] bg-black text-white rounded-lg font-bold uppercase tracking-wider text-[11px] transition-all hover:bg-gray-800 active:scale-95 disabled:opacity-50"
+                  className="w-full h-[52px] bg-black text-white rounded-lg font-bold uppercase tracking-wider text-[16.5px] transition-all hover:bg-gray-800 active:scale-95 disabled:opacity-50"
                 >
                   BUY IT NOW
                 </button>
@@ -1129,12 +1166,12 @@ export default function ProductDetailPage() {
                 ].map((section, idx) => (
                   <details key={idx} className="group overflow-hidden rounded-md border border-gray-100">
                     <summary className="flex items-center justify-between cursor-pointer list-none p-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
-                      <span className="text-[10px] font-bold tracking-widest text-gray-900">
+                      <span className="text-[15px] font-bold tracking-widest text-gray-900">
                         {section.title}
                       </span>
-                      <Plus size={14} className="text-gray-400 group-open:rotate-45 transition-transform" />
+                      <Plus size={18} className="text-gray-400 group-open:rotate-45 transition-transform" />
                     </summary>
-                    <div className="p-3 text-sm text-gray-600 leading-relaxed whitespace-pre-line bg-white border-t border-gray-100">
+                    <div className="p-3 text-[21px] text-gray-600 leading-relaxed whitespace-pre-line bg-white border-t border-gray-100">
                       {section.content}
                     </div>
                   </details>
@@ -1144,22 +1181,22 @@ export default function ProductDetailPage() {
               {/* Bottom Trust Badges */}
               <div className="grid grid-cols-3 gap-2 pt-4 border-t border-gray-100">
                 <div className="flex flex-col items-center text-center gap-1">
-                  <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
-                    <Truck size={16} strokeWidth={1.5} />
+                  <div className="w-12 h-12 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
+                    <Truck size={24} strokeWidth={1.5} />
                   </div>
-                  <span className="text-[8px] font-bold tracking-wider text-gray-900 uppercase">Shipping Worldwide</span>
+                  <span className="text-[12px] font-bold tracking-wider text-gray-900 uppercase">Shipping Worldwide</span>
                 </div>
                 <div className="flex flex-col items-center text-center gap-1">
-                  <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
-                    <RotateCcw size={16} strokeWidth={1.5} />
+                  <div className="w-12 h-12 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
+                    <RotateCcw size={24} strokeWidth={1.5} />
                   </div>
-                  <span className="text-[8px] font-bold tracking-wider text-gray-900 uppercase">Easy Returns</span>
+                  <span className="text-[12px] font-bold tracking-wider text-gray-900 uppercase">Easy Returns</span>
                 </div>
                 <div className="flex flex-col items-center text-center gap-1">
-                  <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
-                    <ShieldCheck size={16} strokeWidth={1.5} />
+                  <div className="w-12 h-12 rounded-full bg-gray-50 flex items-center justify-center text-gray-400">
+                    <ShieldCheck size={24} strokeWidth={1.5} />
                   </div>
-                  <span className="text-[8px] font-bold tracking-wider text-gray-900 uppercase">Secure Checkout</span>
+                  <span className="text-[12px] font-bold tracking-wider text-gray-900 uppercase">Secure Checkout</span>
                 </div>
               </div>
             </div>
@@ -1173,7 +1210,7 @@ export default function ProductDetailPage() {
               <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-[var(--text-muted)] mb-2 block">Pairs Well With</span>
               <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between mb-10 gap-4">
                 <h2 className="text-3xl sm:text-4xl font-light text-[var(--text-primary)] tracking-tight"
-                  style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+                  style={{ fontFamily: "'Poppins', sans-serif" }}>
                   Related Essentials
                 </h2>
                 <button
@@ -1197,7 +1234,7 @@ export default function ProductDetailPage() {
                     key={item.id}
                     product={item}
                     compact
-                    onOpen={(p) => router.push(`/e-commerce/product/${p.id}`)}
+                    onOpen={handleProductNavigation}
                     onAddToCart={(p, e) => handleQuickAddToCart(p, e)}
                   />
                 ))}
@@ -1210,9 +1247,9 @@ export default function ProductDetailPage() {
         {recentlyViewed.length > 0 && (
           <div className="py-16 bg-[var(--bg-surface)] border-b border-[var(--border-default)] -mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
             <div className="max-w-[1400px] mx-auto">
-              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-[var(--text-muted)] mb-2 block" style={{ fontFamily: "'DM Mono', monospace" }}>Your History</span>
+              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-[var(--text-muted)] mb-2 block" style={{ fontFamily: "'Poppins', sans-serif" }}>Your History</span>
               <h2 className="text-3xl sm:text-4xl font-light text-[var(--text-primary)] tracking-tight mb-10"
-                style={{ fontFamily: "'Cormorant Garamond', serif" }}>
+                style={{ fontFamily: "'Poppins', sans-serif" }}>
                 Recently Viewed
               </h2>
               <div className="flex gap-6 overflow-x-auto pb-4 scrollbar-hide no-scrollbar">
@@ -1221,7 +1258,7 @@ export default function ProductDetailPage() {
                     <PremiumProductCard
                       product={item}
                       compact
-                      onOpen={(p) => router.push(`/e-commerce/product/${p.id}`)}
+                      onOpen={handleProductNavigation}
                       onAddToCart={(p, e) => handleQuickAddToCart(p, e)}
                     />
                   </div>

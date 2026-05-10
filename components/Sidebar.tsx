@@ -8,7 +8,6 @@ import {
   FolderTree,
   Package,
   ClipboardList,
-  Wrench,
   CreditCard,
   ShoppingCart,
   Image,
@@ -21,6 +20,8 @@ import {
   RotateCcw,
   Tag,
   Users,
+  FileText,
+  Settings,
 } from 'lucide-react';
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -89,6 +90,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     { icon: Store, label: 'Store', href: '/store' },
     { icon: Store, label: 'Store Assignment', href: '/store-assingment' },
     { icon: FolderTree, label: 'Category', href: '/category' },
+    { icon: Tag, label: 'Collections', href: '/collections' },
     { icon: Image, label: 'Gallery', href: '/gallery' },
     {
       icon: Package,
@@ -114,14 +116,6 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     { icon: ShoppingCart, label: 'POS', href: '/pos' },
     { icon: ClipboardList, label: 'Purchase History', href: '/purchase-history' },
     { icon: ShoppingCart, label: 'Social Commerce', href: '/social-commerce' },
-    {
-      icon: Wrench,
-      label: 'Services',
-      subMenu: [
-        { label: 'Services Catalog', href: '/services-management' },
-        { label: 'Service Orders', href: '/service-orders' },
-      ],
-    },
     { icon: Package, label: 'Orders', href: '/orders' },
     { icon: CreditCard, label: 'Installments', href: '/orders?view=installments' },
     { icon: Package, label: 'Online Order Packing', href: '/social-commerce/package' },
@@ -157,6 +151,13 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       ],
     },
     { icon: CreditCard, label: 'Employee Management', href: '/employees' },
+    {
+      icon: Settings,
+      label: 'Settings',
+      subMenu: [
+        { label: 'Homepage Configuration', href: '/settings/homepage' },
+      ],
+    },
 
 
   ];

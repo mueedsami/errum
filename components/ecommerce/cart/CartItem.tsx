@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
+import Image from 'next/image';
 import { X, Plus, Minus, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import cartService from '@/services/cartService';
@@ -30,7 +31,7 @@ const formatBDT = (value: number) => {
   return `৳${value.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 };
 
-export default function CartItem({ item, onQuantityChange, onRemove, isUpdating: externalIsUpdating }: CartItemProps) {
+const CartItem = memo(function CartItem({ item, onQuantityChange, onRemove, isUpdating: externalIsUpdating }: CartItemProps) {
   const { refreshCart } = useCart();
   const router = useRouter();
   const { getApplicablePromotion } = usePromotion();
@@ -155,10 +156,12 @@ export default function CartItem({ item, onQuantityChange, onRemove, isUpdating:
         className="relative w-20 h-20 flex-shrink-0 cursor-pointer overflow-hidden rounded-[var(--radius-sm)] border border-[var(--border-default)]"
         onClick={handleNavigateToProduct}
       >
-        <img
+        <Image
           src={item.image || '/placeholder-product.png'}
           alt={item.name}
-          className="w-full h-full object-cover hover:scale-110 transition-transform duration-500"
+          fill
+          sizes="(max-width: 768px) 80px, 80px"
+          className="object-cover hover:scale-110 transition-transform duration-500"
         />
       </div>
 
@@ -168,7 +171,7 @@ export default function CartItem({ item, onQuantityChange, onRemove, isUpdating:
           <div className="flex-1 min-w-0 pr-2">
             <h3
               className="text-[14px] font-medium line-clamp-2 cursor-pointer transition-colors text-[var(--text-primary)] hover:text-[var(--cyan)]"
-              style={{ fontFamily: "'Jost', sans-serif" }}
+              style={{ fontFamily: "'Poppins', sans-serif" }}
               onClick={handleNavigateToProduct}
             >
               {item.name}
@@ -176,7 +179,7 @@ export default function CartItem({ item, onQuantityChange, onRemove, isUpdating:
 
             {/* Variant Info */}
             {(item.color || item.size) && (
-              <p className="text-[11px] mt-1 text-[var(--text-muted)] uppercase tracking-tight" style={{ fontFamily: "'DM Mono', monospace" }}>
+              <p className="text-[11px] mt-1 text-[var(--text-muted)] uppercase tracking-tight" style={{ fontFamily: "'Poppins', sans-serif" }}>
                 {item.color && <span>{item.color}</span>}
                 {item.color && item.size && <span className="mx-1 opacity-30">|</span>}
                 {item.size && <span>{item.size}</span>}
@@ -184,7 +187,7 @@ export default function CartItem({ item, onQuantityChange, onRemove, isUpdating:
             )}
 
             {item.sku && (
-              <p className="text-[10px] mt-0.5 text-[var(--text-muted)] uppercase tracking-tight opacity-60" style={{ fontFamily: "'DM Mono', monospace" }}>{item.sku}</p>
+              <p className="text-[10px] mt-0.5 text-[var(--text-muted)] uppercase tracking-tight opacity-60" style={{ fontFamily: "'Poppins', sans-serif" }}>{item.sku}</p>
             )}
 
             {/* Stock Warning (5.5) */}
@@ -238,11 +241,11 @@ export default function CartItem({ item, onQuantityChange, onRemove, isUpdating:
 
           {/* Price */}
           <div className="text-right flex flex-col items-end">
-            <p className="text-[14px] font-bold text-[var(--gold)]" style={{ fontFamily: "'Jost', sans-serif" }}>
+            <p className="text-[14px] font-bold text-[var(--gold)]" style={{ fontFamily: "'Poppins', sans-serif" }}>
               {formatBDT(activePrice * item.quantity)}
             </p>
             {discountPercent > 0 && originalPrice > 0 && (
-              <p className="text-[12px] line-through text-[var(--text-muted)] opacity-60" style={{ fontFamily: "'Jost', sans-serif" }}>
+              <p className="text-[12px] line-through text-[var(--text-muted)] opacity-60" style={{ fontFamily: "'Poppins', sans-serif" }}>
                 {formatBDT(originalPrice * item.quantity)}
               </p>
             )}
@@ -251,4 +254,6 @@ export default function CartItem({ item, onQuantityChange, onRemove, isUpdating:
       </div>
     </div>
   );
-}
+});
+
+export default CartItem;

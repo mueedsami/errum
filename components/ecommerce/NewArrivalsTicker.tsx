@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, memo } from 'react';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import catalogService, { SimpleProduct } from '@/services/catalogService';
 import { buildCardProductsFromResponse } from '@/lib/ecommerceCardUtils';
@@ -11,7 +12,7 @@ import PremiumProductCard from '@/components/ecommerce/ui/PremiumProductCard';
  * A horizontal auto-scrolling strip of new arrival cards.
  * Infinite loop using CSS @keyframes ticker.
  */
-export default function NewArrivalsTicker() {
+const NewArrivalsTicker = memo(function NewArrivalsTicker() {
   const router = useRouter();
   const [products, setProducts] = useState<SimpleProduct[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -54,7 +55,7 @@ export default function NewArrivalsTicker() {
       <div className="flex justify-center mb-6">
         <div className="px-4 py-1.5 rounded-full bg-[var(--cyan-pale)] border border-[var(--cyan-border)] flex items-center gap-2">
           <div className="h-1.5 w-1.5 rounded-full bg-[var(--cyan)] animate-pulse" />
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--cyan)]" style={{ fontFamily: "'DM Mono', monospace" }}>New Arrival</span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[var(--cyan)]" style={{ fontFamily: "var(--font-poppins), sans-serif" }}>New Arrival</span>
         </div>
       </div>
 
@@ -74,11 +75,12 @@ export default function NewArrivalsTicker() {
                 <div className="flex flex-col items-center gap-3 p-4 min-w-[180px] bg-[var(--bg-root)] border border-[var(--border-default)] rounded-[var(--radius-xl)] transition-all duration-500 group-hover:border-[var(--cyan-border)] group-hover:shadow-xl group-hover:bg-[var(--bg-lifted)]">
                   {/* Thumbnail */}
                   <div className="relative h-20 w-16 overflow-hidden rounded-[var(--radius-md)] bg-[var(--bg-depth)]">
-                    <img 
+                    <Image 
                       src={imageUrl} 
                       alt={product.name}
-                      className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
-                      loading="lazy"
+                      fill
+                      sizes="64px"
+                      className="object-cover transition-transform duration-700 group-hover:scale-110"
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-[rgba(28,24,18,0.1)] to-transparent" />
                   </div>
@@ -86,7 +88,7 @@ export default function NewArrivalsTicker() {
                   {/* Product Name */}
                   <p 
                     className="text-center text-[13px] font-medium text-[var(--text-primary)] uppercase tracking-tight group-hover:text-[var(--cyan)] transition-colors line-clamp-1" 
-                    style={{ fontFamily: "'Jost', sans-serif" }}
+                    style={{ fontFamily: "var(--font-poppins), sans-serif" }}
                   >
                     {(product as any).base_name || product.name}
                   </p>
@@ -98,5 +100,7 @@ export default function NewArrivalsTicker() {
       </div>
     </div>
   );
-}
+});
+
+export default NewArrivalsTicker;
 

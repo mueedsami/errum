@@ -26,16 +26,34 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
 
   const isAnyOverStock = cart.some(item => typeof item.maxQuantity === 'number' && item.quantity > item.maxQuantity);
 
-  const handleCheckout = () => {
+  const handleCheckout = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
     if (isAnyOverStock) return;
     
     // Set all cart items as selected for checkout
     if (cart.length > 0) {
-      localStorage.setItem('checkout-selected-items', JSON.stringify(cart.map(i => i.id)));
+      try {
+        localStorage.setItem('checkout-selected-items', JSON.stringify(cart.map(i => i.id)));
+      } catch (err) {
+        console.error('LocalStorage error during checkout:', err);
+      }
+    } else {
+      onClose();
+      return;
     }
     
+    // Navigate first
     router.push('/e-commerce/checkout');
-    onClose();
+    
+    // Close sidebar after a tiny delay to ensure navigation starts
+    // and provide immediate feedback that something happened.
+    setTimeout(() => {
+      onClose();
+    }, 50);
   };
 
 
@@ -48,7 +66,7 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
           style={{
             position: 'fixed',
             inset: 0,
-            zIndex: 100,
+            zIndex: 100000,
             background: 'rgba(0,0,0,0.35)',
             backdropFilter: 'blur(2px)',
           }}
@@ -64,7 +82,7 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
           right: 0,
           top: 0,
           bottom: 0,
-          zIndex: 101,
+          zIndex: 100001,
           width: '100%',
           maxWidth: '380px',
           background: '#ffffff',
@@ -88,7 +106,7 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <ShoppingBag style={{ width: '18px', height: '18px', color: '#111111' }} />
             <h2 style={{
-              fontFamily: "'Jost', sans-serif",
+              fontFamily: "'Poppins', sans-serif",
               fontSize: '14px',
               fontWeight: 700,
               textTransform: 'uppercase',
@@ -99,7 +117,7 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
               Shopping Cart
             </h2>
             <span style={{
-              fontFamily: "'Jost', sans-serif",
+              fontFamily: "'Poppins', sans-serif",
               fontSize: '12px',
               fontWeight: 700,
               color: '#999999',
@@ -135,7 +153,7 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
           {isLoading && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '60px 0', gap: '12px' }}>
               <Loader2 style={{ animation: 'spin 1s linear infinite', color: '#111111', width: '28px', height: '28px' }} />
-              <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.15em', color: '#999999', textTransform: 'uppercase', fontFamily: "'Jost', sans-serif" }}>
+              <p style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.15em', color: '#999999', textTransform: 'uppercase', fontFamily: "'Poppins', sans-serif" }}>
                 Syncing bag...
               </p>
             </div>
@@ -156,8 +174,8 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
               }}>
                 <ShoppingCart style={{ width: '32px', height: '32px', color: '#cccccc' }} />
               </div>
-              <h3 style={{ fontFamily: "'Jost', sans-serif", fontSize: '16px', fontWeight: 700, color: '#111111', marginBottom: '8px' }}>Your cart is empty</h3>
-              <p style={{ fontSize: '13px', color: '#999999', marginBottom: '24px', lineHeight: 1.5, fontFamily: "'Jost', sans-serif" }}>
+              <h3 style={{ fontFamily: "'Poppins', sans-serif", fontSize: '16px', fontWeight: 700, color: '#111111', marginBottom: '8px' }}>Your cart is empty</h3>
+              <p style={{ fontSize: '13px', color: '#999999', marginBottom: '24px', lineHeight: 1.5, fontFamily: "'Poppins', sans-serif" }}>
                 Add something to your collection to get started.
               </p>
               <button
@@ -170,7 +188,7 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
                   borderRadius: '4px',
                   fontSize: '12px',
                   fontWeight: 700,
-                  fontFamily: "'Jost', sans-serif",
+                  fontFamily: "'Poppins', sans-serif",
                   textTransform: 'uppercase',
                   letterSpacing: '0.08em',
                   cursor: 'pointer',
@@ -198,12 +216,12 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
           <div style={{ borderTop: '1px solid rgba(0,0,0,0.08)', padding: '16px 20px', background: '#ffffff' }}>
             {/* Subtotal */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-              <span style={{ fontSize: '13px', color: '#555555', fontFamily: "'Jost', sans-serif" }}>Subtotal</span>
-              <span style={{ fontSize: '16px', fontWeight: 700, color: '#111111', fontFamily: "'Jost', sans-serif" }}>
+              <span style={{ fontSize: '13px', color: '#555555', fontFamily: "'Poppins', sans-serif" }}>Subtotal</span>
+              <span style={{ fontSize: '16px', fontWeight: 700, color: '#111111', fontFamily: "'Poppins', sans-serif" }}>
                 {formatBDT(subtotal)}
               </span>
             </div>
-            <p style={{ fontSize: '11px', color: '#999999', marginBottom: '16px', fontFamily: "'Jost', sans-serif" }}>
+            <p style={{ fontSize: '11px', color: '#999999', marginBottom: '16px', fontFamily: "'Poppins', sans-serif" }}>
               Includes standard delivery
             </p>
 
@@ -221,7 +239,7 @@ export default function CartSidebar({ isOpen, onClose }: CartSidebarProps) {
                   borderRadius: '4px',
                   fontSize: '12px',
                   fontWeight: 700,
-                  fontFamily: "'Jost', sans-serif",
+                  fontFamily: "'Poppins', sans-serif",
                   textTransform: 'uppercase',
                   letterSpacing: '0.10em',
                   cursor: isAnyOverStock ? 'not-allowed' : 'pointer',

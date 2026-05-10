@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
 import Image from 'next/image';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 
@@ -18,7 +18,45 @@ interface ProductImageGalleryProps {
   inStock?: boolean;
 }
 
-const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
+
+const PixelScaffold = () => {
+  return (
+    <div className="absolute inset-0 bg-gray-50 flex flex-wrap overflow-hidden z-[5]">
+      {Array.from({ length: 64 }).map((_, i) => (
+        <div 
+          key={i} 
+          className="w-[12.5%] h-[12.5%] bg-gray-100 border-[0.5px] border-white/40 animate-pulse" 
+          style={{ animationDelay: `${(i % 8) * 40 + Math.floor(i / 8) * 40}ms` }}
+        />
+      ))}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="w-10 h-10 border-2 border-gray-200 border-t-gray-400 rounded-full animate-spin opacity-20" />
+      </div>
+    </div>
+  );
+};
+
+const ImageWithScaffold = ({ src, alt, fill, sizes, className, priority, objectFit = 'contain' }: any) => {
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  return (
+    <div className="relative w-full h-full overflow-hidden">
+      {!isLoaded && <PixelScaffold />}
+      <Image
+        src={src}
+        alt={alt}
+        fill={fill}
+        sizes={sizes}
+        className={`${className} transition-opacity duration-700 ${isLoaded ? 'opacity-100' : 'opacity-0'}`}
+        priority={priority}
+        onLoad={() => setIsLoaded(true)}
+        style={{ objectFit }}
+      />
+    </div>
+  );
+};
+
+const ProductImageGallery: React.FC<ProductImageGalleryProps> = memo(({
   images,
   productName,
   discountPercent = 0,
@@ -27,7 +65,7 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
   const [activeIndex, setActiveIndex] = useState(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
-  // 1. Reset gallery when images change (prevents blank screen when switching variants with fewer images)
+  // 1. Reset gallery when images change
   useEffect(() => {
     setActiveIndex(0);
     if (scrollContainerRef.current) {
@@ -51,13 +89,9 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
   };
 
   const scrollToImage = (index: number) => {
-    // Set index immediately for desktop opacity transition
     setActiveIndex(index);
-
     if (!scrollContainerRef.current) return;
     const { offsetWidth } = scrollContainerRef.current;
-
-    // Only use smooth behavior for mobile swipe experience
     const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
 
     scrollContainerRef.current.scrollTo({
@@ -91,10 +125,13 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
               }`}
               style={{ aspectRatio: '1/1' }}
             >
-              <img 
+              <ImageWithScaffold 
                 src={img.url} 
-                alt={`${productName} thumbnail ${index + 1}`} 
-                className="w-full h-full object-cover" 
+                alt={`${productName} thumbnail ${index + 1}`}
+                fill
+                sizes="80px"
+                className="object-cover" 
+                objectFit="cover"
               />
             </button>
           ))}
@@ -103,7 +140,6 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
 
       {/* Main Container */}
       <div className="flex-1 relative group">
-        {/* Mobile Swipe Carousel / Desktop Main Image */}
         <div
           ref={scrollContainerRef}
           onScroll={handleScroll}
@@ -118,10 +154,14 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
                   index === activeIndex ? 'md:opacity-100 z-10' : 'md:opacity-0 z-0'
                 }`}
               >
-                <img
+                <ImageWithScaffold
                   src={img.url}
                   alt={`${productName} view ${index + 1}`}
-                  className="w-full h-full object-contain transition-transform duration-500"
+                  fill
+                  sizes="(max-width: 768px) 100vw, 50vw"
+                  className="object-contain bg-white"
+                  priority={index === 0}
+                  objectFit="contain"
                 />
               </div>
             ))}
@@ -130,19 +170,18 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
           {/* Status Badges */}
           <div className="absolute top-0 left-0 flex flex-col gap-2 z-20">
             {!inStock && (
-              <span className="bg-black text-white px-2 py-1 rounded-sm text-[8px] font-bold tracking-widest uppercase shadow-sm">
+              <span className="bg-black text-white px-2 py-1 rounded-sm text-[12px] font-bold tracking-widest uppercase shadow-sm">
                 Out of Stock
               </span>
             )}
             {discountPercent > 0 && (
-              <span className="bg-[#b83228] text-white px-2 py-1 rounded-sm text-[8px] font-bold tracking-widest uppercase">
+              <span className="bg-[#b83228] text-white px-2 py-1 rounded-sm text-[12px] font-bold tracking-widest uppercase">
                 {discountPercent}% OFF
               </span>
             )}
           </div>
 
-
-          {/* Navigation Arrows (Desktop - Minimalist) */}
+          {/* Navigation Arrows */}
           {safeImages.length > 1 && (
             <div className="absolute inset-y-0 left-0 right-0 hidden md:flex items-center justify-between px-4 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-30">
               <button
@@ -161,24 +200,24 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
           )}
         </div>
 
-        {/* Mobile Thumbnail Strip (now below and wrapping) */}
+        {/* Mobile Thumbnail Strip */}
         {safeImages.length > 1 && (
           <div className="flex md:hidden flex-wrap gap-2 py-4 z-30 justify-start">
             {safeImages.map((img, index) => (
               <button
                 key={img.id || index}
                 onClick={() => scrollToImage(index)}
-                className={`w-14 h-14 sm:w-16 sm:h-16 flex-shrink-0 rounded-md overflow-hidden border-2 transition-all ${
+                className={`w-14 h-14 sm:w-16 sm:h-16 flex-shrink-0 relative rounded-md overflow-hidden border-2 transition-all ${
                   activeIndex === index ? 'border-gray-900' : 'border-gray-200'
                 }`}
               >
-                <img src={img.url} className="w-full h-full object-cover" alt="" />
+                <ImageWithScaffold src={img.url} fill sizes="64px" className="object-cover" alt="" objectFit="cover" />
               </button>
             ))}
           </div>
         )}
 
-        {/* Desktop Progress/Dots (Minimal) */}
+        {/* Desktop Progress Bars */}
         {safeImages.length > 1 && (
           <div className="hidden md:flex justify-center gap-2 mt-4">
             {safeImages.map((_, i) => (
@@ -194,6 +233,6 @@ const ProductImageGallery: React.FC<ProductImageGalleryProps> = ({
       </div>
     </div>
   );
-};
+});
 
 export default ProductImageGallery;

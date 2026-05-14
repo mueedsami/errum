@@ -1,38 +1,25 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-
-import { useCart } from '@/app/e-commerce/CartContext';
 import catalogService, { SimpleProduct } from '@/services/catalogService';
 import { buildCardProductsFromResponse } from '@/lib/ecommerceCardUtils';
-import PremiumProductCard from '@/components/ecommerce/ui/PremiumProductCard';
-import { fireToast } from '@/lib/globalToast';
+import MimicPremiumProductCard from './MimicPremiumProductCard';
 
-interface NewArrivalsProps {
+interface MimicNewArrivalsProps {
   categoryId?: number;
   limit?: number;
   customProducts?: SimpleProduct[];
 }
 
-/* Parse a date string → ms timestamp, returns 0 if unparseable */
 const toMs = (v: unknown): number => {
   if (!v) return 0;
   const ms = Date.parse(String(v));
   return Number.isFinite(ms) ? ms : 0;
 };
 
-/**
- * Get the CREATION timestamp for a card product.
- * We deliberately ignore updated_at — an old product that was recently edited
- * should NOT reappear as a "new arrival".
- */
 const getCreatedMs = (product: SimpleProduct): number => {
-  // The card product itself (spread from main_variant) has created_at
   const own = toMs((product as any)?.created_at);
   if (own > 0) return own;
-
-  // Check variants as fallback
   const variants = Array.isArray(product.variants) ? product.variants : [];
   let best = 0;
   for (const v of variants) {
@@ -42,21 +29,18 @@ const getCreatedMs = (product: SimpleProduct): number => {
   return best;
 };
 
-const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8, customProducts }) => {
-  const router = useRouter();
+const MimicNewArrivals: React.FC<MimicNewArrivalsProps> = ({ categoryId, limit = 8, customProducts }) => {
   const [products, setProducts] = useState<SimpleProduct[]>(customProducts || []);
   const [isLoading, setIsLoading] = useState(!customProducts);
   const [imageErrors, setImageErrors] = useState<Set<number>>(new Set());
-  const { addToCart } = useCart();
 
   useEffect(() => {
-    if (customProducts) {
+    if (customProducts && customProducts.length > 0) {
       setProducts(customProducts);
       setIsLoading(false);
       return;
     }
     fetchNewArrivals();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryId, limit, customProducts]);
 
   const fetchNewArrivals = async () => {
@@ -74,11 +58,7 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8, custom
       });
 
       const rawCards = buildCardProductsFromResponse(response);
-
-      // We maintain client side sort to ensure flawless display regardless of unstable backend default ordering.
       const sorted = [...rawCards].sort((a, b) => getCreatedMs(b) - getCreatedMs(a));
-
-      // Always show the newest top N products available, without strict date cutoffs.
       setProducts(sorted.slice(0, limit));
     } catch (error) {
       console.error('Error fetching new arrivals:', error);
@@ -97,26 +77,6 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8, custom
     });
   };
 
-  const handleProductClick = (product: SimpleProduct) => {
-    router.push(`/e-commerce/product/${product.id}`);
-  };
-
-  const handleAddToCart = async (product: SimpleProduct, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (product.has_variants) {
-      router.push(`/e-commerce/product/${product.id}`);
-      return;
-    }
-    try {
-      await addToCart(product.id, 1);
-
-      fireToast(`Added to cart: ${product?.name || 'Item'}`, 'success');
-    } catch (error: any) {
-      console.error('Error adding to cart:', error);
-      fireToast(error?.message || 'Failed to add to cart', 'error');
-    }
-  };
-
   if (isLoading) {
     return (
       <section style={{ background: '#ffffff', padding: '48px 0', borderTop: '1px solid rgba(0,0,0,0.08)' }}>
@@ -129,7 +89,7 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8, custom
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 md:gap-6">
             {Array.from({ length: limit }).map((_, i) => (
               <div key={i} className="animate-pulse">
-                <div style={{ aspectRatio: '3/4', background: '#f5f5f5', borderRadius: '4px', marginBottom: '12px' }} />
+                <div style={{ aspectRatio: '2/3', background: '#f5f5f5', borderRadius: '4px', marginBottom: '12px' }} />
                 <div style={{ height: '14px', background: '#f5f5f5', borderRadius: '4px', width: '70%', marginBottom: '6px' }} />
                 <div style={{ height: '14px', background: '#f5f5f5', borderRadius: '4px', width: '40%' }} />
               </div>
@@ -140,13 +100,11 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8, custom
     );
   }
 
-  // Section hides if there are no genuinely new products
   if (products.length === 0) return null;
 
   return (
     <section style={{ background: '#ffffff', padding: '48px 0', borderTop: '1px solid rgba(0,0,0,0.08)' }}>
       <div className="ec-container">
-        {/* Section header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
             <div style={{ height: '1px', flex: 1, maxWidth: '40px', background: '#111111' }} />
@@ -164,7 +122,6 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8, custom
             <div style={{ height: '1px', flex: 1, maxWidth: '40px', background: '#111111' }} />
           </div>
           <button
-            onClick={() => router.push('/e-commerce/products')}
             style={{
               fontFamily: "'Poppins', sans-serif",
               fontSize: '12px',
@@ -176,24 +133,22 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8, custom
               border: '1.5px solid #111111',
               borderRadius: '4px',
               padding: '8px 16px',
-              cursor: 'pointer',
+              cursor: 'default',
               textDecoration: 'none',
               whiteSpace: 'nowrap',
             }}
           >
-            View All
+            View All (Preview)
           </button>
         </div>
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 md:gap-6">
           {products.map((product) => (
-            <PremiumProductCard
+            <MimicPremiumProductCard
               key={product.id}
               product={product}
               imageErrored={imageErrors.has(product.id)}
               onImageError={handleImageError}
-              onOpen={handleProductClick}
-              onAddToCart={handleAddToCart}
             />
           ))}
         </div>
@@ -202,4 +157,4 @@ const NewArrivals: React.FC<NewArrivalsProps> = ({ categoryId, limit = 8, custom
   );
 };
 
-export default NewArrivals;
+export default MimicNewArrivals;

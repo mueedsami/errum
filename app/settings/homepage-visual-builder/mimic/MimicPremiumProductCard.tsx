@@ -2,29 +2,24 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { ShoppingBag } from 'lucide-react';
 import { SimpleProduct } from '@/services/catalogService';
-import { getAdditionalVariantCount, getCardStockLabel, getVariantListForCard } from '@/lib/ecommerceCardUtils';
-import { usePromotion } from '@/contexts/PromotionContext';
+import { getCardStockLabel, getVariantListForCard } from '@/lib/ecommerceCardUtils';
 
-interface PremiumProductCardProps {
+interface MimicPremiumProductCardProps {
   product: SimpleProduct;
   imageErrored?: boolean;
   onImageError?: (id: number) => void;
-  onOpen: (product: SimpleProduct) => void;
-  onAddToCart: (product: SimpleProduct, e: React.MouseEvent) => void | Promise<void>;
   compact?: boolean;
   animDelay?: number;
 }
 
-const PremiumProductCard: React.FC<PremiumProductCardProps> = React.memo(({
-  product, imageErrored = false, onImageError, onOpen, onAddToCart, compact = false, animDelay = 0,
+const MimicPremiumProductCard: React.FC<MimicPremiumProductCardProps> = React.memo(({
+  product, imageErrored = false, onImageError, compact = false, animDelay = 0,
 }) => {
-  const { getApplicablePromotion } = usePromotion();
   const [isLoaded, setIsLoaded] = React.useState(false);
   const [isHovered, setIsHovered] = React.useState(false);
 
-  // 2.3 — Urgency Signals
+  // Urgency Signals
   const stock = Number(product.stock_quantity || 0);
   const isLowStock = stock > 0 && stock <= 5;
 
@@ -47,12 +42,10 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = React.memo(({
   const hasStock = stockLabel !== 'Out of Stock';
   const categoryName = typeof product.category === 'object' && product.category ? product.category.name : '';
 
-  // Promotion / SALE badge
-  const categoryId = typeof product.category === 'object' && product.category ? (product.category as { id?: number }).id ?? null : null;
-  const salePromo = getApplicablePromotion(product.id, categoryId);
-  const salePercent = salePromo?.discount_value ?? 0;
+  // Dummy Sale logic (mimic visual without hook)
+  const salePercent = (product as any).discount_percentage || 0;
   const originalPrice = Number(product.selling_price ?? 0);
-  const salePrice = salePromo ? Math.max(0, originalPrice - (originalPrice * salePercent) / 100) : null;
+  const salePrice = salePercent > 0 ? Math.max(0, originalPrice - (originalPrice * salePercent) / 100) : null;
 
   // Price Range Display
   const variants = React.useMemo(() => getVariantListForCard(product), [product]);
@@ -63,14 +56,13 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = React.memo(({
 
   return (
     <article
-      onClick={() => onOpen(product)}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       style={{
         position: 'relative',
         display: 'flex',
         flexDirection: 'column',
-        cursor: 'pointer',
+        cursor: 'default', // No pointer since it's a preview
         background: '#ffffff',
         animationDelay: `${animDelay}ms`,
         animationFillMode: 'both',
@@ -78,8 +70,7 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = React.memo(({
       className="ec-anim-fade-up"
     >
       {/* Image Container */}
-      <div style={{ position: 'relative', aspectRatio: '3/4', background: '#f5f5f5', overflow: 'hidden' }}>
-        {/* Loading shimmer */}
+      <div style={{ position: 'relative', aspectRatio: '2/3', background: '#f5f5f5', overflow: 'hidden' }}>
         {!isLoaded && !imageErrored && (
           <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, #f5f5f5 25%, #ebebeb 50%, #f5f5f5 75%)', backgroundSize: '200% 100%', animation: 'shimmer 1.5s infinite' }} />
         )}
@@ -90,12 +81,11 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = React.memo(({
           fill
           sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
           className={`object-cover object-top transition-all duration-500`}
-          style={{ transform: isHovered && secondaryImage ? 'opacity: 0' : 'opacity: 1' }}
+          style={{ opacity: isHovered && secondaryImage ? 0 : 1 }}
           onLoad={() => setIsLoaded(true)}
           onError={shouldFallback || !onImageError ? undefined : () => onImageError(product.id)}
         />
 
-        {/* Secondary image hover swap — if available */}
         {secondaryImage && isHovered && (
           <Image
             src={secondaryImage}
@@ -114,7 +104,7 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = React.memo(({
               NEW
             </span>
           )}
-          {salePromo && salePercent > 0 && (
+          {salePercent > 0 && (
             <span style={{ background: '#e02020', color: '#ffffff', fontSize: '10px', fontWeight: 700, padding: '3px 8px', fontFamily: "'Poppins', sans-serif" }}>
               -{salePercent}%
             </span>
@@ -126,10 +116,9 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = React.memo(({
           )}
         </div>
 
-        {/* Quick Add button — appears on hover */}
+        {/* Quick Add button — dummy */}
         {hasStock && (
           <button
-            onClick={e => { e.stopPropagation(); onOpen(product); }}
             style={{
               position: 'absolute',
               bottom: 0,
@@ -144,7 +133,7 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = React.memo(({
               fontFamily: "'Poppins', sans-serif",
               textTransform: 'uppercase',
               letterSpacing: '0.10em',
-              cursor: 'pointer',
+              cursor: 'default',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -154,7 +143,7 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = React.memo(({
               zIndex: 10,
             }}
           >
-            Choose Options
+            Choose Options (Preview)
           </button>
         )}
       </div>
@@ -184,7 +173,7 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = React.memo(({
 
         {/* Price */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px' }}>
-          {salePromo && salePrice !== null ? (
+          {salePrice !== null ? (
             <>
               <span style={{ fontSize: '14px', fontWeight: 700, color: '#e02020', fontFamily: "'Poppins', sans-serif" }}>
                 ৳{salePrice.toFixed(0)}
@@ -211,4 +200,6 @@ const PremiumProductCard: React.FC<PremiumProductCardProps> = React.memo(({
   );
 });
 
-export default PremiumProductCard;
+MimicPremiumProductCard.displayName = 'MimicPremiumProductCard';
+
+export default MimicPremiumProductCard;

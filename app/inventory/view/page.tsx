@@ -48,6 +48,8 @@ const DATE_PRESETS: Array<{ value: InventoryDatePreset; label: string }> = [
   { value: 'custom', label: 'Custom range' },
 ];
 
+const INVENTORY_GRID_CLASS = 'grid grid-cols-[minmax(300px,1.5fr)_minmax(160px,.85fr)_90px_95px_95px_85px_110px_85px_95px_130px_minmax(260px,1.1fr)]';
+
 const nf = new Intl.NumberFormat('en-US');
 
 const number = (value: number | null | undefined, digits = 0) => {
@@ -489,102 +491,99 @@ function ViewInventoryPageContent() {
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-600 dark:bg-gray-900 dark:text-gray-400">
-                      <tr>
-                        <th className="px-4 py-3 text-left">Product</th>
-                        <th className="px-4 py-3 text-left">Category</th>
-                        <th className="px-4 py-3 text-right">Stock</th>
-                        <th className="px-4 py-3 text-right">PO/Batch</th>
-                        <th className="px-4 py-3 text-right">Purchase</th>
-                        <th className="px-4 py-3 text-right">Sell</th>
-                        <th className="px-4 py-3 text-right">Dispatch</th>
-                        <th className="px-4 py-3 text-right">Defect</th>
-                        <th className="px-4 py-3 text-right">Velocity</th>
-                        <th className="px-4 py-3 text-left">Health</th>
-                        <th className="px-4 py-3 text-left">Recommendation</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                  <div className="min-w-[1440px] text-sm">
+                    <div className={`${INVENTORY_GRID_CLASS} bg-gray-50 px-4 py-3 text-xs uppercase tracking-wide text-gray-600 dark:bg-gray-900 dark:text-gray-400`}>
+                      <div className="text-left">Product</div>
+                      <div className="text-left">Category</div>
+                      <div className="text-right">Stock</div>
+                      <div className="text-right">PO/Batch</div>
+                      <div className="text-right">Purchase</div>
+                      <div className="text-right">Sell</div>
+                      <div className="text-right">Dispatch</div>
+                      <div className="text-right">Defect</div>
+                      <div className="text-right">Velocity</div>
+                      <div className="text-left">Health</div>
+                      <div className="text-left">Recommendation</div>
+                    </div>
+
+                    <div className="divide-y divide-gray-100 dark:divide-gray-700">
                       {products.map((item) => {
                         const expanded = expandedProducts.has(item.group_key);
                         return (
-                          <tr key={item.group_key} className="align-top">
-                            <td colSpan={11} className="p-0">
-                              <div className="grid grid-cols-[minmax(260px,1.4fr)_minmax(140px,.8fr)_90px_90px_90px_90px_100px_80px_90px_120px_minmax(220px,1fr)] items-center gap-0 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-900/30">
-                                <button type="button" onClick={() => toggleProduct(item.group_key)} className="flex items-start gap-2 text-left">
-                                  {expanded ? <ChevronDown className="mt-1 h-4 w-4 text-gray-500" /> : <ChevronRight className="mt-1 h-4 w-4 text-gray-500" />}
-                                  <div>
-                                    <p className="font-black text-gray-900 dark:text-white">{item.product_name}</p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">SKU: {item.sku} · {item.variations.length} variation(s)</p>
-                                  </div>
-                                </button>
-                                <div className="text-gray-700 dark:text-gray-300">
-                                  <p className="font-bold">{item.category_name || 'Uncategorized'}</p>
-                                  <p className="text-xs text-gray-500">{item.subcategory_name || '-'}</p>
+                          <div key={item.group_key}>
+                            <div className={`${INVENTORY_GRID_CLASS} items-center px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-900/30`}>
+                              <button type="button" onClick={() => toggleProduct(item.group_key)} className="flex items-start gap-2 text-left">
+                                {expanded ? <ChevronDown className="mt-1 h-4 w-4 text-gray-500" /> : <ChevronRight className="mt-1 h-4 w-4 text-gray-500" />}
+                                <div>
+                                  <p className="font-black text-gray-900 dark:text-white">{item.product_name}</p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">SKU: {item.sku} · {item.variations.length} variation(s)</p>
                                 </div>
-                                <Cell value={number(item.current_stock)} strong />
-                                <Cell value={`${number(item.po_count)} / ${number(item.batch_count)}`} />
-                                <Cell value={number(item.total_purchase)} />
-                                <Cell value={number(item.total_sell)} />
-                                <Cell value={`${number(item.total_dispatch_out)} / ${number(item.total_dispatch_received)}`} />
-                                <Cell value={number(item.total_defect)} />
-                                <Cell value={number(item.velocity_per_day, 3)} />
-                                <div><StatusBadge status={item.stock_status} /></div>
-                                <div className="text-xs font-semibold text-gray-600 dark:text-gray-300">
-                                  {item.movement_recommendation
-                                    ? `Move ${number(item.movement_recommendation.suggested_quantity)}: ${item.movement_recommendation.from_store_name} → ${item.movement_recommendation.to_store_name}`
-                                    : 'No move needed'}
+                              </button>
+                              <div className="text-gray-700 dark:text-gray-300">
+                                <p className="font-bold">{item.category_name || 'Uncategorized'}</p>
+                                <p className="text-xs text-gray-500">{item.subcategory_name || '-'}</p>
+                              </div>
+                              <Cell value={number(item.current_stock)} strong />
+                              <Cell value={`${number(item.po_count)} / ${number(item.batch_count)}`} />
+                              <Cell value={number(item.total_purchase)} />
+                              <Cell value={number(item.total_sell)} />
+                              <Cell value={`${number(item.total_dispatch_out)} / ${number(item.total_dispatch_received)}`} />
+                              <Cell value={number(item.total_defect)} />
+                              <Cell value={number(item.velocity_per_day, 3)} />
+                              <div><StatusBadge status={item.stock_status} /></div>
+                              <div className="text-xs font-semibold text-gray-600 dark:text-gray-300">
+                                {item.movement_recommendation
+                                  ? `Move ${number(item.movement_recommendation.suggested_quantity)}: ${item.movement_recommendation.from_store_name} → ${item.movement_recommendation.to_store_name}`
+                                  : 'No move needed'}
+                              </div>
+                            </div>
+
+                            {expanded && (
+                              <div className="space-y-4 border-t border-gray-100 bg-gray-50/70 p-4 dark:border-gray-700 dark:bg-gray-900/30">
+                                <RecommendationBox item={item} />
+
+                                <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+                                  <MiniMetric label="Available" value={number(item.available_stock)} />
+                                  <MiniMetric label="Reserved" value={number(item.reserved_stock)} />
+                                  <MiniMetric label="Stock cover" value={daysText(item.days_of_cover)} />
+                                  <MiniMetric label="Stock value" value={money(item.stock_value)} />
+                                  <MiniMetric label="Stores" value={item.stores.length} />
+                                  <MiniMetric label="Variations" value={item.variations.length} />
+                                  <MiniMetric label="PO count" value={item.po_count} />
+                                  <MiniMetric label="Batch count" value={item.batch_count} />
+                                </div>
+
+                                <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
+                                  <p className="mb-2 text-sm font-black text-gray-900 dark:text-white">Variation stock</p>
+                                  <div className="flex flex-wrap gap-2">
+                                    {item.variations.map((variation) => (
+                                      <span key={variation.product_id} className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-bold text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
+                                        {variation.variation_suffix || 'Default'}: {number(variation.current_stock)} stock
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+
+                                <div className="space-y-3">
+                                  {item.stores.map((store) => {
+                                    const storeKey = `${item.group_key}:${store.store_id}` as ExpandedStoreKey;
+                                    return (
+                                      <StoreSummaryCard
+                                        key={storeKey}
+                                        store={store}
+                                        isExpanded={expandedStores.has(storeKey)}
+                                        onToggle={() => toggleStore(item.group_key, store.store_id)}
+                                      />
+                                    );
+                                  })}
                                 </div>
                               </div>
-
-                              {expanded && (
-                                <div className="space-y-4 border-t border-gray-100 bg-gray-50/70 p-4 dark:border-gray-700 dark:bg-gray-900/30">
-                                  <RecommendationBox item={item} />
-
-                                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
-                                    <MiniMetric label="Available" value={number(item.available_stock)} />
-                                    <MiniMetric label="Reserved" value={number(item.reserved_stock)} />
-                                    <MiniMetric label="Stock cover" value={daysText(item.days_of_cover)} />
-                                    <MiniMetric label="Stock value" value={money(item.stock_value)} />
-                                    <MiniMetric label="Stores" value={item.stores.length} />
-                                    <MiniMetric label="Variations" value={item.variations.length} />
-                                    <MiniMetric label="PO count" value={item.po_count} />
-                                    <MiniMetric label="Batch count" value={item.batch_count} />
-                                  </div>
-
-                                  <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
-                                    <p className="mb-2 text-sm font-black text-gray-900 dark:text-white">Variation stock</p>
-                                    <div className="flex flex-wrap gap-2">
-                                      {item.variations.map((variation) => (
-                                        <span key={variation.product_id} className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-bold text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
-                                          {variation.variation_suffix || 'Default'}: {number(variation.current_stock)} stock
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-
-                                  <div className="space-y-3">
-                                    {item.stores.map((store) => {
-                                      const storeKey = `${item.group_key}:${store.store_id}` as ExpandedStoreKey;
-                                      return (
-                                        <StoreSummaryCard
-                                          key={storeKey}
-                                          store={store}
-                                          isExpanded={expandedStores.has(storeKey)}
-                                          onToggle={() => toggleStore(item.group_key, store.store_id)}
-                                        />
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
+                            )}
+                          </div>
                         );
                       })}
-                    </tbody>
-                  </table>
+                    </div>
+                  </div>
                 </div>
               )}
 

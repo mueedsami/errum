@@ -642,20 +642,24 @@ export default function AddEditProductPage({
         files.push(img.file);
         imageSequence.push({ type: 'new', value: fileIdx });
       } else {
-        // This is an existing image (already on server)
-        // Extract the path from preview/url
+        // This is an existing image (already on server). Use the real original
+        // image_path, not the thumbnail preview path displayed in the gallery.
         const preview = img.preview || '';
-        let path = preview;
-        if (preview.includes('/storage/')) {
-          path = preview.split('/storage/')[1];
-        } else if (preview.startsWith('http')) {
-          // If it's a full URL but doesn't have /storage/, try to extract path after domain
-          try {
-            const url = new URL(preview);
-            path = url.pathname.replace(/^\/storage\//, '').replace(/^\//, '');
-          } catch (e) {}
+        let path = img.image_path || img.imagePath || '';
+
+        if (!path) {
+          path = preview;
+          if (preview.includes('/storage/')) {
+            path = preview.split('/storage/')[1];
+          } else if (preview.startsWith('http')) {
+            // If it's a full URL but doesn't have /storage/, try to extract path after domain
+            try {
+              const url = new URL(preview);
+              path = url.pathname.replace(/^\/storage\//, '').replace(/^\//, '');
+            } catch (e) {}
+          }
         }
-        
+
         existingPaths.push(path);
         imageSequence.push({ type: 'existing', value: path });
       }
@@ -1150,14 +1154,9 @@ export default function AddEditProductPage({
           custom_fields: customFields,
         };
 
-        // Backward-compatible: always provide name. If we have a suffix, also provide base_name + variation_suffix.
-        if (suffix) {
-          updatePayload.base_name = baseName;
-          updatePayload.variation_suffix = suffix;
-          updatePayload.name = `${baseName}${suffix}`;
-        } else {
-          updatePayload.name = baseName;
-        }
+        updatePayload.base_name = baseName;
+        updatePayload.variation_suffix = suffix;
+        updatePayload.name = suffix ? `${baseName}${suffix}` : baseName;
 
         await productService.update(parseInt(productId!), updatePayload);
 

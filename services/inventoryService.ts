@@ -326,11 +326,30 @@ const inventoryService = {
    */
   getInventoryOverview: async (params?: InventoryOverviewParams) => {
     const { skipStoreScope, ...rest } = params || {};
-    const response = await axiosInstance.get<ApiResponse<InventoryOverviewResponse>>(
-      '/inventory/intelligence/overview',
-      { params: rest, skipStoreScope }
-    );
-    return response.data;
+
+    try {
+      const response = await axiosInstance.get<ApiResponse<InventoryOverviewResponse>>(
+        '/inventory/intelligence/overview',
+        { params: rest, skipStoreScope }
+      );
+      return response.data;
+    } catch (error: any) {
+      const status = error?.response?.status;
+      const message = String(error?.response?.data?.message || '').toLowerCase();
+
+      // Backward compatibility for servers that were deployed with only the
+      // catalog-scoped inventory intelligence route. Do not fallback on auth
+      // errors; only retry when Laravel says the route itself is missing.
+      if (status === 404 && message.includes('route')) {
+        const fallbackResponse = await axiosInstance.get<ApiResponse<InventoryOverviewResponse>>(
+          '/catalog/inventory/intelligence/overview',
+          { params: rest, skipStoreScope }
+        );
+        return fallbackResponse.data;
+      }
+
+      throw error;
+    }
   },
 
   /**

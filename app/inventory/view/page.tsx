@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState, type ReactNode } from 'react';
 import { useTheme } from '@/contexts/ThemeContext';
 import {
   AlertTriangle,
@@ -8,8 +8,6 @@ import {
   Boxes,
   Building2,
   CalendarDays,
-  ChevronDown,
-  ChevronRight,
   Package,
   RefreshCw,
   Search,
@@ -22,6 +20,7 @@ import CategoryTreeSelector from '@/components/product/CategoryTreeSelector';
 import categoryService from '@/services/categoryService';
 import inventoryService, {
   InventoryDatePreset,
+  InventoryOverviewBatch,
   InventoryOverviewItem,
   InventoryOverviewResponse,
   InventoryOverviewStoreRow,
@@ -37,7 +36,11 @@ interface Category {
   children?: Category[];
 }
 
-type ExpandedStoreKey = `${string}:${number}`;
+type SheetRow = {
+  rowKey: string;
+  store: InventoryOverviewStoreRow | null;
+  batch: InventoryOverviewBatch | null;
+};
 
 const DATE_PRESETS: Array<{ value: InventoryDatePreset; label: string }> = [
   { value: '365', label: 'Last 1 year' },
@@ -100,7 +103,7 @@ function getStatusClasses(status: InventoryStockStatus) {
 
 function StatusBadge({ status }: { status: InventoryStockStatus }) {
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-black ${getStatusClasses(status)}`}>
+    <span className={`inline-flex whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-black ${getStatusClasses(status)}`}>
       {getStatusLabel(status)}
     </span>
   );
@@ -123,119 +126,201 @@ function MetricCard({ icon: Icon, label, value, hint }: { icon: any; label: stri
   );
 }
 
-function StoreSummaryCard({ store, isExpanded, onToggle }: { store: InventoryOverviewStoreRow; isExpanded: boolean; onToggle: () => void }) {
-  return (
-    <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-900/40">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <button type="button" onClick={onToggle} className="flex min-w-[200px] items-center gap-2 text-left">
-          {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          <div>
-            <p className="font-black text-gray-900 dark:text-white">{store.store_name}</p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">{store.po_count} PO · {store.batch_count} batch</p>
-          </div>
-        </button>
-        <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge status={store.stock_status} />
-          <span className="rounded-lg bg-white px-2.5 py-1 text-sm font-black text-gray-900 shadow-sm dark:bg-gray-800 dark:text-white">
-            Stock: {number(store.current_stock)}
-          </span>
-          <span className="rounded-lg bg-white px-2.5 py-1 text-sm font-bold text-gray-700 shadow-sm dark:bg-gray-800 dark:text-gray-200">
-            Sold: {number(store.total_sell)}
-          </span>
-          <span className="rounded-lg bg-white px-2.5 py-1 text-sm font-bold text-gray-700 shadow-sm dark:bg-gray-800 dark:text-gray-200">
-            Cover: {daysText(store.days_of_cover)}
-          </span>
-        </div>
-      </div>
-
-      {isExpanded && (
-        <div className="mt-4 space-y-4">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
-            <MiniMetric label="Purchase" value={store.total_purchase} />
-            <MiniMetric label="Sell" value={store.total_sell} />
-            <MiniMetric label="Dispatch Out" value={store.total_dispatch_out} />
-            <MiniMetric label="Dispatch Receive" value={store.total_dispatch_received} />
-            <MiniMetric label="Defect" value={store.total_defect} />
-            <MiniMetric label="Velocity/day" value={number(store.velocity_per_day, 3)} />
-            <MiniMetric label="Retail stock value" value={money(store.stock_value)} />
-            <MiniMetric label="Revenue" value={money(store.sales_revenue)} />
-          </div>
-
-          <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-800">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-100 text-xs uppercase text-gray-600 dark:bg-gray-900 dark:text-gray-400">
-                <tr>
-                  <th className="px-3 py-2 text-left">PO</th>
-                  <th className="px-3 py-2 text-left">Batch</th>
-                  <th className="px-3 py-2 text-right">Purchased</th>
-                  <th className="px-3 py-2 text-right">Remaining</th>
-                  <th className="px-3 py-2 text-right">Sold</th>
-                  <th className="px-3 py-2 text-right">Sell-through</th>
-                  <th className="px-3 py-2 text-right">Velocity/day</th>
-                  <th className="px-3 py-2 text-left">Received</th>
-                  <th className="px-3 py-2 text-left">Vendor</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                {store.batches.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="px-3 py-6 text-center text-gray-500 dark:text-gray-400">
-                      No PO/batch rows found in this selected date range.
-                    </td>
-                  </tr>
-                ) : (
-                  store.batches.map((batch) => (
-                    <tr key={batch.batch_id} className="text-gray-800 dark:text-gray-200">
-                      <td className="px-3 py-2 font-bold">{batch.po_number || 'Manual/Direct'}</td>
-                      <td className="px-3 py-2">{batch.batch_number}</td>
-                      <td className="px-3 py-2 text-right">{number(batch.original_qty)}</td>
-                      <td className="px-3 py-2 text-right font-black">{number(batch.remaining_stock)}</td>
-                      <td className="px-3 py-2 text-right">{number(batch.units_sold)}</td>
-                      <td className="px-3 py-2 text-right">{number(batch.sell_through_pct, 1)}%</td>
-                      <td className="px-3 py-2 text-right">{number(batch.velocity_per_day, 3)}</td>
-                      <td className="px-3 py-2">{formatDate(batch.po_received_date || batch.po_order_date || batch.batch_created_at)}</td>
-                      <td className="px-3 py-2">{batch.vendor_name || '-'}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MiniMetric({ label, value }: { label: string; value: string | number }) {
-  return (
-    <div className="rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 dark:text-gray-400">{label}</p>
-      <p className="mt-1 text-sm font-black text-gray-900 dark:text-white">{value}</p>
-    </div>
-  );
-}
-
-function RecommendationBox({ item }: { item: InventoryOverviewItem }) {
-  const rec = item.movement_recommendation;
-  if (!rec) {
-    return (
-      <div className="rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-900/40 dark:text-gray-300">
-        No transfer recommendation for this product in the selected period.
-      </div>
-    );
+function getSheetRows(item: InventoryOverviewItem): SheetRow[] {
+  if (!item.stores?.length) {
+    return [{ rowKey: `${item.group_key}:no-store`, store: null, batch: null }];
   }
 
+  return item.stores.flatMap((store) => {
+    if (!store.batches?.length) {
+      return [{ rowKey: `${item.group_key}:${store.store_id}:no-batch`, store, batch: null }];
+    }
+
+    return store.batches.map((batch) => ({
+      rowKey: `${item.group_key}:${store.store_id}:${batch.batch_id}`,
+      store,
+      batch,
+    }));
+  });
+}
+
+function variationSummary(item: InventoryOverviewItem) {
+  if (!item.variations?.length) return '-';
+  return item.variations
+    .map((variation) => {
+      const name = variation.variation_suffix || 'Default';
+      return `${name}: ${number(variation.current_stock)} stock, ${number(variation.reserved_stock)} reserved`;
+    })
+    .join(' | ');
+}
+
+function recommendationText(item: InventoryOverviewItem) {
+  const rec = item.movement_recommendation;
+  if (!rec) return 'No move needed';
+  return `Move ${number(rec.suggested_quantity)} from ${rec.from_store_name} to ${rec.to_store_name} (${rec.urgency})`;
+}
+
+function getAlignClass(align: 'left' | 'right' | 'center') {
+  if (align === 'right') return 'text-right';
+  if (align === 'center') return 'text-center';
+  return 'text-left';
+}
+
+function SheetHeader({ children, frozen = false, align = 'left' }: { children: ReactNode; frozen?: boolean; align?: 'left' | 'right' | 'center' }) {
   return (
-    <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
-      <div className="flex flex-wrap items-center gap-2 text-sm font-bold text-blue-900 dark:text-blue-100">
-        <ArrowRightLeft className="h-4 w-4" />
-        Move {number(rec.suggested_quantity)} unit(s) from {rec.from_store_name} to {rec.to_store_name}
-        <span className="rounded-full bg-white px-2 py-0.5 text-xs uppercase text-blue-700 dark:bg-blue-950 dark:text-blue-200">
-          {rec.urgency}
+    <th
+      className={`sticky top-0 z-20 border-b border-r border-gray-200 bg-gray-100 px-3 py-3 ${getAlignClass(align)} text-[11px] font-black uppercase tracking-wide text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 ${
+        frozen ? 'left-0 z-30 min-w-[320px] shadow-[8px_0_14px_-14px_rgba(15,23,42,0.9)]' : 'whitespace-nowrap'
+      }`}
+    >
+      {children}
+    </th>
+  );
+}
+
+function SheetCell({ children, strong = false, align = 'left', className = '' }: { children: ReactNode; strong?: boolean; align?: 'left' | 'right' | 'center'; className?: string }) {
+  return (
+    <td
+      className={`border-b border-r border-gray-100 px-3 py-2.5 ${getAlignClass(align)} text-xs dark:border-gray-700 ${
+        strong ? 'font-black text-gray-900 dark:text-white' : 'font-semibold text-gray-700 dark:text-gray-200'
+      } ${className}`}
+    >
+      {children}
+    </td>
+  );
+}
+
+function ProductFrozenCell({ item, firstProductRow }: { item: InventoryOverviewItem; firstProductRow: boolean }) {
+  return (
+    <td
+      className={`sticky left-0 z-10 min-w-[320px] max-w-[320px] border-b border-r border-gray-200 bg-white px-3 py-2.5 align-top shadow-[8px_0_14px_-14px_rgba(15,23,42,0.9)] group-hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:group-hover:bg-gray-900 ${
+        firstProductRow ? 'border-t-2 border-t-gray-300 dark:border-t-gray-600' : ''
+      }`}
+    >
+      <p className="line-clamp-2 text-sm font-black leading-snug text-gray-900 dark:text-white">{item.product_name}</p>
+      <p className="mt-1 text-[11px] font-bold text-gray-500 dark:text-gray-400">SKU: {item.sku || '-'}</p>
+      <div className="mt-2 flex flex-wrap gap-1">
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+          {number(item.current_stock)} stock
+        </span>
+        <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-black text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+          {number(item.variations?.length || 0)} variations
         </span>
       </div>
-      <p className="mt-1 text-sm text-blue-800 dark:text-blue-200">{rec.reason}</p>
+    </td>
+  );
+}
+
+function InventorySheetTable({ products }: { products: InventoryOverviewItem[] }) {
+  return (
+    <div className="relative max-h-[70vh] overflow-auto">
+      <table className="min-w-[3900px] border-separate border-spacing-0 text-sm">
+        <thead>
+          <tr>
+            <SheetHeader frozen>Product name</SheetHeader>
+            <SheetHeader>Category</SheetHeader>
+            <SheetHeader>Subcategory</SheetHeader>
+            <SheetHeader>Variation stock</SheetHeader>
+            <SheetHeader align="right">Product stock</SheetHeader>
+            <SheetHeader align="right">Available</SheetHeader>
+            <SheetHeader align="right">Reserved</SheetHeader>
+            <SheetHeader align="right">Purchase</SheetHeader>
+            <SheetHeader align="right">Sell</SheetHeader>
+            <SheetHeader align="right">Dispatch out</SheetHeader>
+            <SheetHeader align="right">Dispatch receive</SheetHeader>
+            <SheetHeader align="right">Defect</SheetHeader>
+            <SheetHeader align="right">Velocity/day</SheetHeader>
+            <SheetHeader>Cover</SheetHeader>
+            <SheetHeader align="right">Retail value</SheetHeader>
+            <SheetHeader>Product health</SheetHeader>
+            <SheetHeader>Recommendation</SheetHeader>
+            <SheetHeader>Store</SheetHeader>
+            <SheetHeader align="right">Store stock</SheetHeader>
+            <SheetHeader>Store health</SheetHeader>
+            <SheetHeader align="right">Store purchase</SheetHeader>
+            <SheetHeader align="right">Store sell</SheetHeader>
+            <SheetHeader align="right">Store revenue</SheetHeader>
+            <SheetHeader align="right">Store dispatch out</SheetHeader>
+            <SheetHeader align="right">Store dispatch receive</SheetHeader>
+            <SheetHeader align="right">Store defect</SheetHeader>
+            <SheetHeader align="right">Store velocity/day</SheetHeader>
+            <SheetHeader>Store cover</SheetHeader>
+            <SheetHeader align="right">Store value</SheetHeader>
+            <SheetHeader align="right">Store PO</SheetHeader>
+            <SheetHeader align="right">Store batch</SheetHeader>
+            <SheetHeader>PO</SheetHeader>
+            <SheetHeader>Batch</SheetHeader>
+            <SheetHeader align="right">Batch purchased</SheetHeader>
+            <SheetHeader align="right">Batch remaining</SheetHeader>
+            <SheetHeader align="right">Batch sold</SheetHeader>
+            <SheetHeader align="right">Sell-through</SheetHeader>
+            <SheetHeader align="right">Batch velocity/day</SheetHeader>
+            <SheetHeader>Received/order date</SheetHeader>
+            <SheetHeader>Vendor</SheetHeader>
+            <SheetHeader align="right">Cost price</SheetHeader>
+            <SheetHeader align="right">Sell price</SheetHeader>
+            <SheetHeader align="right">Batch stock value</SheetHeader>
+          </tr>
+        </thead>
+        <tbody>
+          {products.map((item) => {
+            const rows = getSheetRows(item);
+            return rows.map(({ rowKey, store, batch }, rowIndex) => {
+              const firstProductRow = rowIndex === 0;
+              return (
+                <tr
+                  key={rowKey}
+                  className={`group hover:bg-gray-50 dark:hover:bg-gray-900 ${firstProductRow ? 'border-t-2 border-gray-300' : ''}`}
+                >
+                  <ProductFrozenCell item={item} firstProductRow={firstProductRow} />
+                  <SheetCell className="min-w-[160px]">{item.category_name || 'Uncategorized'}</SheetCell>
+                  <SheetCell className="min-w-[160px]">{item.subcategory_name || '-'}</SheetCell>
+                  <SheetCell className="min-w-[360px]">{variationSummary(item)}</SheetCell>
+                  <SheetCell align="right" strong>{number(item.current_stock)}</SheetCell>
+                  <SheetCell align="right">{number(item.available_stock)}</SheetCell>
+                  <SheetCell align="right">{number(item.reserved_stock)}</SheetCell>
+                  <SheetCell align="right">{number(item.total_purchase)}</SheetCell>
+                  <SheetCell align="right">{number(item.total_sell)}</SheetCell>
+                  <SheetCell align="right">{number(item.total_dispatch_out)}</SheetCell>
+                  <SheetCell align="right">{number(item.total_dispatch_received)}</SheetCell>
+                  <SheetCell align="right">{number(item.total_defect)}</SheetCell>
+                  <SheetCell align="right">{number(item.velocity_per_day, 3)}</SheetCell>
+                  <SheetCell>{daysText(item.days_of_cover)}</SheetCell>
+                  <SheetCell align="right">{money(item.stock_value)}</SheetCell>
+                  <SheetCell><StatusBadge status={item.stock_status} /></SheetCell>
+                  <SheetCell className="min-w-[320px]">{recommendationText(item)}</SheetCell>
+                  <SheetCell className="min-w-[170px]">{store?.store_name || '-'}</SheetCell>
+                  <SheetCell align="right" strong>{store ? number(store.current_stock) : '-'}</SheetCell>
+                  <SheetCell>{store ? <StatusBadge status={store.stock_status} /> : '-'}</SheetCell>
+                  <SheetCell align="right">{store ? number(store.total_purchase) : '-'}</SheetCell>
+                  <SheetCell align="right">{store ? number(store.total_sell) : '-'}</SheetCell>
+                  <SheetCell align="right">{store ? money(store.sales_revenue) : '-'}</SheetCell>
+                  <SheetCell align="right">{store ? number(store.total_dispatch_out) : '-'}</SheetCell>
+                  <SheetCell align="right">{store ? number(store.total_dispatch_received) : '-'}</SheetCell>
+                  <SheetCell align="right">{store ? number(store.total_defect) : '-'}</SheetCell>
+                  <SheetCell align="right">{store ? number(store.velocity_per_day, 3) : '-'}</SheetCell>
+                  <SheetCell>{store ? daysText(store.days_of_cover) : '-'}</SheetCell>
+                  <SheetCell align="right">{store ? money(store.stock_value) : '-'}</SheetCell>
+                  <SheetCell align="right">{store ? number(store.po_count) : '-'}</SheetCell>
+                  <SheetCell align="right">{store ? number(store.batch_count) : '-'}</SheetCell>
+                  <SheetCell className="min-w-[150px]">{batch?.po_number || (batch ? 'Manual/Direct' : '-')}</SheetCell>
+                  <SheetCell className="min-w-[150px]">{batch?.batch_number || '-'}</SheetCell>
+                  <SheetCell align="right">{batch ? number(batch.original_qty) : '-'}</SheetCell>
+                  <SheetCell align="right" strong>{batch ? number(batch.remaining_stock) : '-'}</SheetCell>
+                  <SheetCell align="right">{batch ? number(batch.units_sold) : '-'}</SheetCell>
+                  <SheetCell align="right">{batch ? `${number(batch.sell_through_pct, 1)}%` : '-'}</SheetCell>
+                  <SheetCell align="right">{batch ? number(batch.velocity_per_day, 3) : '-'}</SheetCell>
+                  <SheetCell className="min-w-[160px]">{batch ? formatDate(batch.po_received_date || batch.po_order_date || batch.batch_created_at) : '-'}</SheetCell>
+                  <SheetCell className="min-w-[180px]">{batch?.vendor_name || '-'}</SheetCell>
+                  <SheetCell align="right">{batch ? money(batch.cost_price) : '-'}</SheetCell>
+                  <SheetCell align="right">{batch ? money(batch.sell_price) : '-'}</SheetCell>
+                  <SheetCell align="right">{batch ? money(batch.stock_value) : '-'}</SheetCell>
+                </tr>
+              );
+            });
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -255,10 +340,6 @@ function ViewInventoryPageContent() {
   const [data, setData] = useState<InventoryOverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
-  const [expandedStores, setExpandedStores] = useState<Set<ExpandedStoreKey>>(new Set());
-
-
 
   const fetchCategories = useCallback(async () => {
     try {
@@ -299,25 +380,6 @@ function ViewInventoryPageContent() {
     fetchOverview();
   }, [fetchOverview]);
 
-  const toggleProduct = (key: string) => {
-    setExpandedProducts((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
-  const toggleStore = (groupKey: string, storeId: number) => {
-    const key = `${groupKey}:${storeId}` as ExpandedStoreKey;
-    setExpandedStores((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
   const resetToFirstPage = () => setPage(1);
 
   const summary = data?.summary;
@@ -334,9 +396,9 @@ function ViewInventoryPageContent() {
           <main className="flex-1 overflow-auto p-6">
             <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h1 className="text-2xl font-black text-gray-900 dark:text-white">Inventory Intelligence View</h1>
+                <h1 className="text-2xl font-black text-gray-900 dark:text-white">Inventory Intelligence Sheet</h1>
                 <p className="mt-1 text-sm text-gray-600 dark:text-gray-400">
-                  Date-filtered PO, batch, sales, dispatch, defect, velocity and store movement recommendation in one place.
+                  Spreadsheet-style inventory view with product, variation, store, PO, batch, sales, dispatch, defect and movement data in one scrollable grid.
                 </p>
                 {data?.filters && (
                   <p className="mt-1 text-xs font-semibold text-gray-500 dark:text-gray-400">
@@ -461,8 +523,10 @@ function ViewInventoryPageContent() {
             <div className="rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-gray-700 dark:bg-gray-800">
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
                 <div>
-                  <p className="text-sm font-black text-gray-900 dark:text-white">Product-wise stock intelligence</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">Expand a product, then expand any store to see purchase/sell/dispatch/defect and batch/PO details.</p>
+                  <p className="text-sm font-black text-gray-900 dark:text-white">Inventory sheet</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    No dropdowns. Scroll right for all columns; the product name column stays frozen on the left.
+                  </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-gray-500 dark:text-gray-400">Rows</span>
@@ -480,7 +544,7 @@ function ViewInventoryPageContent() {
 
               {loading ? (
                 <div className="flex items-center justify-center p-16 text-gray-500 dark:text-gray-400">
-                  <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> Loading inventory intelligence...
+                  <RefreshCw className="mr-2 h-5 w-5 animate-spin" /> Loading inventory sheet...
                 </div>
               ) : products.length === 0 ? (
                 <div className="p-16 text-center text-gray-500 dark:text-gray-400">
@@ -488,104 +552,7 @@ function ViewInventoryPageContent() {
                   No products found for this filter.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-sm">
-                    <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-600 dark:bg-gray-900 dark:text-gray-400">
-                      <tr>
-                        <th className="px-4 py-3 text-left">Product</th>
-                        <th className="px-4 py-3 text-left">Category</th>
-                        <th className="px-4 py-3 text-right">Stock</th>
-                        <th className="px-4 py-3 text-right">PO/Batch</th>
-                        <th className="px-4 py-3 text-right">Purchase</th>
-                        <th className="px-4 py-3 text-right">Sell</th>
-                        <th className="px-4 py-3 text-right">Dispatch</th>
-                        <th className="px-4 py-3 text-right">Defect</th>
-                        <th className="px-4 py-3 text-right">Velocity</th>
-                        <th className="px-4 py-3 text-left">Health</th>
-                        <th className="px-4 py-3 text-left">Recommendation</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                      {products.map((item) => {
-                        const expanded = expandedProducts.has(item.group_key);
-                        return (
-                          <tr key={item.group_key} className="align-top">
-                            <td colSpan={11} className="p-0">
-                              <div className="grid grid-cols-[minmax(260px,1.4fr)_minmax(140px,.8fr)_90px_90px_90px_90px_100px_80px_90px_120px_minmax(220px,1fr)] items-center gap-0 px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-900/30">
-                                <button type="button" onClick={() => toggleProduct(item.group_key)} className="flex items-start gap-2 text-left">
-                                  {expanded ? <ChevronDown className="mt-1 h-4 w-4 text-gray-500" /> : <ChevronRight className="mt-1 h-4 w-4 text-gray-500" />}
-                                  <div>
-                                    <p className="font-black text-gray-900 dark:text-white">{item.product_name}</p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">SKU: {item.sku} · {item.variations.length} variation(s)</p>
-                                  </div>
-                                </button>
-                                <div className="text-gray-700 dark:text-gray-300">
-                                  <p className="font-bold">{item.category_name || 'Uncategorized'}</p>
-                                  <p className="text-xs text-gray-500">{item.subcategory_name || '-'}</p>
-                                </div>
-                                <Cell value={number(item.current_stock)} strong />
-                                <Cell value={`${number(item.po_count)} / ${number(item.batch_count)}`} />
-                                <Cell value={number(item.total_purchase)} />
-                                <Cell value={number(item.total_sell)} />
-                                <Cell value={`${number(item.total_dispatch_out)} / ${number(item.total_dispatch_received)}`} />
-                                <Cell value={number(item.total_defect)} />
-                                <Cell value={number(item.velocity_per_day, 3)} />
-                                <div><StatusBadge status={item.stock_status} /></div>
-                                <div className="text-xs font-semibold text-gray-600 dark:text-gray-300">
-                                  {item.movement_recommendation
-                                    ? `Move ${number(item.movement_recommendation.suggested_quantity)}: ${item.movement_recommendation.from_store_name} → ${item.movement_recommendation.to_store_name}`
-                                    : 'No move needed'}
-                                </div>
-                              </div>
-
-                              {expanded && (
-                                <div className="space-y-4 border-t border-gray-100 bg-gray-50/70 p-4 dark:border-gray-700 dark:bg-gray-900/30">
-                                  <RecommendationBox item={item} />
-
-                                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
-                                    <MiniMetric label="Available" value={number(item.available_stock)} />
-                                    <MiniMetric label="Reserved" value={number(item.reserved_stock)} />
-                                    <MiniMetric label="Stock cover" value={daysText(item.days_of_cover)} />
-                                    <MiniMetric label="Retail stock value" value={money(item.stock_value)} />
-                                    <MiniMetric label="Stores" value={item.stores.length} />
-                                    <MiniMetric label="Variations" value={item.variations.length} />
-                                    <MiniMetric label="PO count" value={item.po_count} />
-                                    <MiniMetric label="Batch count" value={item.batch_count} />
-                                  </div>
-
-                                  <div className="rounded-xl border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
-                                    <p className="mb-2 text-sm font-black text-gray-900 dark:text-white">Variation stock</p>
-                                    <div className="flex flex-wrap gap-2">
-                                      {item.variations.map((variation) => (
-                                        <span key={variation.product_id} className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1 text-xs font-bold text-gray-700 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200">
-                                          {variation.variation_suffix || 'Default'}: {number(variation.current_stock)} stock {number(variation.reserved_stock)} reserved
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </div>
-
-                                  <div className="space-y-3">
-                                    {item.stores.map((store) => {
-                                      const storeKey = `${item.group_key}:${store.store_id}` as ExpandedStoreKey;
-                                      return (
-                                        <StoreSummaryCard
-                                          key={storeKey}
-                                          store={store}
-                                          isExpanded={expandedStores.has(storeKey)}
-                                          onToggle={() => toggleStore(item.group_key, store.store_id)}
-                                        />
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                <InventorySheetTable products={products} />
               )}
 
               {data && data.last_page > 1 && (
@@ -617,14 +584,6 @@ function ViewInventoryPageContent() {
           </main>
         </div>
       </div>
-    </div>
-  );
-}
-
-function Cell({ value, strong = false }: { value: string | number; strong?: boolean }) {
-  return (
-    <div className={`text-right ${strong ? 'font-black text-gray-900 dark:text-white' : 'font-bold text-gray-700 dark:text-gray-300'}`}>
-      {value}
     </div>
   );
 }

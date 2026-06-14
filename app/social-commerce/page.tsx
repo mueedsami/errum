@@ -999,6 +999,11 @@ export default function SocialCommercePage() {
             amount: item.amount,
             productName: item.productName,
             sku: item.sku || '',
+            ...(item.isDefective ? {
+              is_defective: true,
+              defective_product_id: item.defectId,
+              source: 'defective_resale',
+            } : {}),
           };
         }),
         services: [],
@@ -1170,6 +1175,17 @@ export default function SocialCommercePage() {
               </select>
             </div>
           )}
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Order Note</label>
+          <textarea
+            value={orderNotes}
+            onChange={(e) => setOrderNotes(e.target.value)}
+            rows={3}
+            placeholder="Optional office/internal note for this social commerce order"
+            className="w-full px-3 py-2 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg outline-none focus:ring-1 focus:ring-teal-500 resize-none dark:text-white"
+          />
         </div>
 
         <div className="rounded-lg border border-blue-100 dark:border-blue-900 bg-blue-50/70 dark:bg-blue-950/30 p-3 text-xs text-blue-700 dark:text-blue-300">

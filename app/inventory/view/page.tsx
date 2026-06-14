@@ -8,6 +8,7 @@ import {
   Boxes,
   Building2,
   CalendarDays,
+  Download,
   Package,
   RefreshCw,
   Search,
@@ -160,6 +161,127 @@ function recommendationText(item: InventoryOverviewItem) {
   return `Move ${number(rec.suggested_quantity)} from ${rec.from_store_name} to ${rec.to_store_name} (${rec.urgency})`;
 }
 
+
+type CsvValue = string | number | null | undefined;
+
+const INVENTORY_CSV_HEADERS = [
+  'Product Name',
+  'SKU',
+  'Category',
+  'Subcategory',
+  'Variation Stock',
+  'Product Stock',
+  'Available',
+  'Reserved',
+  'Purchase',
+  'Sell',
+  'Dispatch Out',
+  'Dispatch Receive',
+  'Defect',
+  'Velocity/Day',
+  'Cover',
+  'Retail Value',
+  'Product Health',
+  'Recommendation',
+  'Store',
+  'Store Stock',
+  'Store Health',
+  'Store Purchase',
+  'Store Sell',
+  'Store Revenue',
+  'Store Dispatch Out',
+  'Store Dispatch Receive',
+  'Store Defect',
+  'Store Velocity/Day',
+  'Store Cover',
+  'Store Value',
+  'Store PO',
+  'Store Batch',
+  'PO',
+  'Batch',
+  'Batch Purchased',
+  'Batch Remaining',
+  'Batch Sold',
+  'Sell-through %',
+  'Batch Velocity/Day',
+  'Received/Order Date',
+  'Vendor',
+  'Sell Price',
+  'Batch Stock Value',
+];
+
+const csvCell = (value: CsvValue) => {
+  const text = String(value ?? '').replace(/\r?\n/g, ' ');
+  return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+const rowsToCsv = (rows: CsvValue[][]) => `\uFEFF${rows.map((row) => row.map(csvCell).join(',')).join('\n')}`;
+
+function inventoryProductsToCsv(products: InventoryOverviewItem[]) {
+  const dataRows = products.flatMap((item) => {
+    const rows = getSheetRows(item);
+    return rows.map(({ store, batch }) => [
+      item.product_name,
+      item.sku || '-',
+      item.category_name || 'Uncategorized',
+      item.subcategory_name || '-',
+      variationSummary(item),
+      item.current_stock,
+      item.available_stock,
+      item.reserved_stock,
+      item.total_purchase,
+      item.total_sell,
+      item.total_dispatch_out,
+      item.total_dispatch_received,
+      item.total_defect,
+      Number(item.velocity_per_day || 0).toFixed(3),
+      daysText(item.days_of_cover),
+      money(item.stock_value),
+      getStatusLabel(item.stock_status),
+      recommendationText(item),
+      store?.store_name || '-',
+      store ? store.current_stock : '-',
+      store ? getStatusLabel(store.stock_status) : '-',
+      store ? store.total_purchase : '-',
+      store ? store.total_sell : '-',
+      store ? money(store.sales_revenue) : '-',
+      store ? store.total_dispatch_out : '-',
+      store ? store.total_dispatch_received : '-',
+      store ? store.total_defect : '-',
+      store ? Number(store.velocity_per_day || 0).toFixed(3) : '-',
+      store ? daysText(store.days_of_cover) : '-',
+      store ? money(store.stock_value) : '-',
+      store ? store.po_count : '-',
+      store ? store.batch_count : '-',
+      batch?.po_number || (batch ? 'Manual/Direct' : '-'),
+      batch?.batch_number || '-',
+      batch ? batch.original_qty : '-',
+      batch ? batch.remaining_stock : '-',
+      batch ? batch.units_sold : '-',
+      batch ? Number(batch.sell_through_pct || 0).toFixed(1) : '-',
+      batch ? Number(batch.velocity_per_day || 0).toFixed(3) : '-',
+      batch ? formatDate(batch.po_received_date || batch.po_order_date || batch.batch_created_at) : '-',
+      batch?.vendor_name || '-',
+      batch ? money(batch.sell_price) : '-',
+      batch ? money(batch.stock_value) : '-',
+    ]);
+  });
+
+  return rowsToCsv([INVENTORY_CSV_HEADERS, ...dataRows]);
+}
+
+function downloadCsvFile(csv: string, fileName: string) {
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 function getAlignClass(align: 'left' | 'right' | 'center') {
   if (align === 'right') return 'text-right';
   if (align === 'center') return 'text-center';
@@ -214,7 +336,7 @@ function ProductFrozenCell({ item, firstProductRow }: { item: InventoryOverviewI
 function InventorySheetTable({ products }: { products: InventoryOverviewItem[] }) {
   return (
     <div className="relative max-h-[70vh] overflow-auto">
-      <table className="min-w-[3900px] border-separate border-spacing-0 text-sm">
+      <table className="min-w-[3740px] border-separate border-spacing-0 text-sm">
         <thead>
           <tr>
             <SheetHeader frozen>Product name</SheetHeader>
@@ -257,7 +379,6 @@ function InventorySheetTable({ products }: { products: InventoryOverviewItem[] }
             <SheetHeader align="right">Batch velocity/day</SheetHeader>
             <SheetHeader>Received/order date</SheetHeader>
             <SheetHeader>Vendor</SheetHeader>
-            <SheetHeader align="right">Cost price</SheetHeader>
             <SheetHeader align="right">Sell price</SheetHeader>
             <SheetHeader align="right">Batch stock value</SheetHeader>
           </tr>
@@ -312,7 +433,6 @@ function InventorySheetTable({ products }: { products: InventoryOverviewItem[] }
                   <SheetCell align="right">{batch ? number(batch.velocity_per_day, 3) : '-'}</SheetCell>
                   <SheetCell className="min-w-[160px]">{batch ? formatDate(batch.po_received_date || batch.po_order_date || batch.batch_created_at) : '-'}</SheetCell>
                   <SheetCell className="min-w-[180px]">{batch?.vendor_name || '-'}</SheetCell>
-                  <SheetCell align="right">{batch ? money(batch.cost_price) : '-'}</SheetCell>
                   <SheetCell align="right">{batch ? money(batch.sell_price) : '-'}</SheetCell>
                   <SheetCell align="right">{batch ? money(batch.stock_value) : '-'}</SheetCell>
                 </tr>
@@ -339,6 +459,7 @@ function ViewInventoryPageContent() {
   const [perPage, setPerPage] = useState(50);
   const [data, setData] = useState<InventoryOverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [exportingCsv, setExportingCsv] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const fetchCategories = useCallback(async () => {
@@ -385,6 +506,57 @@ function ViewInventoryPageContent() {
   const summary = data?.summary;
   const products = data?.items || [];
 
+  const fetchFilteredProductsForExport = useCallback(async () => {
+    const exportPerPage = 500;
+    const baseParams = {
+      date_preset: datePreset,
+      start_date: datePreset === 'custom' ? startDate || undefined : undefined,
+      end_date: datePreset === 'custom' ? endDate || undefined : undefined,
+      category_id: selectedCategoryId || undefined,
+      search: appliedSearch || undefined,
+      per_page: exportPerPage,
+      skipStoreScope: true,
+    };
+
+    const first = await inventoryService.getInventoryOverview({
+      ...baseParams,
+      page: 1,
+    });
+
+    let exportProducts = first.data.items || [];
+    const lastPage = first.data.last_page || 1;
+
+    for (let currentPage = 2; currentPage <= lastPage; currentPage += 1) {
+      const res = await inventoryService.getInventoryOverview({
+        ...baseParams,
+        page: currentPage,
+      });
+      exportProducts = [...exportProducts, ...(res.data.items || [])];
+    }
+
+    return exportProducts;
+  }, [datePreset, startDate, endDate, selectedCategoryId, appliedSearch]);
+
+  const handleExportCsv = async () => {
+    try {
+      setExportingCsv(true);
+      const exportProducts = data && data.last_page <= 1 ? products : await fetchFilteredProductsForExport();
+
+      if (!exportProducts.length) {
+        alert('No inventory rows found for the selected view.');
+        return;
+      }
+
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+      downloadCsvFile(inventoryProductsToCsv(exportProducts), `inventory_selected_view_${stamp}.csv`);
+    } catch (e) {
+      console.error('Failed to export selected inventory view:', e);
+      alert('Failed to export the selected inventory view. Please try again.');
+    } finally {
+      setExportingCsv(false);
+    }
+  };
+
   return (
     <div className={darkMode ? 'dark' : ''}>
       <div className="flex h-screen bg-gray-50 dark:bg-gray-900">
@@ -407,14 +579,25 @@ function ViewInventoryPageContent() {
                 )}
               </div>
 
-              <button
-                type="button"
-                onClick={fetchOverview}
-                className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-bold text-gray-800 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-white dark:hover:bg-gray-700"
-              >
-                <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportCsv}
+                  disabled={loading || exportingCsv || !products.length}
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Download className={`h-4 w-4 ${exportingCsv ? 'animate-pulse' : ''}`} />
+                  {exportingCsv ? 'Exporting...' : 'Export CSV'}
+                </button>
+                <button
+                  type="button"
+                  onClick={fetchOverview}
+                  className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-bold text-gray-800 shadow-sm hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-white dark:hover:bg-gray-700"
+                >
+                  <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              </div>
             </div>
 
             <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
@@ -525,7 +708,7 @@ function ViewInventoryPageContent() {
                 <div>
                   <p className="text-sm font-black text-gray-900 dark:text-white">Inventory sheet</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400">
-                    No dropdowns. Scroll right for all columns; the product name column stays frozen on the left.
+                    No dropdowns. Scroll right for all columns; the product name column stays frozen on the left. CSV export respects the current date/category/search filters.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

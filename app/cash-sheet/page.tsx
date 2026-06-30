@@ -12,7 +12,7 @@ import cashSheetService, { CashSheetRow, CashSheetSummary } from '@/services/cas
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 const fmt = (n: number) =>
-  n === 0 ? '—' : '৳' + Math.round(n).toLocaleString('en-BD');
+  n === 0 ? '0' : '৳' + Math.round(n).toLocaleString('en-BD');
 
 function currentMonth() {
   const d = new Date();
@@ -47,7 +47,7 @@ function StatCell({ value, highlight }: { value: number; highlight?: 'green' | '
     value > 0 ? 'text-gray-700 dark:text-gray-300' : 'text-gray-300 dark:text-gray-600';
   return (
     <td className={`px-2 py-1.5 text-right text-xs whitespace-nowrap tabular-nums ${color}`}>
-      {value > 0 ? '৳' + Math.round(value).toLocaleString('en-BD') : '—'}
+      {value > 0 ? '৳' + Math.round(value).toLocaleString('en-BD') : '0'}
     </td>
   );
 }
@@ -286,7 +286,7 @@ export default function CashSheetPage() {
                         {visibleStores.map(s => {
                           const b = row.branches.find(b => b.store_id === s.id);
                           if (!b) return Array.from({ length: 7 }).map((_, i) => (
-                            <td key={i} className="px-2 py-1.5 text-gray-300 dark:text-gray-600 text-center">—</td>
+                            <td key={i} className="px-2 py-1.5 text-gray-300 dark:text-gray-600 text-center">0</td>
                           ));
                           return (
                             <>

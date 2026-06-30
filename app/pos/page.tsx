@@ -1218,6 +1218,17 @@ export default function POSPage() {
         joinDate: emp.join_date || new Date().toISOString(),
       }));
 
+      if (user?.id && !formattedEmployees.some((emp: any) => String(emp.id) === String(user.id))) {
+        formattedEmployees.unshift({
+          id: String(user.id),
+          name: user.name || userName || 'Current User',
+          email: user.email || '',
+          phone: '',
+          role: role || userRole || 'Employee',
+          joinDate: new Date().toISOString(),
+        });
+      }
+
       setEmployees(formattedEmployees);
     } catch (error: any) {
       console.error('Error fetching employees:', error);
@@ -1564,7 +1575,7 @@ export default function POSPage() {
                   </label>
                   <input
                     type="text"
-                    value={userRole === 'store_manager' ? userName : 'Admin'}
+                    value={userName || user?.name || 'Current User'}
                     readOnly
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-white"
                   />

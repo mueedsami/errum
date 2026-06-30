@@ -146,6 +146,8 @@ export interface AvailableCourier {
 export interface OrderFilters {
   order_type?: string;
   order_types?: string[];
+  order_source?: string;
+  source_tag?: string;
   status?: string;
   payment_status?: string;
   fulfillment_status?: string;

@@ -245,6 +245,8 @@ export default function PurchaseOrdersPage() {
   // Modals
   const [showViewModal, setShowViewModal] = useState(false);
   const [showReceiveModal, setShowReceiveModal] = useState(false);
+  const [receivingPOId, setReceivingPOId] = useState<number | null>(null);
+  const [isReceiveSubmitting, setIsReceiveSubmitting] = useState(false);
 
   // Filters
   const [filters, setFilters] = useState<PurchaseOrderFilters>({
@@ -780,7 +782,7 @@ export default function PurchaseOrdersPage() {
 
 
   const handleReceivePO = async () => {
-    if (!selectedPO) return;
+    if (!selectedPO || isReceiveSubmitting) return;
 
     // Validate that at least one item has quantity
     const hasItems = receiveForm.items.some(item =>
@@ -794,6 +796,8 @@ export default function PurchaseOrdersPage() {
 
     try {
       setLoading(true);
+      setIsReceiveSubmitting(true);
+      setReceivingPOId(selectedPO.id);
 
       const receiveData: { items: ReceiveItemData[] } = {
         items: receiveForm.items
@@ -815,6 +819,8 @@ export default function PurchaseOrdersPage() {
       showAlert('error', error.message || 'Failed to receive products');
     } finally {
       setLoading(false);
+      setIsReceiveSubmitting(false);
+      setReceivingPOId(null);
     }
   };
 
@@ -1062,11 +1068,12 @@ export default function PurchaseOrdersPage() {
                         {(po.status === 'approved' || po.status === 'partially_received') && (
                           <button
                             onClick={() => openReceiveModal(po)}
-                            className="flex items-center gap-1 px-3 py-2 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                            disabled={loading || receivingPOId === po.id}
+                            className="flex items-center gap-1 px-3 py-2 text-sm bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             title="Receive products"
                           >
-                            <Package className="w-4 h-4" />
-                            Receive
+                            {receivingPOId === po.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Package className="w-4 h-4" />}
+                            {receivingPOId === po.id ? 'Processing...' : 'Receive'}
                           </button>
                         )}
 
@@ -2108,11 +2115,11 @@ export default function PurchaseOrdersPage() {
               </button>
               <button
                 onClick={handleReceivePO}
-                disabled={loading}
+                disabled={loading || isReceiveSubmitting}
                 className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
               >
-                {loading && <Loader2 className="w-4 h-4 animate-spin" />}
-                Receive Products
+                {isReceiveSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                {isReceiveSubmitting ? 'Processing...' : 'Receive Products'}
               </button>
             </div>
           </div>

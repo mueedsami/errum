@@ -111,6 +111,9 @@ interface Order {
   // Intended courier marker
   intendedCourier?: string | null;
 
+  // Social-commerce source tag (fb/instagram/wp/internal)
+  sourceTag?: string | null;
+
   // Installments / EMI
   isInstallment?: boolean;
   installmentInfo?: {
@@ -247,6 +250,46 @@ const titleCase = (s: string) =>
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(' ');
 
+const SOCIAL_ORDER_SOURCE_OPTIONS = [
+  { value: 'fb', label: 'Facebook' },
+  { value: 'instagram', label: 'Instagram' },
+  { value: 'wp', label: 'WhatsApp' },
+  { value: 'internal', label: 'Internal Order' },
+] as const;
+
+const normalizeOrderSourceTag = (value: any): string => {
+  const raw = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+  if (raw === 'facebook') return 'fb';
+  if (raw === 'whatsapp' || raw === 'wa') return 'wp';
+  if (raw === 'internal_order') return 'internal';
+  return raw;
+};
+
+const orderSourceLabel = (value: any): string => {
+  const normalized = normalizeOrderSourceTag(value);
+  return SOCIAL_ORDER_SOURCE_OPTIONS.find((option) => option.value === normalized)?.label || titleCase(normalized || 'Unknown');
+};
+
+const extractOrderSourceTag = (order: any): string | null => {
+  const candidates = [
+    order?.source_tag,
+    order?.order_source,
+    order?.metadata?.source_tag,
+    order?.metadata?.order_source,
+    ...(Array.isArray(order?.tags) ? order.tags : []),
+    ...(Array.isArray(order?.metadata?.tags) ? order.metadata.tags : []),
+  ];
+
+  for (const candidate of candidates) {
+    const normalized = normalizeOrderSourceTag(candidate);
+    if (SOCIAL_ORDER_SOURCE_OPTIONS.some((option) => option.value === normalized)) {
+      return normalized;
+    }
+  }
+
+  return null;
+};
+
 const sanitizePhone = (phone?: string) => String(phone || '').replace(/[^0-9+]/g, '');
 
 const buildPathaoTrackingUrl = (consignmentId: string, phone?: string) => {
@@ -335,6 +378,7 @@ export default function OrdersDashboard() {
 
   // ✅ NEW: Order type filter (All / Social / E-Com)
   const [orderTypeFilter, setOrderTypeFilter] = useState('All Types');
+  const [sourceTagFilter, setSourceTagFilter] = useState('All Sources');
 
   // ✅ Separate filters
   const [orderStatusFilter, setOrderStatusFilter] = useState('All Order Status');
@@ -1002,6 +1046,7 @@ export default function OrdersDashboard() {
       paymentStatusLabel: statusLabel(pStatusRaw || 'pending'),
 
       intendedCourier: order.intended_courier ?? order.intendedCourier ?? null,
+      sourceTag: extractOrderSourceTag(order),
 
       isInstallment: !!(
         order.is_installment === true ||
@@ -1308,6 +1353,11 @@ export default function OrdersDashboard() {
       filtered = filtered.filter((o) => normalize(o.orderType) === target);
     }
 
+    if (sourceTagFilter !== 'All Sources') {
+      const target = normalizeOrderSourceTag(sourceTagFilter);
+      filtered = filtered.filter((o) => normalizeOrderSourceTag(o.sourceTag) === target);
+    }
+
     if (orderStatusFilter !== 'All Order Status') {
       const target = normalize(orderStatusFilter);
       filtered = filtered.filter((o) => normalize(o.status) === target);
@@ -1325,7 +1375,7 @@ export default function OrdersDashboard() {
     }
 
     setFilteredOrders(filtered);
-  }, [search, dateFilter, startDate, endDate, orderTypeFilter, orderStatusFilter, paymentStatusFilter, courierFilter, orders]);
+  }, [search, dateFilter, startDate, endDate, orderTypeFilter, sourceTagFilter, orderStatusFilter, paymentStatusFilter, courierFilter, orders]);
 
   // 🧾 Bulk lookup Pathao status for displayed orders
   const filteredOrderNumbers = useMemo(() => {
@@ -1594,6 +1644,7 @@ export default function OrdersDashboard() {
         userEmail: fullOrder.customer?.email || '',
         socialId: (fullOrder.customer as any)?.social_id || '',
         orderNotes: fullOrder.notes || '',
+        orderSource: extractOrderSourceTag(fullOrder) || '',
         isInternational,
         streetAddress,
         postalCode: normalisedShippingAddress.postal_code || normalisedShippingAddress.postalCode || '',
@@ -3432,6 +3483,22 @@ export default function OrdersDashboard() {
 
                   {viewMode === 'online' && (
                     <div>
+                      <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-500 uppercase mb-1.5 ml-1">Order Source</label>
+                      <select
+                        value={sourceTagFilter}
+                        onChange={(e) => setSourceTagFilter(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-800 rounded-lg bg-white dark:bg-gray-900 text-black dark:text-white focus:outline-none focus:ring-1 focus:ring-black dark:focus:ring-white"
+                      >
+                        <option value="All Sources">All Sources</option>
+                        {SOCIAL_ORDER_SOURCE_OPTIONS.map((source) => (
+                          <option key={source.value} value={source.value}>{source.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {viewMode === 'online' && (
+                    <div>
                       <label className="block text-[10px] font-bold text-gray-500 dark:text-gray-500 uppercase mb-1.5 ml-1">Order Marker</label>
                       <select
                         value={courierFilter}
@@ -3449,7 +3516,7 @@ export default function OrdersDashboard() {
               )}
 
               {/* Active Filter Pills */}
-              {(search || dateFilter || startDate || endDate || orderTypeFilter !== 'All Types' || orderStatusFilter !== (viewMode === 'online' ? 'All Order Status' : 'All Order Status') || paymentStatusFilter !== 'All Payment Status' || courierFilter !== 'All Couriers') && (
+              {(search || dateFilter || startDate || endDate || orderTypeFilter !== 'All Types' || orderStatusFilter !== (viewMode === 'online' ? 'All Order Status' : 'All Order Status') || paymentStatusFilter !== 'All Payment Status' || sourceTagFilter !== 'All Sources' || courierFilter !== 'All Couriers') && (
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <span className="text-[10px] font-bold text-gray-400 dark:text-gray-600 uppercase mr-1">Active:</span>
 
@@ -3487,6 +3554,12 @@ export default function OrdersDashboard() {
                     </div>
                   )}
 
+                  {sourceTagFilter !== 'All Sources' && (
+                    <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium bg-black text-white dark:bg-white dark:text-black rounded-full animate-in zoom-in-95 duration-200">
+                      Source: {orderSourceLabel(sourceTagFilter)} <X className="w-2.5 h-2.5 cursor-pointer" onClick={() => setSourceTagFilter('All Sources')} />
+                    </div>
+                  )}
+
                   {courierFilter !== 'All Couriers' && (
                     <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-medium bg-black text-white dark:bg-white dark:text-black rounded-full animate-in zoom-in-95 duration-200">
                       Marker: {courierLabel(courierFilter)} <X className="w-2.5 h-2.5 cursor-pointer" onClick={() => setCourierFilter('All Couriers')} />
@@ -3502,6 +3575,7 @@ export default function OrdersDashboard() {
                       setOrderTypeFilter('All Types');
                       setOrderStatusFilter('All Order Status');
                       setPaymentStatusFilter('All Payment Status');
+                      setSourceTagFilter('All Sources');
                       setCourierFilter('All Couriers');
                     }}
                     className="text-[10px] font-bold text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 ml-1 transition-colors"
@@ -3758,6 +3832,9 @@ export default function OrdersDashboard() {
                                 <div className="mt-2 flex flex-wrap items-center gap-1.5">
                                   {getOrderTypeBadge(order.orderType)}
                                   {getDeliveryBadge(order.orderNumber)}
+                                  {viewMode === 'online' && order.sourceTag && (
+                                    <span className="px-2 py-1 text-[10px] font-black rounded-full bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300">{orderSourceLabel(order.sourceTag)}</span>
+                                  )}
                                   {viewMode === 'online' && getCourierBadge(order.intendedCourier)}
                                   {order.isInstallment && (
                                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300">
@@ -3869,6 +3946,9 @@ export default function OrdersDashboard() {
                                     </span>
                                   )}
                                   {getDeliveryBadge(order.orderNumber)}
+                                  {viewMode === 'online' && order.sourceTag && (
+                                    <span className="px-2 py-1 text-[10px] font-black rounded-full bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300">{orderSourceLabel(order.sourceTag)}</span>
+                                  )}
                                   {viewMode === 'online' && getCourierBadge(order.intendedCourier)}
                                 </div>
                                 {pathaoLookupByOrderNumber[order.orderNumber]?.is_sent_via_pathao &&

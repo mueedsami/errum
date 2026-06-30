@@ -311,11 +311,25 @@ export default function AmountDetailsPage() {
     );
   }
 
+  const normalizeSocialOrderSource = (value: any): string => {
+    const raw = String(value ?? '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    if (raw === 'facebook') return 'fb';
+    if (raw === 'whatsapp' || raw === 'wa') return 'wp';
+    if (raw === 'internal_order') return 'internal';
+    return raw;
+  };
+
   const handlePlaceOrder = async () => {
     // Store can be blank for auto-assigned social/e-commerce orders.
     // If a store is selected on the previous page, we pass it. Otherwise the backend keeps store_id null.
     const parsedStoreId = Number.parseInt(String(orderData?.store_id ?? ''), 10);
     const hasStoreId = Number.isFinite(parsedStoreId) && parsedStoreId > 0;
+    const orderSource = normalizeSocialOrderSource(orderData?.order_source || orderData?.source_tag || orderData?.orderSource || (Array.isArray(orderData?.tags) ? orderData.tags[0] : ''));
+    const allowedOrderSources = ['fb', 'instagram', 'wp', 'internal'];
+    if ((orderData?.order_type || 'social_commerce') === 'social_commerce' && !allowedOrderSources.includes(orderSource)) {
+      displayToast('Please select a social-commerce order source before placing the order.', 'error');
+      return;
+    }
 
     // Validation: payment methods
     if (paymentOption === 'full' || paymentOption === 'partial' || paymentOption === 'installment') {
@@ -405,6 +419,7 @@ export default function AmountDetailsPage() {
           customer_email: orderData.customer?.email || undefined,
           customer_address: orderData.customer?.address || undefined,
           shipping_address: shippingPayload,
+          ...(orderSource ? { order_source: orderSource, source_tag: orderSource, tags: [orderSource] } : {}),
           discount_amount: orderDiscount,
           shipping_amount: transport,
           ...(Array.isArray(orderData.services) && orderData.services.length > 0 ? { services: orderData.services } : {}),
@@ -506,6 +521,7 @@ export default function AmountDetailsPage() {
           },
           shipping_address: shippingPayload,
           delivery_address: shippingPayload,
+          ...(orderSource ? { order_source: orderSource, source_tag: orderSource, tags: [orderSource] } : {}),
           items: itemPayloads.map((item: any) => ({
             product_id: item.product_id,
             batch_id: item.batch_id ?? null,
